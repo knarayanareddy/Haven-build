@@ -1,6 +1,6 @@
 ---
 title: HAVEN Engineering Design Suite
-version: 1.1.1
+version: 1.2.0
 status: Approved — Single Source of Truth
 locale: Netherlands (nl-NL)
 jurisdiction: EU / Dutch law (AVG/UAVG/WGBO)
@@ -18,6 +18,11 @@ changelog:
          Seed SQL rewritten to match canonical schema;
          MVP scope labels fixed (G-standaard Phase 3; PSD2 Phase 2 consistent);
          Medication adherence stat corrected with sourcing
+  1.2.0: Addendum P added — BUURT (De Buurtverbinder)
+         Feature assigned to Phase 2 (post-MVP)
+         5 new tables + indexes + RLS + 3 Edge Functions + 3 feature flags
+         NL statistics corrected from US sources to CBS/RIVM/Buurtteam Amsterdam
+         DPIA supplementary assessment required before Phase 2 activation
 
 items_requiring_human_dpo_action:
   - Addendum J (DPIA — AVG Art. 35): must be completed + signed before production
@@ -55,8 +60,9 @@ P6     G-standaard labelled Phase 3           Scope creep / engineer confusion
 ```
 
 
+
 HAVEN — Engineering Design Document Suite
-Version: 1.1.1 Status: Approved — Single Source of Truth Locale: Netherlands (nl-NL) | Jurisdiction: EU / Dutch Law Last Updated: 2026-06-10 Replaces: README.md, HAVEN_BLUEPRINT.md, UIUXRENDER
+Version: 1.2.0 Status: Approved — Single Source of Truth Locale: Netherlands (nl-NL) | Jurisdiction: EU / Dutch Law Last Updated: 2026-06-10 Replaces: README.md, HAVEN_BLUEPRINT.md, UIUXRENDER
 
 Document 01 — Product Specification
 1. Mission
@@ -148,6 +154,29 @@ Memory lane: anniversary and memorial surfacing
 Dutch community event aggregation (via gemeentelijke APIs and Ouderenfonds feeds)
 Intergenerational skill exchange
 Connection to Dutch elder networks (ANBO, KBO-PCOB)
+
+### KRING — sub-feature: BUURT (De Buurtverbinder) [MVP Phase 2]
+
+**Problem:** 51% of Dutch adults aged 75+ feel lonely (RIVM/Buurtteam Amsterdam 2024).
+Neighbourhood spaces are the most accessible social space for ageing-in-place elders,
+but there is no low-friction, privacy-safe way to discover shared interests nearby.
+
+**What it does:**
+- Opt-in neighbourhood profile with Dutch interest tags (no name, no photo required)
+- Anonymous proximity display ("3 mensen in uw buurt gebruiken ook HAVEN")
+- Interest-matching without identity disclosure
+- Hyper-local activity suggestions (library events, park walks, etc.)
+- "Wandelmaatje" — mutual opt-in walk-buddy matching
+- Anonymous connection requests → double opt-in before any contact
+
+**What it does NOT do:**
+- No real-time location sharing
+- No direct messaging
+- No demographic matching
+- No visible profiles until both parties consent
+
+**Phase assignment:** Phase 2 (post-MVP closed beta)
+**Feature flag:** buurt_neighbourhood_connector (default: false)
 Pillar 4 — KOMPAS (Cognitive Safety & Orientation)
 Daily cognitive check-ins (orientation questions)
 Safe zone / "Veilige Zone" — PostGIS-backed with fuzzy location privacy
@@ -740,8 +769,89 @@ Logic:
 
 Apply 100m fuzzy noise before storage
 Check against elder_profiles.safe_zone_centre + safe_zone_radius_metres
-If outside safe zone: INSERT location_events (precise — 24h auto-delete via pg_cron), trigger family notification
-If inside safe zone: INSERT location_events with fuzzed geometry only
+If outside safe zone: INSERT location_events with fuzzed geometry only
+
+2.9 fn-buurt-discover
+Trigger: POST from elder app
+Auth: Bearer JWT (elder role)
+Input:
+```typescript
+interface BuurtDiscoverInput {
+  elder_id: string;
+}
+```
+Output:
+```typescript
+interface BuurtDiscoverOutput {
+  nearby_haven_users_count: number;       // e.g. 3 — NEVER identities
+  shared_interest_matches: Array<{
+    tag_key: string;
+    label_nl: string;
+    nearby_count: number;                 // e.g. "2 mensen houden ook van tuinieren"
+  }>;
+  suggested_events: Array<{
+    id: string;
+    title_nl: string;
+    location_label_nl: string;
+    distance_label_nl: string;
+    event_date: string;
+    is_free: boolean;
+    interested_count: number;             // how many other HAVEN users marked interest
+  }>;
+  walk_buddy_available: boolean;          // is there someone seeking a walk buddy nearby?
+}
+```
+Privacy rule: this function MUST query using PC4 matching only. It MUST NOT return `elder_id`, `profile_id`, or any identifier of another elder under any circumstances.
+
+2.10 fn-buurt-match
+Trigger: POST from elder app
+Auth: Bearer JWT (elder role)
+Input:
+```typescript
+interface BuurtMatchInput {
+  action:
+    | 'send_request'
+    | 'accept_request'
+    | 'decline_request'
+    | 'withdraw_request'
+    | 'end_connection';
+  connection_id?: string;         // required for all actions except 'send_request'
+  shared_tag_ids?: string[];      // required for 'send_request'
+  is_walk_buddy?: boolean;
+}
+```
+Output:
+```typescript
+interface BuurtMatchOutput {
+  success: boolean;
+  new_status: ConnectionStatus;
+  message_nl: string;             // e.g. "Uw verzoek is verstuurd."
+}
+```
+Privacy rule: when `action = 'send_request'`, the function selects a matching recipient using PC4 + shared tags — **it does NOT expose the recipient's ID to the initiator** until `status = 'accepted'` by both parties.
+
+2.11 fn-buurt-events-ingest
+Trigger: POST (scheduled / admin)
+Auth: Service role only
+Input:
+```typescript
+interface EventIngestInput {
+  events: Array<{
+    postcode_pc4: string;
+    location_label_nl: string;
+    distance_label_nl: string;
+    title_nl: string;
+    description_nl?: string;
+    event_date: string;           // ISO date
+    event_time?: string;          // HH:MM
+    is_free: boolean;
+    relevant_tag_keys: string[];  // maps to tag_ids on insert
+    source: string;
+    source_url?: string;
+  }>;
+}
+```
+
 3. PostgREST (Auto-generated REST API)
 Supabase exposes all tables via PostgREST. Access is governed entirely by RLS policies (defined in Document 05). No table is accessible without a valid JWT and a matching RLS policy.
 
@@ -1326,6 +1436,200 @@ CREATE TABLE memory_lane_photos (
 
 ALTER TABLE memory_lane_photos ENABLE ROW LEVEL SECURITY;
 FORCE ROW LEVEL SECURITY ON memory_lane_photos;
+
+7.5 interest_tags
+SQL
+
+CREATE TABLE interest_tags (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tag_key       text UNIQUE NOT NULL,   -- e.g. 'tuinieren'
+  label_nl      text NOT NULL,          -- e.g. '🌿 Tuinieren'
+  category_nl   text,                   -- e.g. 'Buiten', 'Cultuur', 'Beweging'
+  is_active     boolean DEFAULT true,
+  sort_order    integer DEFAULT 0,
+  created_at    timestamptz DEFAULT now()
+);
+
+-- Seed: initial Dutch interest tag catalogue
+INSERT INTO interest_tags (tag_key, label_nl, category_nl, sort_order) VALUES
+  ('tuinieren',     '🌿 Tuinieren',        'Buiten',    1),
+  ('wandelen',      '🚶 Wandelen',          'Beweging',  2),
+  ('lezen',         '📖 Lezen',             'Cultuur',   3),
+  ('muziek',        '🎵 Muziek',            'Cultuur',   4),
+  ('schaken',       '♟️ Schaken',           'Spel',      5),
+  ('kaarten',       '🃏 Kaartspelen',       'Spel',      6),
+  ('koken',         '🍳 Koken',             'Thuis',     7),
+  ('handwerken',    '🧶 Handwerken',        'Thuis',     8),
+  ('vogels',        '🐦 Vogels kijken',     'Buiten',    9),
+  ('fietsen',       '🚲 Fietsen',           'Beweging',  10),
+  ('geschiedenis',  '📜 Geschiedenis',      'Cultuur',   11),
+  ('film',          '🎬 Film & TV',         'Cultuur',   12),
+  ('religie',       '🙏 Geloof & bezinning','Welzijn',   13),
+  ('kleinkinderen', '👶 Kleinkinderen',     'Familie',   14),
+  ('vrijwillig',    '🤝 Vrijwilligerswerk', 'Sociaal',   15);
+
+7.6 neighbourhood_profiles
+SQL
+
+CREATE TABLE neighbourhood_profiles (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  elder_id            uuid UNIQUE NOT NULL
+                        REFERENCES profiles(id) ON DELETE CASCADE,
+  -- Declared neighbourhood (PC4 level — NOT precise location)
+  postcode_pc4        char(4) NOT NULL,         -- e.g. '1234' (4-digit NL postcode)
+  neighbourhood_label text,                     -- e.g. 'De Pijp, Amsterdam' (display only)
+  -- Discovery radius preference
+  radius_km           integer DEFAULT 2
+                        CHECK (radius_km BETWEEN 1 AND 5),
+  -- Opt-in status
+  is_active           boolean DEFAULT false,    -- elder must explicitly opt in
+  opted_in_at         timestamptz,
+  opted_out_at        timestamptz,
+  -- Walk buddy preference
+  walk_buddy_seeking  boolean DEFAULT false,
+  walk_preferred_time text,                     -- 'ochtend' | 'middag' | 'beide'
+  -- Family visibility (elder controls)
+  family_can_see_connections boolean DEFAULT false,
+  -- Timestamps
+  created_at          timestamptz DEFAULT now(),
+  updated_at          timestamptz DEFAULT now(),
+  deleted_at          timestamptz,
+  -- CONSTRAINT: no precise location stored here
+  CONSTRAINT no_precise_location CHECK (length(postcode_pc4) = 4)
+);
+
+COMMENT ON COLUMN neighbourhood_profiles.postcode_pc4
+  IS 'PC4 (4-digit postcode) only. Never store full postcode (PC6) or GPS coords in this table.';
+
+7.7 elder_interest_tags
+SQL
+
+CREATE TABLE elder_interest_tags (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  elder_id    uuid NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  tag_id      uuid NOT NULL REFERENCES interest_tags(id),
+  created_at  timestamptz DEFAULT now(),
+  UNIQUE (elder_id, tag_id)
+);
+
+-- Enforce max 5 tags per elder via trigger
+CREATE OR REPLACE FUNCTION enforce_max_interest_tags()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF (
+    SELECT count(*) FROM elder_interest_tags
+    WHERE elder_id = NEW.elder_id
+  ) >= 5 THEN
+    RAISE EXCEPTION 'Maximum 5 interesse-tags per oudere toegestaan.';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_max_interest_tags
+  BEFORE INSERT ON elder_interest_tags
+  FOR EACH ROW EXECUTE FUNCTION enforce_max_interest_tags();
+
+7.8 neighbourhood_connections
+SQL
+
+CREATE TABLE neighbourhood_connections (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  initiator_elder_id    uuid NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  recipient_elder_id    uuid NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  status                connection_status DEFAULT 'pending_initiator',
+  -- Anonymous matching basis (what triggered this suggestion)
+  shared_tag_ids        uuid[],                  -- which tags matched
+  -- Mutual consent timestamps
+  initiator_accepted_at timestamptz,
+  recipient_accepted_at timestamptz,
+  -- Identity reveal (only after both_accepted_at is populated)
+  -- Names/details are NOT stored here; they are fetched from profiles on demand
+  -- Walk buddy specific
+  is_walk_buddy_match   boolean DEFAULT false,
+  -- Ended reason (for internal analysis only, not shown to users)
+  ended_by              uuid,                    -- references profiles(id)
+  ended_reason_internal text,
+  -- Timestamps
+  created_at            timestamptz DEFAULT now(),
+  updated_at            timestamptz DEFAULT now(),
+  CONSTRAINT no_self_connection CHECK (initiator_elder_id != recipient_elder_id),
+  UNIQUE (initiator_elder_id, recipient_elder_id)
+);
+
+7.9 neighbourhood_events
+SQL
+
+CREATE TABLE neighbourhood_events (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- Location (PC4 level only)
+  postcode_pc4      char(4) NOT NULL,
+  location_label_nl text NOT NULL,        -- "Bibliotheek De Pijp"
+  distance_label_nl text,                 -- "600m van uw huis"
+  -- Event details (Dutch)
+  title_nl          text NOT NULL,
+  description_nl    text,
+  event_date        date NOT NULL,
+  event_time        time,
+  is_free           boolean DEFAULT true,
+  -- Matching
+  relevant_tag_ids  uuid[],               -- which interest tags this event suits
+  -- Source
+  source            text DEFAULT 'manual',-- 'manual' | 'opendata' | 'bibliotheek_api'
+  source_url        text,
+  -- Status
+  is_active         boolean DEFAULT true,
+  created_at        timestamptz DEFAULT now(),
+  expires_at        timestamptz           -- auto-expires after event_date
+);
+
+-- Auto-expire events after they pass
+SELECT cron.schedule(
+  'expire-neighbourhood-events',
+  '0 5 * * *',
+  $$
+    UPDATE neighbourhood_events
+    SET is_active = false
+    WHERE event_date < CURRENT_DATE
+      AND is_active = true;
+  $$
+);
+
+7.10 event_interests
+SQL
+
+CREATE TABLE event_interests (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  elder_id    uuid NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  event_id    uuid NOT NULL REFERENCES neighbourhood_events(id) ON DELETE CASCADE,
+  interested_at timestamptz DEFAULT now(),
+  UNIQUE (elder_id, event_id)
+);
+
+-- Indexes and constraints for BUURT
+CREATE INDEX idx_nbhd_profile_pc4 ON neighbourhood_profiles(postcode_pc4)
+  WHERE is_active = true AND deleted_at IS NULL;
+
+CREATE INDEX idx_nbhd_profile_elder ON neighbourhood_profiles(elder_id)
+  WHERE deleted_at IS NULL;
+
+CREATE INDEX idx_elder_tags_elder ON elder_interest_tags(elder_id);
+CREATE INDEX idx_elder_tags_tag ON elder_interest_tags(tag_id);
+
+CREATE INDEX idx_nbhd_conn_initiator ON neighbourhood_connections(initiator_elder_id);
+CREATE INDEX idx_nbhd_conn_recipient ON neighbourhood_connections(recipient_elder_id);
+CREATE INDEX idx_nbhd_conn_status ON neighbourhood_connections(status)
+  WHERE status IN ('pending_recipient', 'accepted');
+
+CREATE INDEX idx_nbhd_events_pc4 ON neighbourhood_events(postcode_pc4)
+  WHERE is_active = true;
+CREATE INDEX idx_nbhd_events_date ON neighbourhood_events(event_date)
+  WHERE is_active = true;
+
+CREATE INDEX idx_event_interests_elder ON event_interests(elder_id);
+
 8. KOMPAS Tables
 8.1 location_events
 SQL
@@ -1804,6 +2108,10 @@ Health check-ins / wellness	Yes — health data	Article 9(2)(a) — explicit con
 Cognitive check-in scores	Yes — health data	Article 9(2)(a) — explicit consent	
 Life stories / voice diaries	No (unless health content)	Article 6(1)(a) — explicit consent	Elder controls sharing
 Scam event data	No	Article 6(1)(f) — legitimate interest	Fraud prevention; LIA documented
+Neighbourhood profile	No	Article 6(1)(a) — explicit consent	Opt-in required
+Interest tags	No	Article 6(1)(a) — explicit consent	Selected from curated catalogue
+PC4 neighbourhood	No	Article 6(1)(a) — explicit consent	Declared by elder; not real-time location
+Name reveal (double opt-in)	No	Article 6(1)(a) — explicit consent	Double opt-in is the consent mechanism
 Carer visit logs	Yes — health data	Article 9(2)(h) — healthcare provision	Carer professional obligation
 Incident reports	Yes — health data	Article 9(2)(h) + Meldcode obligations	
 3. Consent Management
@@ -1895,7 +2203,7 @@ Edge Functions	Injection via malformed audio/text	Input validation + sanitisatio
 Push notifications	Spoofed notifications	Notifications only sent server-side via service role
 PSD2 webhooks (Phase 2)	Spoofed webhook	HMAC-SHA256 signature verification on all inbound webhooks
 BSN	Not collected	N/A — HAVEN does not store BSN (hard product rule; see Section 5.4)
-## Retention policy (canonical — v1.1.1)
+## Retention policy (canonical — v1.2.0)
 
 > **SSOT rule:** This table is the single canonical retention reference.
 > Any other retention table elsewhere in this document or its addenda is
@@ -1924,6 +2232,12 @@ BSN	Not collected	N/A — HAVEN does not store BSN (hard product rule; see Secti
 | Audit log | `audit_log` | 5 years | AVG accountability (Art. 5(2)) | Immutable; no client access |
 | Carer visit logs (WACHT Phase 2) | `carer_visit_logs` | **20 years (WGBO Art. 7:454 BW)** | WGBO statutory | Applies only when HAVEN operates in professional care context |
 | Safeguarding incidents (WACHT Phase 2) | `incidents` | **20 years (WGBO Art. 7:454 BW)** | WGBO statutory | Same as above |
+| Neighbourhood profile | `neighbourhood_profiles` | Until opt-out + 30 days | AVG Art. 6(1)(a) | Opt-out deletes immediately; 30-day buffer for recovery |
+| Interest tags | `elder_interest_tags` | Until profile deletion | AVG Art. 6(1)(a) | Deleted with profile |
+| PC4 postcode | `neighbourhood_profiles.postcode_pc4` | Until profile deletion | AVG Art. 6(1)(a) | Never stored at PC6 level |
+| Connection records | `neighbourhood_connections` | 12 months after `ended` / `declined` | AVG proportionality | Aggregate counts kept for safety digest; identifiers purged |
+| Local events | `neighbourhood_events` | Auto-expired after `event_date` | Operational | pg_cron; not personal data |
+| Event interests | `event_interests` | 12 months | AVG proportionality | |
 
 ### Retention pg_cron jobs (canonical)
 
@@ -2410,6 +2724,171 @@ export const SCHILD_ROOD_SCHEMA: ScreenSchema = {
     { key: 'scam_event', table: 'scam_events', offlineCacheTtlSeconds: 0 }
   ]
 };
+
+export const BUURT_SCHEMA: ScreenSchema = {
+  screenId: 'BUURT',
+  titleNl: 'Uw Buurt',
+  accessibilityLabel: 'De Buurtverbinder scherm',
+  layout: 'single_column',
+  themeVariant: 'default',
+  headerVariant: 'title',
+  depthFromHome: 1,
+  maxPrimaryItems: 4,
+  contentBlocks: [
+    {
+      id: 'buurt_count',
+      type: 'info_card',
+      accessibilityLabel: 'Anoniem aantal buurtbewoners dat HAVEN gebruikt',
+      props: {
+        contentKey: 'buurt.nearby_count'
+      }
+    },
+    {
+      id: 'interest_matches',
+      type: 'tag_list',
+      accessibilityLabel: 'Gedeelde interesses in de buurt',
+      props: {
+        contentKey: 'buurt.shared_interests',
+        maxItems: 3
+      }
+    },
+    {
+      id: 'local_events',
+      type: 'event_cards',
+      accessibilityLabel: 'Aanbevolen lokale activiteiten',
+      props: {
+        contentKey: 'buurt.suggested_events',
+        maxItems: 2
+      }
+    }
+  ],
+  bottomActions: [
+    {
+      id: 'find_walk_buddy',
+      labelNl: 'Wandelmaatje',
+      voiceAlias: ['wandelmaatje', 'wandel partner'],
+      accessibilityLabel: 'Zoek een wandelmaatje in uw buurt',
+      style: 'primary'
+    },
+    {
+      id: 'manage_interests',
+      labelNl: 'Interesses',
+      voiceAlias: ['interesses', 'hobby aanpassen'],
+      accessibilityLabel: 'Beheer uw interesse-tags',
+      style: 'secondary'
+    }
+  ],
+  persistentElements: {
+    emergencyButton: true,
+    voiceButton: true,
+    haloStatus: false,
+    backButton: true
+  },
+  voice: {
+    entrySpeak: 'In uw buurt zijn mensen die ook HAVEN gebruiken.',
+    fallbackSpeak: 'Wilt u een wandelmaatje zoeken, of uw interesses aanpassen?',
+    commands: [
+      {
+        intentNl: 'find_walk_buddy',
+        examplePhrases: ['wandelmaatje', 'wandel partner'],
+        action: 'find_walk_buddy'
+      },
+      {
+        intentNl: 'read_nearby_count',
+        examplePhrases: ['wie is er in mijn buurt', 'hoeveel mensen'],
+        action: 'read_nearby_count'
+      },
+      {
+        intentNl: 'read_events',
+        examplePhrases: ['activiteiten', 'wat is er te doen'],
+        action: 'read_events'
+      },
+      {
+        intentNl: 'manage_interests',
+        examplePhrases: ['interesses', 'hobby aanpassen'],
+        action: 'manage_interests'
+      }
+    ],
+    distressPhrases: []
+  },
+  dataSources: [
+    {
+      key: 'buurt_discover',
+      table: 'neighbourhood_profiles',
+      offlineCacheTtlSeconds: 3600
+    }
+  ]
+};
+
+export const BUURT_VERBINDING_SCHEMA: ScreenSchema = {
+  screenId: 'BUURT_VERBINDING',
+  titleNl: 'Verbindingsverzoek',
+  accessibilityLabel: 'Verbindingsverzoek scherm',
+  layout: 'focused_decision',
+  themeVariant: 'default',
+  headerVariant: 'title',
+  depthFromHome: 2,
+  maxPrimaryItems: 2,
+  contentBlocks: [
+    {
+      id: 'connection_context',
+      type: 'info_card',
+      accessibilityLabel: 'Beschrijving van de voorgestelde kennismaking',
+      props: {
+        contentKey: 'buurt.connection.context'
+      }
+    },
+    {
+      id: 'privacy_reassurance',
+      type: 'info_text',
+      accessibilityLabel: 'Informatie over uw privacy',
+      props: {
+        contentKey: 'buurt.connection.privacy_note'
+      }
+    }
+  ],
+  bottomActions: [
+    {
+      id: 'accept_connection',
+      labelNl: 'Ja, leuk!',
+      voiceAlias: ['ja', 'ja leuk', 'akkoord'],
+      accessibilityLabel: 'Accepteer het verbindingsverzoek',
+      style: 'primary'
+    },
+    {
+      id: 'decline_connection',
+      labelNl: 'Nee, bedankt',
+      voiceAlias: ['nee', 'nee bedankt', 'geen interesse'],
+      accessibilityLabel: 'Wijs het verbindingsverzoek af',
+      style: 'secondary'
+    }
+  ],
+  persistentElements: {
+    emergencyButton: true,
+    voiceButton: true,
+    haloStatus: false,
+    backButton: true
+  },
+  voice: {
+    entrySpeak: 'Iemand in uw buurt wil graag kennismaken. Wilt u ja zeggen?',
+    fallbackSpeak: 'Zeg "ja" of "nee".',
+    commands: [
+      {
+        intentNl: 'accept_connection',
+        examplePhrases: ['ja', 'ja leuk', 'akkoord'],
+        action: 'accept_connection'
+      },
+      {
+        intentNl: 'decline_connection',
+        examplePhrases: ['nee', 'nee bedankt', 'geen interesse'],
+        action: 'decline_connection'
+      }
+    ],
+    distressPhrases: []
+  },
+  dataSources: []
+};
+
 5. Screen Renderer Architecture
 TypeScript
 
@@ -2602,6 +3081,7 @@ Messages	/dashboard/berichten	Family (can_view_messages)	Send/read family messag
 Stories	/dashboard/verhalen	Family (can_view_stories)	Life story archive (read-only)
 Wellness	/dashboard/welzijn	Family (can_view_wellness)	Wellness trends + check-in history
 Location	/dashboard/locatie	Family (can_view_location)	Fuzzed map: safe zone + last known area
+Buurt Connections	/dashboard/buurt	Family (can_view_stories + consent)	Neighbourhood connections overview
 Weekly Digest	/dashboard/overzicht	Family	Weekly safety + wellbeing summary
 Elder Profile	/dashboard/profiel	Primary family only	Edit elder profile, manage permissions
 Medications Setup	/dashboard/medicijnen/beheren	Primary + can_manage_medications	Add/edit medications
@@ -2702,6 +3182,29 @@ text
 ├────────────────────┼────────────────────────┤
 │ Familie contact    │ 6 berichten gewisseld  │
 └────────────────────┴────────────────────────┘
+Family dashboard BUURT visibility rules:
+Family members can see the BUURT section ONLY if:
+1. Elder has set `neighbourhood_profiles.family_can_see_connections = true` AND
+2. `family_relationships.can_view_stories = true` (KRING permission proxy)
+
+What family can see (when permitted):
+- Whether elder has a neighbourhood profile (active/inactive)
+- Interest tags elder has selected
+- Count of connections (accepted only)
+- Events elder has marked as interesting
+
+What family can NEVER see (hard rule):
+- Identity of any other elder in BUURT (even after connection is accepted)
+- Connection request content or anonymous messages
+- Whether elder declined any requests (privacy of third parties)
+
+Family dashboard BUURT section UI:
+- "Buurt" tab in KRING section
+- Shows: "[Voornaam] heeft 2 buurtverbindingen" + interest tags
+- Shows: "Komende activiteiten: [event title], [date]"
+- Cannot initiate connections on behalf of elder
+- Can help set up neighbourhood profile during onboarding
+
 Document 09 — Integrations Specification
 1. Integration Inventory
 Integration	Pillar	Phase	Type	Data Stored
@@ -3581,6 +4084,102 @@ ALTER TABLE audit_log FORCE ROW LEVEL SECURITY;
 -- Service role bypasses RLS by design
 ```
 
+-- ============================================================
+-- BUURT RLS POLICIES (v1.0.0 — 2026-06-10)
+-- ============================================================
+
+-- interest_tags: public read (catalogue), service-only write
+ALTER TABLE interest_tags ENABLE ROW LEVEL SECURITY;
+ALTER TABLE interest_tags FORCE ROW LEVEL SECURITY;
+CREATE POLICY "interest_tags_read_all"
+ON interest_tags FOR SELECT
+USING (is_active = true);
+
+-- neighbourhood_profiles: elder owns their own; family sees
+-- ONLY if elder has set family_can_see_connections = true
+ALTER TABLE neighbourhood_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE neighbourhood_profiles FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "nbhd_profile_select_self"
+ON neighbourhood_profiles FOR SELECT
+USING (elder_id = auth.uid() AND deleted_at IS NULL);
+
+CREATE POLICY "nbhd_profile_select_family"
+ON neighbourhood_profiles FOR SELECT
+USING (
+  auth.family_can(elder_id, 'stories')    -- reuse stories permission as "kring" proxy
+  AND family_can_see_connections = true
+  AND deleted_at IS NULL
+);
+
+CREATE POLICY "nbhd_profile_insert_self"
+ON neighbourhood_profiles FOR INSERT
+WITH CHECK (elder_id = auth.uid());
+
+CREATE POLICY "nbhd_profile_update_self"
+ON neighbourhood_profiles FOR UPDATE
+USING  (elder_id = auth.uid())
+WITH CHECK (elder_id = auth.uid());
+
+-- elder_interest_tags: elder owns their own
+ALTER TABLE elder_interest_tags ENABLE ROW LEVEL SECURITY;
+ALTER TABLE elder_interest_tags FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "elder_tags_select_self"
+ON elder_interest_tags FOR SELECT
+USING (elder_id = auth.uid());
+
+CREATE POLICY "elder_tags_insert_self"
+ON elder_interest_tags FOR INSERT
+WITH CHECK (elder_id = auth.uid());
+
+CREATE POLICY "elder_tags_delete_self"
+ON elder_interest_tags FOR DELETE
+USING (elder_id = auth.uid());
+
+-- neighbourhood_connections: elder sees their own connections only
+-- CRITICAL: elder must NOT see the other party's identity until status = 'accepted'
+-- Identity reveal is handled at the application layer (Edge Function)
+-- NOT by exposing the other elder's profile_id in a direct join
+ALTER TABLE neighbourhood_connections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE neighbourhood_connections FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "nbhd_conn_select_participant"
+ON neighbourhood_connections FOR SELECT
+USING (
+  initiator_elder_id = auth.uid()
+  OR recipient_elder_id = auth.uid()
+);
+
+-- Inserts only via Edge Function fn-buurt-match (service role)
+-- Updates only via Edge Function fn-buurt-match (service role)
+
+-- neighbourhood_events: all active HAVEN users can read events
+-- (events are not personal data — they are public local activities)
+ALTER TABLE neighbourhood_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE neighbourhood_events FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "nbhd_events_read_authenticated"
+ON neighbourhood_events FOR SELECT
+USING (is_active = true);
+
+-- event_interests: elder owns their own
+ALTER TABLE event_interests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE event_interests FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "event_interest_select_self"
+ON event_interests FOR SELECT
+USING (elder_id = auth.uid());
+
+CREATE POLICY "event_interest_insert_self"
+ON event_interests FOR INSERT
+WITH CHECK (elder_id = auth.uid());
+
+CREATE POLICY "event_interest_delete_self"
+ON event_interests FOR DELETE
+USING (elder_id = auth.uid());
+```
+
 ---
 
 # Addendum B — Database Indexes & Migration Strategy
@@ -3727,6 +4326,7 @@ supabase/migrations/
   20260610000005_indexes.sql
   20260610000006_pg_cron_jobs.sql
   20260610000007_seed_dev_data.sql  -- local dev only
+  20260610000008_buurt_neighbourhood_connector.sql
 ```
 
 **Format:** `YYYYMMDDHHMMSS_descriptive_name.sql`
@@ -4579,6 +5179,49 @@ const SCHILD_EXCEPTIONS = ['verdacht', 'voorzichtig'];
 
 ---
 
+### BUURT copy (nl-NL, formal "u/uw" register)
+
+#### Anonymous proximity display
+"Er zijn 3 mensen in uw buurt die ook HAVEN gebruiken."
+"Er is 1 persoon in uw buurt die ook HAVEN gebruikt."
+"Er zijn nog geen HAVEN-gebruikers in uw directe buurt gevonden."
+
+#### Interest match display
+"Iemand vlakbij houdt ook van 🌿 tuinieren."
+"2 mensen in uw buurt houden ook van 🎵 muziek."
+
+#### Connection request (incoming — voice + screen)
+"Iemand in uw buurt die ook van [tag] houdt wil graag kennismaken. Uw naam wordt pas gedeeld als u allebei ja zegt."
+
+#### Connection accepted
+"Goed nieuws! U heeft een nieuwe buurtverbinding. Uw naam is nu gedeeld. Misschien ziet u elkaar binnenkort."
+
+#### Connection declined (to initiator)
+"De persoon heeft helaas nee gezegd. Dat is prima."
+*(No shame language; normalize declining)*
+
+#### Walk buddy request
+"Wilt u dat HAVEN een wandelmaatje zoekt? Iemand in uw buurt gaat ook graag 's ochtends wandelen."
+
+#### Walk buddy match found
+"Goed nieuws! Er is een wandelmaatje gevonden in uw buurt. Wilt u kennismaken?"
+
+#### Event suggestion
+"[Event title], [distance], [day]. Het is gratis. Twee mensen in uw buurt hebben hier ook interesse in."
+
+#### Privacy reassurance (shown on opt-in screen)
+"HAVEN deelt nooit uw adres of foto. Alleen uw voornaam — en alleen als u allebei ja zegt."
+
+#### Opt-out confirmation
+"U heeft de Buurtverbinder uitgeschakeld. Uw buurtprofiel is verwijderd."
+
+#### Banned words for BUURT specifically
+- "In uw buurt woont..." (implies address knowledge — forbidden)
+- "Uw buurman/buurvrouw..." (implies identity before consent)
+- "We weten waar u woont..." (alarming — obviously forbidden)
+
+---
+
 # Addendum G — Local Development Environment Setup
 
 **File:** `docs/addenda/G-local-dev-setup.md`
@@ -5172,6 +5815,28 @@ EXPO_APPLE_APP_SPECIFIC_PASSWORD  (iOS builds)
 
 ---
 
+## J.7 DPIA supplementary item: BUURT feature
+
+The BUURT feature introduces additional processing that must be assessed in the DPIA before activation:
+
+| New processing | Risk level | Notes |
+|---|---|---|
+| PC4 postcode stored per elder | Medium | Not precise location, but still geographic data |
+| Anonymous proximity matching (count display) | Low | No identifiers exchanged; count only |
+| Interest tags profile | Low | Non-sensitive; elder-selected from fixed list |
+| Double opt-in connection (name reveal post-consent) | Medium | First name + HAVEN status revealed to another elder |
+| Family visibility of connections | Medium | Requires explicit elder consent + permission flag |
+
+Additional AVG Article 6 legal basis required for BUURT:
+- Processing basis: Art. 6(1)(a) — explicit consent (elder opts in to BUURT)
+- Interest tags: Art. 6(1)(a) — consent
+- PC4 neighbourhood: Art. 6(1)(a) — consent
+- Name reveal to matched elder: Art. 6(1)(a) — consent (double opt-in IS the consent)
+
+DPO must assess whether BUURT triggers a new or expanded DPIA before Phase 2 launch.
+
+---
+
 # Addendum K — Vendor Register & DPA Tracking
 
 **File:** `docs/addenda/K-vendor-register.md`
@@ -5211,6 +5876,16 @@ EXPO_APPLE_APP_SPECIFIC_PASSWORD  (iOS builds)
 3. Receive written confirmation of deletion
 4. Archive confirmation + mark vendor as removed in this register
 5. Update Addendum J (DPIA) to reflect changed processing
+
+---
+
+## K.4 supplementary items: BUURT feature
+
+| Vendor | Purpose | Data shared | BSN? | DPA? |
+|---|---|---|---|---|
+| OpenData/gemeente APIs (Phase 2+) | Neighbourhood event ingestion | No personal data (events only) | Never | Review per municipality |
+
+Note: if HAVEN integrates with gemeente (municipality) open data portals for event feeds (e.g. Amsterdam Open Data, Rotterdam Open Data), each integration should be reviewed by the DPO — though public event data sharing is typically low-risk.
 
 ---
 
@@ -5480,6 +6155,15 @@ VALUES
    false, 0),   -- Phase 2
   ('wacht_professional_portal',
    'Professional carer portal',
+   false, 0),   -- Phase 2
+  ('buurt_neighbourhood_connector',
+   'BUURT: De Buurtverbinder — anonieme buurtprofielen + interesse-matching',
+   false, 0),   -- Phase 2; off by default
+  ('buurt_walk_buddy',
+   'BUURT: Wandelmaatje matching',
+   false, 0),   -- Phase 2; only enable after base BUURT is stable
+  ('buurt_events',
+   'BUURT: Lokale activiteiten suggesties',
    false, 0);   -- Phase 2
 ```
 
@@ -5739,9 +6423,77 @@ export interface CompanionMemoryRow {
 | M — Accessibility Testing Plan | `docs/addenda/M-accessibility.md` | ✅ |
 | N — Feature Flags + Rollout Strategy | `docs/addenda/N-feature-flags.md` | ✅ |
 | O — Companion Memory Sub-Spec | `docs/addenda/O-companion-memory.md` | ✅ |
+| P — BUURT (De Buurtverbinder) | `docs/addenda/P-buurt-neighbourhood-connector.md` | ✅ |
 
 ---
 
-> **`Havenbuildcompletedesigndoc.md` + these 15 addenda = complete SSOT.**
+> **`Havenbuildcompletedesigndoc.md` + these 16 addenda = complete SSOT.**
 >
 > The two items marked ⚠️ (DPIA + Vendor Register) are not engineering gaps — they are **legal process gaps** that require a named DPO or privacy officer to complete before production launch. No engineer can close them. Flag these to leadership immediately if a DPO has not been appointed.
+
+---
+
+# Addendum P — BUURT: Neighbourhood Connector (De Buurtverbinder)
+
+**File:** `docs/addenda/P-buurt-neighbourhood-connector.md`
+
+## P.1 — The problem (NL-verified statistics only)
+
+### P.1.1 Living alone in the Netherlands
+At the beginning of 2024, 19 percent of the Dutch population — **3.3 million people** — lived alone. The largest group of people living alone are **women aged 70 and older**, often left living alone after the death of a partner.
+Among people aged 70 to 80 specifically, **31% are single** (living alone).
+The number of households where the reference person is 65 or older is expected to rise significantly — from **2.5 million in 2024 to 3 million by 2035** — with much of this growth coming from individuals living alone, fuelled by increasing life expectancy, widowhood, and higher divorce rates among older adults.
+
+### P.1.2 Loneliness in the Netherlands (older adults specifically)
+Of all people aged **75 and over** in the Netherlands, **51% felt lonely in 2024**. Of those aged **85 and over, 60%** felt lonely.
+More than half of the Dutch population older than 65 feels lonely sometimes (RIVM 2024). As people are predominantly **ageing in place** instead of in care homes, their everyday experiences become more localised and **neighbourhood spaces gain traction as important spaces of encounter**.
+Among people aged 45 to 75, **social loneliness** — missing a wider social network — is most common.
+Of people who do not have regular social contact, **over 46% feel strongly socially lonely**, compared to almost 13% of people who do see, speak, or message someone every week.
+Modern society has become increasingly individualistic — signified by smaller households and **longer geographical distance between parents and their children**. Loneliness is negatively associated with physical and mental wellbeing: it is a **strong predictor for premature death, depression, dementia and heart failure**.
+
+**The neighbourhood opportunity:**
+Spaces of encounter can serve as important spaces for social contact for older people, and even **reduce their loneliness** — but only if their physical mobility and the accessibility and proximity of these spaces allow them to.
+BUURT is HAVEN's answer: **bring the neighbourhood to the elder, not the elder to the neighbourhood.**
+
+### P.1.3 What this means for HAVEN's product rationale
+The NL-verified figures above represent a compelling rationale for a Netherlands-specific elder-care product and are the authoritative source for KRING loneliness justifications.
+
+---
+
+## P.2 — Feature definition (BUURT — De Buurtverbinder)
+**Pillar assignment:** KRING (connection) — sub-feature of Pillar 3
+**Core promise:**
+> "U bent niet alleen in uw buurt. Er zijn mensen vlakbij die ook van [tuinieren] houden."
+> *(You are not alone in your neighbourhood. There are people nearby who also enjoy gardening.)*
+
+**What BUURT does:**
+- **Buurtprofiel**: Elder opts in and selects up to 5 interest tags from a fixed Dutch catalogue.
+- **Anonieme nabijheid**: Shows a count only: "3 mensen in uw buurt gebruiken ook HAVEN" — no names, no photos.
+- **Interesse-match**: Shows shared interest tags anonymously: "Iemand vlakbij houdt ook van 🌿 tuinieren".
+- **Activiteiten**: Hyper-local events within configurable radius: "Gratis lezing over vogels, 600m, donderdag".
+- **Wandelmaatje**: "Wilt u dat HAVEN een wandelmaatje zoekt in uw buurt?" — mutual opt-in only.
+- **Verbindingsverzoek**: Anonymous request → both parties must accept before any contact.
+- **Familie-zichtbaarheid**: Family can see who elder has connected with — only after elder shares this.
+
+---
+
+## P.3 — Privacy architecture (non-negotiable)
+This is the most privacy-sensitive feature in HAVEN. Every design decision is AVG-first.
+- **Fuzzy location only**: Neighbourhood stored at 4-digit postcode area (PC4) level — never address, never GPS point.
+- **No reverse lookup**: PC4 is one-way; there is no way to derive address from stored neighbourhood.
+- **Anonymous until double opt-in**: Both parties must actively accept before any identity is revealed.
+- **No direct messaging**: HAVEN does not provide a chat function; connections lead to family-mediated or activity-level contact only.
+- **Elder controls family visibility**: Family can only see connections if elder explicitly shares them.
+- **Full opt-out at any time**: No dark patterns; opt-out deletes neighbourhood profile and all derived data immediately.
+- **No persistent location tracking**: BUURT uses a **declared neighbourhood** (elder sets it once), not real-time location.
+- **Minimum age gap matching**: Interest matching only; no age, gender, or demographic matching.
+- **No profiling for advertising**: Neighbourhood data is never used for targeting, profiling, or third-party purposes.
+
+---
+
+## P.4 — What BUURT explicitly is NOT
+- A dating app (no romantic matching, no photos until mutual opt-in)
+- A real-time location tracker ("where is my neighbour now?")
+- A direct messaging platform (no in-app chat)
+- A social network with profiles, followers, or public presence
+- A tool for family to see who their parent is socialising with (without elder's consent)
