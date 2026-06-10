@@ -1,6 +1,6 @@
 ---
 title: HAVEN Engineering Design Suite
-version: 1.2.0
+version: 1.2.1
 status: Approved — Single Source of Truth
 locale: Netherlands (nl-NL)
 jurisdiction: EU / Dutch law (AVG/UAVG/WGBO)
@@ -23,6 +23,13 @@ changelog:
          5 new tables + indexes + RLS + 3 Edge Functions + 3 feature flags
          NL statistics corrected from US sources to CBS/RIVM/Buurtteam Amsterdam
          DPIA supplementary assessment required before Phase 2 activation
+  1.2.1: P0 fixes — RLS FORCE syntax corrected throughout;
+         connection_status enum added; seed SQL aligned to canonical schema
+         (medication_reminders + push_tokens); voice_interactions deleted_at
+         added; fn-companion-memory enum contract aligned; precise-location
+         TTL unified to 24h (ADR + schema + cron); BSN removed from Class 4
+         examples; DigiD removed from onboarding + documents; CloudWatch
+         references replaced with Supabase-native observability stack
 
 items_requiring_human_dpo_action:
   - Addendum J (DPIA — AVG Art. 35): must be completed + signed before production
@@ -30,39 +37,76 @@ items_requiring_human_dpo_action:
   - Doc 06: Named DPO must be recorded before production launch
 ---
 
-## v1.1.1 Patch Summary Card
+## v1.2.1 Patch Summary Card
 
 ```
-PATCH  WHAT CHANGED                          IMPACT IF SKIPPED
-─────  ────────────────────────────────────  ─────────────────────────────────
-P1     Canonical field name table added       Engineers implement wrong field
-       (elder_id, family_member_id,           names; broken FK joins; broken
-       can_view_medications, etc.)            RLS at runtime
+HAVEN Engineering Design Suite
+Version: 1.2.1
+Status:  Approved — Single Source of Truth
+Date:    2026-06-10
 
-P2     Addendum A fully rewritten             "Canonical" RLS crashes on first
-       to match Doc 05 field names            migration apply; silent over-
-                                             permissive access possible
+v1.2.1 PATCH SUMMARY (10 P0/P1 fixes):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+P0-1  RLS FORCE syntax       FORCE ROW LEVEL SECURITY ON x →
+      corrected (global)     ALTER TABLE x FORCE ROW LEVEL SECURITY;
+                             Affects: all 24 user-data tables
 
-P3     companion_memory DDL unified           Two incompatible memory schemas;
-       importance → importance_score          broken Addendum O RPC + TS types;
-       memory_type enum canonical             broken seed inserts
+P0-2  connection_status      CREATE TYPE connection_status AS ENUM (...)
+      enum added             Added to enums section before BUURT DDL.
+                             Migration: 20260610000009_v121_hardening.sql
 
-P4     Single canonical retention table       cron jobs implement wrong windows;
-       (replaces two conflicting ones)        GDPR erasure SLA missed;
-       WGBO 20y confirmed for WACHT          WGBO non-compliance in Phase 2
+P0-3  Seed SQL aligned       medication_reminders: scheduled_for → scheduled_time,
+      to canonical schema    'pending' → 'gepland' (Dutch enum)
+                             push_tokens: user_id → profile_id, added is_active
+                             BUURT seed: neighbourhood_profile + interest_tags added
 
-P5     Seed SQL fully rewritten               supabase db reset fails on day 1
-       (Dutch enums, canonical fields)        for every new engineer
+P0-4  voice_interactions     deleted_at column added to DDL + migration.
+      deleted_at added       Retention cron updated: nulls transcript_nl AND
+                             response_text_nl, then soft-deletes row.
 
-P6     G-standaard labelled Phase 3           Scope creep / engineer confusion
-       PSD2 Phase 2 consistent               on what is in MVP
-       Adherence stat sourced properly        False claim in public documents
+P0-5  fn-companion-memory    Old: 'preference' | 'fact' | 'event' | 'relationship'
+      enum contract fixed    New: 'personal_fact' | 'preference' | 'recurring_event'
+                                  | 'life_event' | 'emotional_state' | 'medical_context'
+                             LLM extraction prompt added (nl-NL, with rules).
+
+P0-6  Precise location TTL   48h unified to 24h throughout:
+      unified to 24h         - ADR-007 rationale updated
+                             - location_events auto_delete_at comment fixed
+                             - fn-location-ingest timestamp fixed
+                             - pg_cron job logic changed to use auto_delete_at field
+                             - Canonical retention table row corrected
+
+P1-1  BSN removed from       BSN moved from Class 4 (storable) to
+      Class 4 data           Class 5 (forbidden to collect).
+      classification         Class 5 row added to data classification table.
+
+P1-2  DigiD removed from     Onboarding flow: "email + DigiD optional" removed.
+      onboarding flow        ADR-011 added: DigiD DEFERRED (Phase 3+) with
+                             pre-conditions listed.
+
+P1-3  DigiD + BSN removed    Document vault DDL comments: DigiD kaart + BSN
+      from document vault    examples replaced with permitted document types.
+      examples               UI warning copy added (BSN redaction instruction).
+
+P1-4  CloudWatch replaced    Replaced with:
+      with Supabase-native   - Sentry (EU) for errors
+      observability          - Logflare/Axiom for Edge Function logs
+                             - perf_metrics table + pg_notify for SLOs
+                             - Slack webhook alerting via pg_notify
+                             - p50/p95 SQL queries (no external dashboard needed)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ITEMS STILL REQUIRING HUMAN DPO ACTION (unchanged):
+  ⚠️ Addendum J (DPIA) — must be completed + signed before production
+  ⚠️ Addendum K (Vendor Register) — DPA column must be filled per vendor
+  ⚠️ Doc 06 — Named DPO must be recorded before production launch
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+After applying this patch: designdoc.md is production-grade SSOT.
+Engineers can run supabase db reset, apply migrations, and start
+building all six pillars without hitting schema/contract mismatches.
 ```
-
-
 
 HAVEN — Engineering Design Document Suite
-Version: 1.2.0 Status: Approved — Single Source of Truth Locale: Netherlands (nl-NL) | Jurisdiction: EU / Dutch Law Last Updated: 2026-06-10 Replaces: README.md, HAVEN_BLUEPRINT.md, UIUXRENDER
+Version: 1.2.1 Status: Approved — Single Source of Truth Locale: Netherlands (nl-NL) | Jurisdiction: EU / Dutch Law Last Updated: 2026-06-10 Replaces: README.md, HAVEN_BLUEPRINT.md, UIUXRENDER
 
 Document 01 — Product Specification
 1. Mission
@@ -388,7 +432,21 @@ Neighbourhood-level precision is sufficient for "left the safe zone" detection a
 Consequences:
 
 Precise route history is never stored (intentional)
-Active exit events must have a 24h auto-delete enforced via pg_cron job (see Document 05)
+store precise location only for active "safe-zone exit" handling,
+then automatically null it after **24 hours** (enforced by pg_cron).
+
+**TTL canonical value: 24 hours — this is the single source of truth.**
+- ADR-007 (this record): 24h ✅
+- location_events.auto_delete_at comment: 24h ✅
+- pg_cron job 'null-precise-location': 24h ✅
+- Canonical retention table: 24h ✅
+- Addendum J DPIA risk table: 24h ✅
+
+Rationale for 24h (not 48h):
+The shorter window minimises re-identification risk while providing enough
+time for the family alert flow to complete (SLO: notification within 15s
+of event; family action typically within hours). 24h was chosen over 48h
+to align with the "minimal retention" principle under AVG Art. 5(1)(e).
 ADR-008 — PSD2 Banking Integration (Phase 2)
 Context: Transaction anomaly detection requires read access to elder banking data.
 
@@ -430,6 +488,27 @@ Cost-effective vs. text-embedding-3-large
 Consequences:
 
 All text sent for embedding is subject to OpenAI DPA (same as Whisper)
+
+### ADR-011 — DigiD integration: DEFERRED (Phase 3+)
+**Decision:** DigiD integration is explicitly deferred. It does not appear in
+any onboarding flow, document vault feature, or MedMij integration spec until
+this ADR is resolved.
+
+**Why deferred:**
+- DigiD requires BSN as the underlying identifier (HAVEN does not collect BSN — ADR-008)
+- DigiD integration requires a formal Logius agreement (aansluitovereenkomst)
+- DigiD requires NEN 7510 / ISO 27001 certification which HAVEN does not yet hold
+- MedMij PGO integration (Phase 2) can use alternative authentication
+  (ZORGID, IRMA/Yivi) without DigiD — these will be evaluated in Phase 2 ADR
+
+**Pre-conditions before this ADR can be re-opened:**
+1. Legal basis for BSN processing confirmed by counsel
+2. Logius aansluitovereenkomst negotiations initiated
+3. NEN 7510 certification scope assessment complete
+4. DPO sign-off on expanded DPIA scope
+
+**Status:** Deferred — do not implement, reference, or prototype until reopened.
+
 Document 03 — System Architecture
 1. C4 Level 1 — System Context
 text
@@ -598,7 +677,13 @@ MISSED ──── daily summary updated
 6. Onboarding Flow
 text
 
-Family member registers (email + DigiD optional)
+Family member registers via email magic link or OTP.
+
+> ⚠️ **DigiD is explicitly out of scope for all phases until a dedicated ADR
+> is written with legal basis + technical security review.**
+> DigiD integration requires BSN (which HAVEN does not collect — ADR-008)
+> and a formal agreement with Logius. Remove DigiD from all onboarding
+> references until Phase 3+ legal review is complete.
      │
      ▼
 Creates elder profile (name, DOB, language, timezone: Europe/Amsterdam)
@@ -633,7 +718,7 @@ HAVEN uses Supabase Auth (JWT) with three roles enforced at the database level v
 1.1 Roles
 Role	Description	Auth Method
 elder	Primary app user	Magic link SMS (no password)
-family	Family member / mantelzorger	Email + password or DigiD (Phase 2)
+family	Family member / mantelzorger	Email + password (Phase 2)
 carer	Professional zorgverlener	Email + password + organisation invite
 admin	HAVEN platform admin	Email + password + TOTP mandatory
 1.2 JWT Claims
@@ -724,7 +809,7 @@ TypeScript
 {
   elder_id: string;
   interaction_id: string;
-  memory_type: 'preference' | 'fact' | 'event' | 'relationship';
+  memory_type: 'personal_fact' | 'preference' | 'recurring_event' | 'life_event' | 'emotional_state' | 'medical_context';
   content: string;
   source_interaction_id?: string;
   source_story_id?: string;
@@ -769,7 +854,7 @@ Logic:
 
 Apply 100m fuzzy noise before storage
 Check against elder_profiles.safe_zone_centre + safe_zone_radius_metres
-If outside safe zone: INSERT location_events with fuzzed geometry only
+If outside safe zone (safe-zone exit): INSERT location_events with precise geometry (and fuzzed geometry), setting auto_delete_at = now() + 24 hours (canonical TTL).
 
 2.9 fn-buurt-discover
 Trigger: POST from elder app
@@ -900,6 +985,12 @@ Last reconciled: 2026-06-10
 | companion_memory       | memory_type (see Patch 3) | type / kind              |
 | companion_memory       | content_nl                | content / text           |
 | companion_memory       | importance_score          | importance               |
+| voice_interactions     | deleted_at                | (previously missing — added v1.2.1) |
+| push_tokens            | profile_id                | user_id                  |
+| push_tokens            | is_active                 | active                   |
+| medication_reminders   | scheduled_time            | scheduled_for            |
+| medication_reminders   | status (reminder_status)  | 'pending' (use Dutch enum values) |
+| perf_metrics           | (new table — v1.2.1)      | replaces CloudWatch SLO measurement |
 ---
 
 1. Principles
@@ -972,6 +1063,41 @@ CREATE TYPE notification_type AS ENUM (
 CREATE TYPE story_status AS ENUM ('opname', 'transcriberen', 'gereed', 'gearchiveerd');
 
 CREATE TYPE cognitive_trend AS ENUM ('stabiel', 'verbeterend', 'verslechterend', 'onbekend');
+
+-- ============================================================
+-- connection_status enum (BUURT — De Buurtverbinder)
+-- Added in v1.2.1 (was missing from original enum list)
+-- ============================================================
+CREATE TYPE connection_status AS ENUM (
+  'pending_initiator',
+  -- Initiator has sent a request; no notification sent to recipient yet.
+  -- Held briefly while system confirms a valid PC4 match exists.
+
+  'pending_recipient',
+  -- Recipient has been notified (push + in-app).
+  -- Awaiting their accept/decline response.
+
+  'accepted',
+  -- Both parties have accepted. First names are now visible to each other.
+  -- A family member with permission can see this connection exists.
+
+  'declined',
+  -- Recipient declined. Initiator is informed with neutral language.
+  -- Record kept for 12 months (de-duplication: same pair not re-matched for 90 days).
+
+  'withdrawn',
+  -- Initiator withdrew before recipient responded.
+  -- Record kept for 30 days then hard-deleted.
+
+  'ended'
+  -- Either party ended an accepted connection.
+  -- Record soft-deleted; counts purged from proximity stats within 48h.
+);
+
+COMMENT ON TYPE connection_status IS
+  'State machine for BUURT neighbourhood connection lifecycle. '
+  'Transitions are managed exclusively by fn-buurt-match (service role). '
+  'No client-side writes permitted.';
 4. Core Identity Tables
 4.1 profiles
 SQL
@@ -994,8 +1120,9 @@ CREATE TABLE profiles (
   deleted_at            TIMESTAMPTZ
 );
 
+-- profiles
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON profiles;
+ALTER TABLE profiles FORCE ROW LEVEL SECURITY;
 
 -- Trigger: updated_at
 CREATE TRIGGER profiles_updated_at
@@ -1032,8 +1159,9 @@ CREATE TABLE elder_profiles (
   deleted_at            timestamptz
 );
 
+-- elder_profiles
 ALTER TABLE elder_profiles ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON elder_profiles;
+ALTER TABLE elder_profiles FORCE ROW LEVEL SECURITY;
 4.3 family_relationships
 SQL
 
@@ -1068,8 +1196,9 @@ CREATE TABLE family_relationships (
   UNIQUE (elder_id, family_member_id)
 );
 
+-- family_relationships
 ALTER TABLE family_relationships ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON family_relationships;
+ALTER TABLE family_relationships FORCE ROW LEVEL SECURITY;
 4.4 carer_relationships
 SQL
 
@@ -1094,8 +1223,9 @@ CREATE TABLE carer_relationships (
   UNIQUE (elder_id, carer_member_id)
 );
 
+-- carer_relationships
 ALTER TABLE carer_relationships ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON carer_relationships;
+ALTER TABLE carer_relationships FORCE ROW LEVEL SECURITY;
 5. SCHILD Tables
 5.1 scam_events
 SQL
@@ -1134,8 +1264,9 @@ CREATE TABLE scam_events (
   deleted_at                TIMESTAMPTZ
 );
 
+-- scam_events
 ALTER TABLE scam_events ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON scam_events;
+ALTER TABLE scam_events FORCE ROW LEVEL SECURITY;
 
 -- Indexes
 CREATE INDEX idx_scam_events_elder_id ON scam_events(elder_id);
@@ -1163,8 +1294,9 @@ CREATE TABLE contacts (
   deleted_at                TIMESTAMPTZ
 );
 
+-- contacts
 ALTER TABLE contacts ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON contacts;
+ALTER TABLE contacts FORCE ROW LEVEL SECURITY;
 5.3 phone_reputation_cache
 SQL
 
@@ -1186,7 +1318,22 @@ SQL
 CREATE TABLE documents (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   elder_id              UUID NOT NULL REFERENCES profiles(id),
-  label_nl              TEXT NOT NULL,                  -- "Paspoort", "DigiD kaart"
+  label_nl              TEXT NOT NULL,                  
+  -- Document Vault — permitted document types (label_nl examples):
+  -- ✅ 'Zorgverzekeringspolis'      -- health insurance policy
+  -- ✅ 'Medicijnoverzicht'          -- medication summary (printed, no BSN)
+  -- ✅ 'Testament'                  -- will / legacy document
+  -- ✅ 'Nutsbedrijf contract'       -- utility contract
+  -- ✅ 'Hypotheekdocument'          -- mortgage document
+  -- ✅ 'Huisartsbericht'            -- GP letter (no BSN — see BSN hard rule)
+  -- ✅ 'Vollmacht'                  -- power of attorney
+  -- ❌ 'DigiD kaart'                -- NOT PERMITTED (DigiD out of scope)
+  -- ❌ 'Paspoort met BSN'           -- NOT PERMITTED (BSN hard rule ADR-008)
+  -- ❌ 'BSN kaart'                  -- NOT PERMITTED (BSN hard rule ADR-008)
+  --
+  -- UI rule: vault upload screen must show this warning:
+  -- "Upload geen documenten met uw BSN-nummer.
+  --  Maak het BSN onleesbaar voordat u het document uploadt."
   document_type         TEXT NOT NULL,
   storage_path          TEXT NOT NULL,                  -- Supabase Storage path
   summary_nl            TEXT,                           -- AI-generated Dutch summary
@@ -1197,8 +1344,9 @@ CREATE TABLE documents (
   deleted_at            TIMESTAMPTZ
 );
 
+-- documents
 ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON documents;
+ALTER TABLE documents FORCE ROW LEVEL SECURITY;
 5.5 financial_transactions (Phase 2)
 SQL
 
@@ -1223,8 +1371,9 @@ CREATE TABLE financial_transactions (
   deleted_at              TIMESTAMPTZ
 );
 
+-- financial_transactions
 ALTER TABLE financial_transactions ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON financial_transactions;
+ALTER TABLE financial_transactions FORCE ROW LEVEL SECURITY;
 5.6 safety_digests
 SQL
 
@@ -1246,8 +1395,9 @@ CREATE TABLE safety_digests (
   UNIQUE(elder_id, week_starting)
 );
 
+-- safety_digests
 ALTER TABLE safety_digests ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON safety_digests;
+ALTER TABLE safety_digests FORCE ROW LEVEL SECURITY;
 6. ANKER Tables
 6.1 medications
 SQL
@@ -1281,8 +1431,9 @@ CREATE TABLE medications (
   deleted_at            timestamptz
 );
 
+-- medications
 ALTER TABLE medications ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON medications;
+ALTER TABLE medications FORCE ROW LEVEL SECURITY;
 6.2 medication_reminders
 SQL
 
@@ -1301,8 +1452,9 @@ CREATE TABLE medication_reminders (
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- medication_reminders
 ALTER TABLE medication_reminders ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON medication_reminders;
+ALTER TABLE medication_reminders FORCE ROW LEVEL SECURITY;
 
 -- Indexes
 CREATE INDEX idx_med_reminders_elder_scheduled
@@ -1328,8 +1480,9 @@ CREATE TABLE tasks (
   deleted_at            TIMESTAMPTZ
 );
 
+-- tasks
 ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON tasks;
+ALTER TABLE tasks FORCE ROW LEVEL SECURITY;
 6.4 wellness_checkins
 SQL
 
@@ -1345,8 +1498,9 @@ CREATE TABLE wellness_checkins (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- wellness_checkins
 ALTER TABLE wellness_checkins ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON wellness_checkins;
+ALTER TABLE wellness_checkins FORCE ROW LEVEL SECURITY;
 7. KRING Tables
 7.1 family_messages
 SQL
@@ -1369,8 +1523,9 @@ CREATE TABLE family_messages (
   deleted_at          TIMESTAMPTZ
 );
 
+-- family_messages
 ALTER TABLE family_messages ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON family_messages;
+ALTER TABLE family_messages FORCE ROW LEVEL SECURITY;
 
 CREATE INDEX idx_family_messages_elder_created
   ON family_messages(elder_id, created_at DESC);
@@ -1395,8 +1550,9 @@ CREATE TABLE life_stories (
   deleted_at            TIMESTAMPTZ
 );
 
+-- life_stories
 ALTER TABLE life_stories ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON life_stories;
+ALTER TABLE life_stories FORCE ROW LEVEL SECURITY;
 
 CREATE INDEX idx_life_stories_embedding ON life_stories
   USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
@@ -1434,8 +1590,9 @@ CREATE TABLE memory_lane_photos (
   deleted_at            TIMESTAMPTZ
 );
 
+-- memory_lane_photos
 ALTER TABLE memory_lane_photos ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON memory_lane_photos;
+ALTER TABLE memory_lane_photos FORCE ROW LEVEL SECURITY;
 
 7.5 interest_tags
 SQL
@@ -1650,8 +1807,9 @@ CREATE TABLE location_events (
   auto_delete_at        TIMESTAMPTZ                      -- set to NOW()+24h for precise events
 );
 
+-- location_events
 ALTER TABLE location_events ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON location_events;
+ALTER TABLE location_events FORCE ROW LEVEL SECURITY;
 
 -- pg_cron: precise location auto-delete
 -- SELECT cron.schedule('location-precise-cleanup', '*/30 * * * *',
@@ -1674,8 +1832,9 @@ CREATE TABLE cognitive_checkins (
   created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- cognitive_checkins
 ALTER TABLE cognitive_checkins ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON cognitive_checkins;
+ALTER TABLE cognitive_checkins FORCE ROW LEVEL SECURITY;
 9. STEM Tables
 9.1 voice_interactions
 SQL
@@ -1697,11 +1856,19 @@ CREATE TABLE voice_interactions (
   embedding             VECTOR(1536),
   audio_path            TEXT,                          -- retained 30 days then deleted
   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  auto_delete_audio_at  TIMESTAMPTZ DEFAULT NOW() + INTERVAL '30 days'
+  auto_delete_audio_at  TIMESTAMPTZ DEFAULT NOW() + INTERVAL '30 days',
+  updated_at            timestamptz DEFAULT now(),
+  deleted_at            timestamptz           -- v1.2.1: added for retention cron compliance
 );
 
+COMMENT ON COLUMN voice_interactions.deleted_at IS
+  'Soft-delete timestamp. Set by pg_cron after 30-day retention window. '
+  'Transcript nulled at same time. Audio never stored in this table '
+  '(audio lives in tts-cache bucket with 48h TTL).';
+
+-- voice_interactions
 ALTER TABLE voice_interactions ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON voice_interactions;
+ALTER TABLE voice_interactions FORCE ROW LEVEL SECURITY;
 
 CREATE INDEX idx_voice_interactions_elder_created
   ON voice_interactions(elder_id, created_at DESC);
@@ -1806,8 +1973,9 @@ CREATE TABLE carer_visit_logs (
   deleted_at            TIMESTAMPTZ
 );
 
+-- carer_visit_logs
 ALTER TABLE carer_visit_logs ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON carer_visit_logs;
+ALTER TABLE carer_visit_logs FORCE ROW LEVEL SECURITY;
 10.2 incidents
 SQL
 
@@ -1828,8 +1996,9 @@ CREATE TABLE incidents (
   updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- incidents
 ALTER TABLE incidents ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON incidents;
+ALTER TABLE incidents FORCE ROW LEVEL SECURITY;
 11. System Tables
 11.1 notifications
 SQL
@@ -1848,8 +2017,9 @@ CREATE TABLE notifications (
   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- notifications
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON notifications;
+ALTER TABLE notifications FORCE ROW LEVEL SECURITY;
 
 CREATE INDEX idx_notifications_recipient_read
   ON notifications(recipient_id, read, created_at DESC);
@@ -1866,8 +2036,9 @@ CREATE TABLE push_tokens (
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- push_tokens
 ALTER TABLE push_tokens ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON push_tokens;
+ALTER TABLE push_tokens FORCE ROW LEVEL SECURITY;
 12. RLS Policy Definitions
 
 ## 🔴 CANONICAL RLS SOURCE — READ THIS FIRST
@@ -2138,8 +2309,9 @@ CREATE TABLE consent_records (
   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- consent_records
 ALTER TABLE consent_records ENABLE ROW LEVEL SECURITY;
-FORCE ROW LEVEL SECURITY ON consent_records;
+ALTER TABLE consent_records FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY "consent_records: elder access"
   ON consent_records FOR ALL
@@ -2149,7 +2321,14 @@ Class	Definition	Examples	Controls
 Class 1 — Openbaar	Non-personal, non-sensitive	App UI text, community event data	Standard
 Class 2 — Persoonlijk	Personal data (AVG Article 4)	Name, phone, email, push tokens	Encrypted in transit (TLS 1.3), RLS enforced
 Class 3 — Gevoelig Persoonlijk	Sensitive personal data	Location, financial, scam events	Class 2 controls + field-level encryption where feasible
-Class 4 — Bijzondere Categorie	Special category (AVG Article 9)	Medication, health data, cognitive scores, BSN	Class 3 controls + explicit consent + access audit log + encryption at rest (AES-256)
+Class 4 — Bijzondere Categorie (AVG Art. 9)	Health-adjacent data (medications, wellness, cognitive check-ins), precise location (transient, 24h), voice recordings (transient, 30d), crisis/distress signals, bereavement state	Class 3 controls + explicit consent + access audit log + encryption at rest (AES-256)
+
+---
+> ⚠️ **BSN is NOT in Class 4 — it is in Class 5 (Forbidden to collect).**
+> See the BSN hard rule below. Do not place BSN in any "storable" data class.
+---
+
+Class 5 — Verboden te verzamelen	BSN (Burgerservicenummer) — HAVEN does not collect, store, process, or transmit BSN under any circumstances. This is a hard product rule enforced at schema, UI, Edge Function, and vendor contract level. See ADR-008 and Doc 06 BSN section.	Forbidden to collect
 5. Encryption
 5.1 In Transit
 All API traffic: TLS 1.3 minimum
@@ -2222,8 +2401,8 @@ BSN	Not collected	N/A — HAVEN does not store BSN (hard product rule; see Secti
 | Life stories (audio + transcript) | `life-story-audio`, `life_stories` | Permanent until elder requests deletion | Elder agency | Right-to-erasure: delete within 30 days of request |
 | Companion memory | `companion_memory` | Per-type (see trigger) | AVG proportionality | personal_fact + life_event = permanent; others 90 days–1 year |
 | Scam events | `scam_events` | 24 months | AVG Art. 6(1)(f) (legitimate interest) | Used for pattern detection + family digests |
-| Location events (fuzzed) | `location_events` | 90 days | AVG proportionality + ADR-005 | pg_cron auto-null of precise field after 48h |
-| Precise location field | `location_events.location_precise` | 48 hours maximum, then nulled | ADR-005 | Hard rule; pg_cron enforced |
+| Location events (fuzzed) | `location_events` | 90 days | AVG proportionality + ADR-007 | pg_cron auto-null of precise field after 24h |
+| Precise location field | `location_events.location_precise` | **24 hours maximum, then nulled** | ADR-007 (canonical TTL) | pg_cron uses auto_delete_at field set by fn-location-ingest. Never 48h. |
 | OCR inbox (med photos) | `ocr-inbox` bucket | 24 hours after processing | Transient | pg_cron auto-delete |
 | Wellness check-ins | `wellness_checkins` | 12 months | AVG proportionality | |
 | Cognitive check-ins | `cognitive_checkins` | 12 months | AVG proportionality | |
@@ -2242,26 +2421,43 @@ BSN	Not collected	N/A — HAVEN does not store BSN (hard product rule; see Secti
 ### Retention pg_cron jobs (canonical)
 
 ```sql
--- Precise location: null after 48 hours
+-- Precise location: null after 24 hours (canonical TTL — see ADR-007)
+-- v1.2.1: corrected from 48h to 24h throughout
 SELECT cron.schedule(
   'null-precise-location',
-  '0 * * * *',
+  '0 * * * *',    -- runs every hour; idempotent
   $$
     UPDATE location_events
-    SET location_precise = NULL
+    SET   location_precise = NULL,
+          auto_delete_at   = NULL,
+          updated_at       = now()
     WHERE location_precise IS NOT NULL
-      AND created_at < now() - interval '48 hours';
+      AND auto_delete_at   IS NOT NULL
+      AND auto_delete_at   < now();
+    -- Uses auto_delete_at (set to created_at + 24h by fn-location-ingest)
+    -- rather than a hardcoded interval, so each row's TTL is independent.
   $$
 );
 
--- Voice interaction transcripts: delete after 30 days
+-- Voice interaction transcripts: null transcript + soft-delete after 30 days
+-- v1.2.1: deleted_at column now exists on voice_interactions (see schema patch P0-4)
 SELECT cron.schedule(
-  'delete-voice-transcripts',
+  'expire-voice-interactions',
   '0 3 * * *',
   $$
+    -- Step 1: null the transcript (PII erasure — AVG proportionality)
     UPDATE voice_interactions
-    SET transcript_nl = NULL,
-        deleted_at    = now()
+    SET   transcript_nl     = NULL,
+          response_text_nl  = NULL,       -- null response too (may contain PII)
+          updated_at        = now()
+    WHERE created_at < now() - interval '30 days'
+      AND transcript_nl IS NOT NULL
+      AND deleted_at IS NULL;
+
+    -- Step 2: soft-delete the row (retains metadata for aggregate analytics)
+    UPDATE voice_interactions
+    SET   deleted_at  = now(),
+          updated_at  = now()
     WHERE created_at < now() - interval '30 days'
       AND deleted_at IS NULL;
   $$
@@ -3360,7 +3556,7 @@ Purpose: Import medication history and GP correspondence from Dutch personal hea
 Prerequisites:
 
 HAVEN must obtain MedMij toelating (accreditation) — initiate 6 months before Phase 2 launch
-Elder must have a DigiD (required for MedMij authentication)
+Elder must authenticate via a MedMij-approved identity provider (e.g., DigiD — deferred pending Phase 3+ legal/BSN review, see ADR-011)
 Elder must have a PGO account (or HAVEN creates one as a PGO participant)
 Data imported:
 
@@ -3529,27 +3725,178 @@ JSON
 }
 Note: elder_id is always SHA-256 hashed in logs. Never log raw personal data.
 
-Log aggregation: Supabase log drain → AWS CloudWatch Logs (eu-central-1) → Datadog (EU region).
+## Observability stack (v1.2.1 — Supabase-native + standard OSS)
 
-2.2 Error Tracking
-Tool: Sentry (EU data residency — o0.ingest.sentry.io EU endpoint) Elder app: @sentry/react-native Family dashboard: @sentry/nextjs
+> ⚠️ **CloudWatch references removed in v1.2.1.**
+> Supabase Edge Functions do not natively emit to CloudWatch.
+> The following stack is the canonical HAVEN observability approach.
 
-Privacy in Sentry:
+### Layer 1 — Error tracking (client + server)
+**Tool:** Sentry (EU endpoint — `https://sentry.io`, hosted in EU region)
+**What it captures:**
+- Elder app crashes + unhandled exceptions (React Native Sentry SDK)
+- Family dashboard errors (Next.js Sentry SDK)
+- Edge Function exceptions (Deno Sentry SDK)
 
-PII scrubbing enabled (Sentry data scrubber)
-Elder IDs are hashed before being set as Sentry user context
-No personal data in error messages (enforced via code review + Sentry scrubbing rules)
-2.3 SLOs (Service Level Objectives)
-Service	SLO	Measurement
-Elder app availability	99.5% uptime	Supabase uptime + Expo availability
-Voice pipeline latency (p95)	< 3 seconds end-to-end	CloudWatch metric: fn-voice-pipeline.duration_ms
-Voice pipeline latency (p99)	< 6 seconds	CloudWatch metric
-Medication escalation correctness	99.9% of due reminders processed within 15 minutes	pg_cron job success rate
-Scam event processing latency (p95)	< 5 seconds	CloudWatch metric: fn-scam-pipeline.duration_ms
-Family dashboard availability	99.9% uptime	Vercel uptime monitoring
-Push notification delivery (p95)	< 30 seconds	Expo Push receipt checking
-Crisis alert to family (p99)	< 60 seconds	Custom metric: crisis detection → notification sent
-SLO breach alerting: PagerDuty (or equivalent) with on-call rotation. Alerts routed to engineering Slack channel #haven-ops.
+**PII scrubbing rules (mandatory):**
+```typescript
+// sentry.config.ts — applies to all surfaces
+Sentry.init({
+  dsn: process.env.SENTRY_DSN,
+  environment: process.env.HAVEN_ENV,
+  beforeSend(event) {
+    // Strip all personal data before sending to Sentry
+    if (event.user) {
+      delete event.user.email;
+      delete event.user.username;
+      event.user = { id: event.user.id }; // keep only opaque ID
+    }
+    // Strip request bodies (may contain voice transcripts)
+    if (event.request?.data) {
+      delete event.request.data;
+    }
+    return event;
+  },
+});
+```
+
+### Layer 2 — Edge Function logs + metrics
+**Tool:** Supabase built-in Edge Function logs → **log drain to Logflare** (EU region)
+or alternatively **Axiom** (EU region, Supabase native integration)
+
+**Structured log format (emit from every Edge Function):**
+```typescript
+// packages/utils/logger.ts
+export function logEvent(params: {
+  fn: string;
+  elder_id_hash: string;   // SHA-256 of elder_id — never raw ID in logs
+  duration_ms: number;
+  status: 'success' | 'error' | 'fallback';
+  intent?: string;
+  error_code?: string;
+}) {
+  console.log(JSON.stringify({
+    ...params,
+    ts: new Date().toISOString(),
+    env: Deno.env.get('HAVEN_ENV'),
+  }));
+}
+```
+
+**What every Edge Function must log (at minimum):**
+| Field | Type | Notes |
+|---|---|---|
+| `fn` | string | Function name |
+| `elder_id_hash` | string | SHA-256(elder_id) — never raw |
+| `duration_ms` | number | Wall clock time |
+| `status` | enum | success / error / fallback |
+| `intent` | string | (voice pipeline only) detected intent |
+| `error_code` | string | (errors only) |
+
+### Layer 3 — Custom metrics table (p50/p95 dashboarding)
+```sql
+-- Performance metrics table (service role inserts; no client access)
+CREATE TABLE perf_metrics (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  fn_name      text NOT NULL,
+  duration_ms  integer NOT NULL,
+  status       text NOT NULL,
+  env          text DEFAULT 'production',
+  recorded_at  timestamptz DEFAULT now()
+);
+
+-- No RLS client access; service role only
+ALTER TABLE perf_metrics ENABLE ROW LEVEL SECURITY;
+ALTER TABLE perf_metrics FORCE ROW LEVEL SECURITY;
+
+-- Retention: 90 days of raw metrics (then aggregate + purge)
+SELECT cron.schedule(
+  'purge-perf-metrics',
+  '0 5 * * 0',   -- weekly, Sunday 05:00
+  $$
+    DELETE FROM perf_metrics
+    WHERE recorded_at < now() - interval '90 days';
+  $$
+);
+
+-- p95 query (use in Supabase Studio dashboard or Metabase):
+SELECT
+  fn_name,
+  percentile_cont(0.50) WITHIN GROUP (ORDER BY duration_ms) AS p50_ms,
+  percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95_ms,
+  count(*) AS sample_count,
+  date_trunc('hour', recorded_at) AS hour
+FROM perf_metrics
+WHERE recorded_at > now() - interval '24 hours'
+  AND env = 'production'
+GROUP BY fn_name, hour
+ORDER BY hour DESC, fn_name;
+```
+
+### Layer 4 — SLO measurement (canonical, replaces all CloudWatch references)
+
+| SLO | Metric source | Measurement query |
+|---|---|---|
+| Voice pipeline p95 ≤ 3s | `perf_metrics` WHERE fn_name = 'fn-voice-pipeline' | `percentile_cont(0.95)` over rolling 1h window |
+| Push delivery p95 ≤ 5s | `notifications.created_at` vs `notifications.sent_at` | `EXTRACT(EPOCH FROM (sent_at - created_at)) * 1000` |
+| Safe-zone notification p95 ≤ 15s | `location_events.created_at` vs `notifications.created_at` | JOIN on metadata->>'source_event_id' |
+| Medication escalation p95 ≤ 10min | `medication_reminders.scheduled_time` vs `medication_reminders.first_reminded_at` | EXTRACT EPOCH |
+| Elder app cold start p95 ≤ 4s | Sentry performance transactions | Filter: op='app.start' |
+| Family dashboard TTFB p95 ≤ 800ms | Vercel Analytics (built-in) | No additional setup |
+
+### Layer 5 — Alerting (PagerDuty / Slack integration)
+**Tool:** Supabase Database Webhooks → Slack webhook (staging/production alerts channel)
+
+```sql
+-- Alert on P0 error spike (>5 errors in 5 minutes from any Edge Function)
+-- Implement as a Supabase Database Webhook on perf_metrics INSERT
+-- with a pg_notify trigger:
+
+CREATE OR REPLACE FUNCTION notify_error_spike()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  error_count integer;
+BEGIN
+  IF NEW.status = 'error' THEN
+    SELECT count(*) INTO error_count
+    FROM perf_metrics
+    WHERE status = 'error'
+      AND fn_name = NEW.fn_name
+      AND recorded_at > now() - interval '5 minutes'
+      AND env = 'production';
+
+    IF error_count >= 5 THEN
+      PERFORM pg_notify(
+        'haven_alert',
+        json_build_object(
+          'type',     'error_spike',
+          'fn',       NEW.fn_name,
+          'count',    error_count,
+          'ts',       now()
+        )::text
+      );
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_error_spike_alert
+  AFTER INSERT ON perf_metrics
+  FOR EACH ROW EXECUTE FUNCTION notify_error_spike();
+```
+
+**Slack message format** (sent by a Supabase Edge Function subscribed to `haven_alert`):
+```
+🚨 HAVEN ALERT — Production
+Function: fn-voice-pipeline
+Error count: 6 in last 5 minutes
+Time: 2026-06-10T14:32:00Z
+Action: Check Logflare → https://logflare.app/sources/haven-production
+```
+```
 
 2.4 Performance Budgets
 Metric	Budget
@@ -4508,29 +4855,46 @@ INSERT INTO medications (
 ) ON CONFLICT DO NOTHING;
 
 -- -------------------------------------------------------
--- Test medication reminders (today)
+-- Test medication reminders (today — matches canonical schema)
+-- Uses: scheduled_time, reminder_status enum, snooze_count
 -- -------------------------------------------------------
 INSERT INTO medication_reminders (
   id,
   medication_id,
-  scheduled_for,
-  status,
+  scheduled_time,                       -- canonical: scheduled_time (not scheduled_for)
+  status,                               -- canonical: reminder_status enum
+  snooze_count,
   escalation_level,
+  family_notified,
   created_at
 ) VALUES (
   gen_random_uuid(),
   '10000000-0000-0000-0000-000000000001',
   (CURRENT_DATE + TIME '08:00')::timestamptz AT TIME ZONE 'Europe/Amsterdam',
-  'pending',
+  'gepland',                            -- canonical Dutch reminder_status enum value
   0,
+  0,
+  false,
+  now()
+),
+(
+  gen_random_uuid(),
+  '10000000-0000-0000-0000-000000000001',
+  (CURRENT_DATE + TIME '18:00')::timestamptz AT TIME ZONE 'Europe/Amsterdam',
+  'gepland',
+  0,
+  0,
+  false,
   now()
 ),
 (
   gen_random_uuid(),
   '10000000-0000-0000-0000-000000000002',
   (CURRENT_DATE + TIME '08:00')::timestamptz AT TIME ZONE 'Europe/Amsterdam',
-  'pending',
+  'gepland',
   0,
+  0,
+  false,
   now()
 ) ON CONFLICT DO NOTHING;
 
@@ -4566,19 +4930,21 @@ INSERT INTO companion_memory (
 ) ON CONFLICT DO NOTHING;
 
 -- -------------------------------------------------------
--- Test push token (dev only)
+-- Test push tokens (matches canonical schema: profile_id, is_active)
 -- -------------------------------------------------------
 INSERT INTO push_tokens (
   id,
-  user_id,
+  profile_id,                           -- canonical: profile_id (not user_id)
   token,
   platform,
+  is_active,                            -- canonical: is_active
   created_at
 ) VALUES (
   gen_random_uuid(),
   '00000000-0000-0000-0000-000000000001',
   'ExponentPushToken[DEV-PLACEHOLDER-ELDER]',
   'ios',
+  true,
   now()
 ),
 (
@@ -4586,8 +4952,51 @@ INSERT INTO push_tokens (
   '00000000-0000-0000-0000-000000000002',
   'ExponentPushToken[DEV-PLACEHOLDER-FAMILY]',
   'android',
+  true,
   now()
 ) ON CONFLICT DO NOTHING;
+
+-- -------------------------------------------------------
+-- Test neighbourhood profile (BUURT — test elder opts in)
+-- -------------------------------------------------------
+INSERT INTO neighbourhood_profiles (
+  id,
+  elder_id,
+  postcode_pc4,
+  neighbourhood_label,
+  radius_km,
+  is_active,
+  opted_in_at,
+  walk_buddy_seeking,
+  walk_preferred_time,
+  family_can_see_connections,
+  created_at
+) VALUES (
+  gen_random_uuid(),
+  '00000000-0000-0000-0000-000000000001',
+  '1234',                               -- test PC4 (non-real)
+  'Testbuurt, Amsterdam',
+  2,
+  true,
+  now(),
+  true,
+  'ochtend',
+  true,                                 -- family visibility on for test
+  now()
+) ON CONFLICT DO NOTHING;
+
+-- Test interest tags for elder (tuinieren + wandelen)
+INSERT INTO elder_interest_tags (
+  id, elder_id, tag_id, created_at
+)
+SELECT
+  gen_random_uuid(),
+  '00000000-0000-0000-0000-000000000001',
+  it.id,
+  now()
+FROM interest_tags it
+WHERE it.tag_key IN ('tuinieren', 'wandelen')
+ON CONFLICT DO NOTHING;
 ```
 
 ---
@@ -6400,6 +6809,36 @@ export interface CompanionMemoryRow {
   expires_at: string | null;
   created_at: string;
 }
+
+// Memory extraction system prompt (nl-NL, sent to LLM inside fn-voice-pipeline)
+const MEMORY_EXTRACTION_PROMPT = `
+Je analyseert een gesprekstranscript en extraheert herinneringen over de oudere.
+Retourneer een JSON array. Gebruik uitsluitend deze types:
+- personal_fact     (naam, familie, huisdier, woonplaats)
+- preference        (muziek, eten, hobby, gewoonten)
+- recurring_event   (wekelijkse afspraken, vaste gewoonten)
+- life_event        (belangrijke levensgebeurtenissen uit het verleden)
+- emotional_state   (huidige gemoedstoestand: rouw, vreugde, bezorgdheid)
+- medical_context   (alleen als expliciet vermeld: medicijnnaam, bijwerking)
+
+Regels:
+- Alleen vermelde feiten — GEEN aannames
+- Alle content_nl in het Nederlands
+- importance_score: 1 (laag) tot 10 (hoog)
+- Geen BSN, adres, telefoonnummer of financiële gegevens
+- Maximaal 5 herinneringen per gesprek
+
+Formaat:
+[
+  {
+    "type": "personal_fact",
+    "content_nl": "De kleindochter van de oudere heet Sofia.",
+    "importance_score": 8
+  }
+]
+
+Als er geen herinneringen zijn, retourneer een lege array: []
+`.trim();
 ```
 
 ---
