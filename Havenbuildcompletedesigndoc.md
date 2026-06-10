@@ -2795,3 +2795,2480 @@ OpenAI Whisper	1,000 elders × 10 voice interactions/day × 30 days × avg 5s = 
 OpenAI Embeddings	~15k tokens/elder/month × 1,000 = 15M tokens	$0.02/1M tokens	~€0.30
 ElevenLabs	1,000 elders × 10 responses/day × 30 days × avg 50 chars = 15M chars	€0.30/1,000 chars (Creator plan)	~€4,500
 Expo Push	1,000 elders
+
+
+
+
+
+
+
+
+# HAVEN — Addendum Document Suite (v1.0.0)
+
+**Status:** Approved — SSOT addendums to `Havenbuildcompletedesigndoc.md`
+**Version:** 1.0.0
+**Last updated:** 2026-06-10
+**Locale:** Netherlands (nl-NL) / EU
+**These documents patch the gaps identified in the gap audit and together with `Havenbuildcompletedesigndoc.md` constitute the complete engineer reference.**
+
+---
+
+# Addendum A — RLS Policies (Complete SQL)
+
+**File:** `docs/addenda/A-rls-policies.md`
+
+## A.1 Principles
+- Every user-data table has RLS **enabled + forced**
+- Service role (Edge Functions) bypasses RLS via `service_role` key — **never expose this to clients**
+- Policies follow the pattern: `elder owns their rows`, `family reads with consent + permission flag`, `carers read with active relationship`
+- `deleted_at IS NULL` is included in all `SELECT` policies (soft-delete enforcement)
+
+## A.2 Helper functions (create first)
+
+```sql
+-- Returns the role claim from the JWT
+CREATE OR REPLACE FUNCTION auth.user_role()
+RETURNS text
+LANGUAGE sql STABLE
+AS $$
+  SELECT COALESCE(
+    current_setting('request.jwt.claims', true)::json->>'role',
+    'anonymous'
+  )
+$$;
+
+-- Returns the elder_id the current user IS (if role = elder)
+CREATE OR REPLACE FUNCTION auth.elder_id()
+RETURNS uuid
+LANGUAGE sql STABLE
+AS $$
+  SELECT CASE
+    WHEN auth.user_role() = 'elder' THEN auth.uid()
+    ELSE NULL
+  END
+$$;
+
+-- Returns true if current user is a consented family member
+-- for the given elder_id with a specific permission flag
+CREATE OR REPLACE FUNCTION auth.family_can(
+  p_elder_id uuid,
+  p_permission text
+)
+RETURNS boolean
+LANGUAGE sql STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM family_relationships fr
+    WHERE fr.family_user_id = auth.uid()
+      AND fr.elder_id = p_elder_id
+      AND fr.elder_consented = true
+      AND fr.is_active = true
+      AND CASE p_permission
+            WHEN 'meds'      THEN fr.can_view_meds
+            WHEN 'messages'  THEN fr.can_view_messages
+            WHEN 'location'  THEN fr.can_view_location
+            WHEN 'alerts'    THEN fr.can_view_alerts
+            WHEN 'stories'   THEN fr.can_view_stories
+            WHEN 'financials' THEN fr.can_view_financials
+            ELSE false
+          END = true
+  )
+$$;
+
+-- Returns true if current user is an active carer for elder_id
+CREATE OR REPLACE FUNCTION auth.carer_can(
+  p_elder_id uuid
+)
+RETURNS boolean
+LANGUAGE sql STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM carer_relationships cr
+    WHERE cr.carer_user_id = auth.uid()
+      AND cr.elder_id = p_elder_id
+      AND cr.is_active = true
+  )
+$$;
+```
+
+---
+
+## A.3 Table-by-table RLS policies
+
+### A.3.1 `profiles`
+
+```sql
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE profiles FORCE ROW LEVEL SECURITY;
+
+-- Users read their own profile
+CREATE POLICY "profiles_select_own"
+ON profiles FOR SELECT
+USING (id = auth.uid());
+
+-- Users update their own profile
+CREATE POLICY "profiles_update_own"
+ON profiles FOR UPDATE
+USING (id = auth.uid())
+WITH CHECK (id = auth.uid());
+
+-- Insert on sign-up (trigger-managed; policy allows service role)
+CREATE POLICY "profiles_insert_self"
+ON profiles FOR INSERT
+WITH CHECK (id = auth.uid());
+```
+
+---
+
+### A.3.2 `elder_profiles`
+
+```sql
+ALTER TABLE elder_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE elder_profiles FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "elder_profiles_select_self"
+ON elder_profiles FOR SELECT
+USING (elder_id = auth.uid());
+
+CREATE POLICY "elder_profiles_select_family"
+ON elder_profiles FOR SELECT
+USING (auth.family_can(elder_id, 'alerts'));
+
+CREATE POLICY "elder_profiles_update_self"
+ON elder_profiles FOR UPDATE
+USING (elder_id = auth.uid())
+WITH CHECK (elder_id = auth.uid());
+
+CREATE POLICY "elder_profiles_insert_self"
+ON elder_profiles FOR INSERT
+WITH CHECK (elder_id = auth.uid());
+```
+
+---
+
+### A.3.3 `family_relationships`
+
+```sql
+ALTER TABLE family_relationships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE family_relationships FORCE ROW LEVEL SECURITY;
+
+-- Elder sees all relationships for themselves
+CREATE POLICY "family_relationships_select_elder"
+ON family_relationships FOR SELECT
+USING (elder_id = auth.uid());
+
+-- Family member sees their own relationship rows
+CREATE POLICY "family_relationships_select_family"
+ON family_relationships FOR SELECT
+USING (family_user_id = auth.uid());
+
+-- Only elder can update consent + permissions on their relationships
+CREATE POLICY "family_relationships_update_elder"
+ON family_relationships FOR UPDATE
+USING (elder_id = auth.uid())
+WITH CHECK (elder_id = auth.uid());
+
+-- Family can insert a relationship (pending elder consent)
+CREATE POLICY "family_relationships_insert_family"
+ON family_relationships FOR INSERT
+WITH CHECK (family_user_id = auth.uid() AND elder_consented = false);
+
+-- Only elder can delete (revoke consent)
+CREATE POLICY "family_relationships_delete_elder"
+ON family_relationships FOR DELETE
+USING (elder_id = auth.uid());
+```
+
+---
+
+### A.3.4 `medications`
+
+```sql
+ALTER TABLE medications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE medications FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "medications_select_elder"
+ON medications FOR SELECT
+USING (elder_id = auth.uid() AND deleted_at IS NULL);
+
+CREATE POLICY "medications_select_family"
+ON medications FOR SELECT
+USING (
+  auth.family_can(elder_id, 'meds')
+  AND deleted_at IS NULL
+);
+
+CREATE POLICY "medications_insert_elder"
+ON medications FOR INSERT
+WITH CHECK (elder_id = auth.uid());
+
+CREATE POLICY "medications_update_elder"
+ON medications FOR UPDATE
+USING (elder_id = auth.uid())
+WITH CHECK (elder_id = auth.uid());
+
+CREATE POLICY "medications_softdelete_elder"
+ON medications FOR UPDATE
+USING (elder_id = auth.uid());
+```
+
+---
+
+### A.3.5 `medication_reminders`
+
+```sql
+ALTER TABLE medication_reminders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE medication_reminders FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "reminders_select_elder"
+ON medication_reminders FOR SELECT
+USING (
+  EXISTS (
+    SELECT 1 FROM medications m
+    WHERE m.id = medication_id
+      AND m.elder_id = auth.uid()
+  )
+);
+
+CREATE POLICY "reminders_select_family"
+ON medication_reminders FOR SELECT
+USING (
+  EXISTS (
+    SELECT 1 FROM medications m
+    WHERE m.id = medication_id
+      AND auth.family_can(m.elder_id, 'meds')
+  )
+);
+
+CREATE POLICY "reminders_update_elder"
+ON medication_reminders FOR UPDATE
+USING (
+  EXISTS (
+    SELECT 1 FROM medications m
+    WHERE m.id = medication_id
+      AND m.elder_id = auth.uid()
+  )
+);
+```
+
+---
+
+### A.3.6 `family_messages`
+
+```sql
+ALTER TABLE family_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE family_messages FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "messages_select_elder"
+ON family_messages FOR SELECT
+USING (elder_id = auth.uid() AND deleted_at IS NULL);
+
+CREATE POLICY "messages_select_family"
+ON family_messages FOR SELECT
+USING (
+  (sender_id = auth.uid() OR recipient_id = auth.uid())
+  AND auth.family_can(elder_id, 'messages')
+  AND deleted_at IS NULL
+);
+
+CREATE POLICY "messages_insert_elder"
+ON family_messages FOR INSERT
+WITH CHECK (elder_id = auth.uid() AND sender_id = auth.uid());
+
+CREATE POLICY "messages_insert_family"
+ON family_messages FOR INSERT
+WITH CHECK (
+  sender_id = auth.uid()
+  AND auth.family_can(elder_id, 'messages')
+);
+
+CREATE POLICY "messages_update_sender"
+ON family_messages FOR UPDATE
+USING (sender_id = auth.uid())
+WITH CHECK (sender_id = auth.uid());
+```
+
+---
+
+### A.3.7 `scam_events`
+
+```sql
+ALTER TABLE scam_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE scam_events FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "scam_events_select_elder"
+ON scam_events FOR SELECT
+USING (elder_id = auth.uid());
+
+CREATE POLICY "scam_events_select_family"
+ON scam_events FOR SELECT
+USING (auth.family_can(elder_id, 'alerts'));
+
+-- Only service role / edge function inserts
+-- (no client-side INSERT policy = blocked by default for non-service)
+```
+
+---
+
+### A.3.8 `location_events`
+
+```sql
+ALTER TABLE location_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE location_events FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "location_events_select_elder"
+ON location_events FOR SELECT
+USING (elder_id = auth.uid());
+
+CREATE POLICY "location_events_select_family"
+ON location_events FOR SELECT
+USING (auth.family_can(elder_id, 'location'));
+
+-- Inserts only via Edge Function (service role)
+```
+
+---
+
+### A.3.9 `life_stories`
+
+```sql
+ALTER TABLE life_stories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE life_stories FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "stories_select_elder"
+ON life_stories FOR SELECT
+USING (elder_id = auth.uid() AND deleted_at IS NULL);
+
+CREATE POLICY "stories_select_family"
+ON life_stories FOR SELECT
+USING (
+  auth.family_can(elder_id, 'stories')
+  AND deleted_at IS NULL
+  AND is_private = false
+);
+
+CREATE POLICY "stories_insert_elder"
+ON life_stories FOR INSERT
+WITH CHECK (elder_id = auth.uid());
+
+CREATE POLICY "stories_update_elder"
+ON life_stories FOR UPDATE
+USING (elder_id = auth.uid())
+WITH CHECK (elder_id = auth.uid());
+```
+
+---
+
+### A.3.10 `voice_interactions`
+
+```sql
+ALTER TABLE voice_interactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE voice_interactions FORCE ROW LEVEL SECURITY;
+
+-- Elder reads their own interactions
+CREATE POLICY "voice_select_elder"
+ON voice_interactions FOR SELECT
+USING (elder_id = auth.uid());
+
+-- No family access to raw voice interactions (privacy)
+-- Family sees summaries via safety_digests only
+
+-- Inserts only via Edge Function (service role)
+```
+
+---
+
+### A.3.11 `companion_memory`
+
+```sql
+ALTER TABLE companion_memory ENABLE ROW LEVEL SECURITY;
+ALTER TABLE companion_memory FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "companion_memory_select_elder"
+ON companion_memory FOR SELECT
+USING (elder_id = auth.uid());
+
+-- No family access to companion memory (private)
+-- Inserts/updates only via Edge Function (service role)
+```
+
+---
+
+### A.3.12 `notifications`
+
+```sql
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "notifications_select_self"
+ON notifications FOR SELECT
+USING (recipient_id = auth.uid());
+
+CREATE POLICY "notifications_update_self"
+ON notifications FOR UPDATE
+USING (recipient_id = auth.uid())
+WITH CHECK (recipient_id = auth.uid());
+-- (only to mark as read)
+```
+
+---
+
+### A.3.13 `push_tokens`
+
+```sql
+ALTER TABLE push_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE push_tokens FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "push_tokens_select_own"
+ON push_tokens FOR SELECT
+USING (user_id = auth.uid());
+
+CREATE POLICY "push_tokens_insert_own"
+ON push_tokens FOR INSERT
+WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "push_tokens_delete_own"
+ON push_tokens FOR DELETE
+USING (user_id = auth.uid());
+```
+
+---
+
+### A.3.14 `wellness_checkins`
+
+```sql
+ALTER TABLE wellness_checkins ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wellness_checkins FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "wellness_select_elder"
+ON wellness_checkins FOR SELECT
+USING (elder_id = auth.uid());
+
+CREATE POLICY "wellness_select_family"
+ON wellness_checkins FOR SELECT
+USING (auth.family_can(elder_id, 'alerts'));
+
+CREATE POLICY "wellness_insert_elder"
+ON wellness_checkins FOR INSERT
+WITH CHECK (elder_id = auth.uid());
+```
+
+---
+
+### A.3.15 `cognitive_checkins`
+
+```sql
+ALTER TABLE cognitive_checkins ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cognitive_checkins FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY "cognitive_select_elder"
+ON cognitive_checkins FOR SELECT
+USING (elder_id = auth.uid());
+
+CREATE POLICY "cognitive_select_family"
+ON cognitive_checkins FOR SELECT
+USING (auth.family_can(elder_id, 'alerts'));
+
+-- Inserts via Edge Function (service role)
+```
+
+---
+
+## A.4 Audit log (append-only, service role only)
+
+```sql
+CREATE TABLE audit_log (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  actor_id       uuid,
+  actor_role     text,
+  action         text NOT NULL,
+  target_table   text NOT NULL,
+  target_id      uuid,
+  metadata       jsonb,
+  created_at     timestamptz DEFAULT now()
+);
+
+-- No client-facing RLS; only service role writes + reads
+ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_log FORCE ROW LEVEL SECURITY;
+-- No permissive policies = blocked for all JWT users
+-- Service role bypasses RLS by design
+```
+
+---
+
+# Addendum B — Database Indexes & Migration Strategy
+
+**File:** `docs/addenda/B-db-indexes-migrations.md`
+
+## B.1 Index strategy
+
+### B.1.1 Standard FK + query indexes
+
+```sql
+-- profiles
+CREATE INDEX idx_profiles_role ON profiles(role);
+
+-- elder_profiles
+CREATE INDEX idx_elder_profiles_elder_id ON elder_profiles(elder_id);
+
+-- family_relationships
+CREATE INDEX idx_fam_rel_elder_id ON family_relationships(elder_id);
+CREATE INDEX idx_fam_rel_family_user_id ON family_relationships(family_user_id);
+CREATE INDEX idx_fam_rel_active ON family_relationships(elder_id, is_active)
+  WHERE is_active = true AND elder_consented = true;
+
+-- medications (active only — most common query)
+CREATE INDEX idx_medications_elder_active ON medications(elder_id)
+  WHERE deleted_at IS NULL;
+
+-- medication_reminders (cron query: upcoming + overdue)
+CREATE INDEX idx_reminders_scheduled ON medication_reminders(scheduled_for)
+  WHERE status IN ('pending', 'overdue');
+CREATE INDEX idx_reminders_medication_id ON medication_reminders(medication_id);
+
+-- family_messages
+CREATE INDEX idx_messages_elder_id ON family_messages(elder_id)
+  WHERE deleted_at IS NULL;
+CREATE INDEX idx_messages_created ON family_messages(elder_id, created_at DESC)
+  WHERE deleted_at IS NULL;
+
+-- scam_events
+CREATE INDEX idx_scam_elder_id ON scam_events(elder_id);
+CREATE INDEX idx_scam_created ON scam_events(elder_id, created_at DESC);
+CREATE INDEX idx_scam_alert_level ON scam_events(alert_level)
+  WHERE family_notified = false;
+
+-- location_events
+CREATE INDEX idx_location_elder_time ON location_events(elder_id, created_at DESC);
+
+-- notifications
+CREATE INDEX idx_notifications_recipient ON notifications(recipient_id)
+  WHERE read_at IS NULL;
+
+-- voice_interactions
+CREATE INDEX idx_voice_elder_time ON voice_interactions(elder_id, created_at DESC);
+
+-- cognitive_checkins
+CREATE INDEX idx_cognitive_elder_time ON cognitive_checkins(elder_id, created_at DESC);
+
+-- life_stories
+CREATE INDEX idx_stories_elder ON life_stories(elder_id)
+  WHERE deleted_at IS NULL;
+
+-- companion_memory
+CREATE INDEX idx_memory_elder ON companion_memory(elder_id);
+CREATE INDEX idx_memory_type ON companion_memory(elder_id, memory_type);
+```
+
+---
+
+### B.1.2 PostGIS indexes (safe-zone + location)
+
+```sql
+-- Safe-zone centre on elder_profiles
+CREATE INDEX idx_elder_safe_zone_centre
+  ON elder_profiles USING GIST (safe_zone_centre);
+
+-- Fuzzed geometry on location_events
+CREATE INDEX idx_location_events_geom
+  ON location_events USING GIST (location_fuzzed);
+```
+
+---
+
+### B.1.3 pgvector indexes (HNSW — recommended over IVFFlat for HAVEN's workload)
+
+```sql
+-- voice_interactions embeddings
+CREATE INDEX idx_voice_embedding
+  ON voice_interactions USING hnsw (embedding vector_cosine_ops)
+  WITH (m = 16, ef_construction = 64);
+
+-- companion_memory embeddings
+CREATE INDEX idx_companion_memory_embedding
+  ON companion_memory USING hnsw (embedding vector_cosine_ops)
+  WITH (m = 16, ef_construction = 64);
+
+-- life_stories embeddings
+CREATE INDEX idx_life_stories_embedding
+  ON life_stories USING hnsw (embedding vector_cosine_ops)
+  WITH (m = 16, ef_construction = 64);
+
+-- scam_events embeddings (for similarity matching across events)
+CREATE INDEX idx_scam_events_embedding
+  ON scam_events USING hnsw (embedding vector_cosine_ops)
+  WITH (m = 16, ef_construction = 64);
+```
+
+**HNSW parameter guidance:**
+- `m = 16` is the default and appropriate for HAVEN's data volumes at launch
+- `ef_construction = 64` balances build time vs. recall quality
+- Re-evaluate at 100k+ rows per table with `EXPLAIN ANALYZE`
+
+---
+
+## B.2 Migration strategy
+
+### B.2.1 Tooling
+Use **Supabase CLI** (`supabase migrate`) as the single migration tool.
+
+```bash
+# Init (once, in monorepo root)
+supabase init
+
+# Create a new migration
+supabase migration new <descriptive_name>
+# e.g.: supabase migration new add_medications_table
+
+# Apply locally
+supabase db reset   # full reset + all migrations
+supabase db push    # apply pending migrations to linked project
+
+# List migrations
+supabase migration list
+```
+
+---
+
+### B.2.2 File naming convention
+```
+supabase/migrations/
+  20260610000001_extensions_and_enums.sql
+  20260610000002_core_tables.sql
+  20260610000003_rls_helper_functions.sql
+  20260610000004_rls_policies.sql
+  20260610000005_indexes.sql
+  20260610000006_pg_cron_jobs.sql
+  20260610000007_seed_dev_data.sql  -- local dev only
+```
+
+**Format:** `YYYYMMDDHHMMSS_descriptive_name.sql`
+
+---
+
+### B.2.3 Migration rules (non-negotiable)
+1. **Never edit an applied migration** — create a new one
+2. **No destructive changes in a single migration** — always: add column nullable → backfill → add constraint → drop old column (separate migrations)
+3. **Every migration is idempotent** where possible (use `IF NOT EXISTS`, `IF EXISTS`)
+4. **Migrations must pass locally before PR merge** (enforced in CI — see Addendum I)
+5. **Production migrations are applied manually by a named engineer** with a signed-off checklist (not auto-deployed)
+
+---
+
+### B.2.4 Seed data (local dev only)
+
+```sql
+-- supabase/seed.sql (runs after migrations on supabase db reset)
+
+-- Test elder user
+INSERT INTO auth.users (id, email, created_at)
+VALUES (
+  '00000000-0000-0000-0000-000000000001',
+  'elder@haven.test',
+  now()
+) ON CONFLICT DO NOTHING;
+
+INSERT INTO profiles (id, role, locale, created_at)
+VALUES (
+  '00000000-0000-0000-0000-000000000001',
+  'elder',
+  'nl-NL',
+  now()
+) ON CONFLICT DO NOTHING;
+
+-- Test family member
+INSERT INTO auth.users (id, email, created_at)
+VALUES (
+  '00000000-0000-0000-0000-000000000002',
+  'family@haven.test',
+  now()
+) ON CONFLICT DO NOTHING;
+
+INSERT INTO profiles (id, role, locale, created_at)
+VALUES (
+  '00000000-0000-0000-0000-000000000002',
+  'family',
+  'nl-NL',
+  now()
+) ON CONFLICT DO NOTHING;
+
+-- Consented family relationship
+INSERT INTO family_relationships (
+  elder_id, family_user_id,
+  elder_consented, is_active,
+  can_view_meds, can_view_messages, can_view_location,
+  can_view_alerts, can_view_stories
+) VALUES (
+  '00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000002',
+  true, true, true, true, true, true, true
+) ON CONFLICT DO NOTHING;
+
+-- Test medication
+INSERT INTO medications (
+  elder_id, name_nl, dosage, frequency, is_active
+) VALUES (
+  '00000000-0000-0000-0000-000000000001',
+  'Metformine 500mg',
+  '500mg',
+  'twice_daily',
+  true
+) ON CONFLICT DO NOTHING;
+```
+
+---
+
+### B.2.5 Breaking change protocol
+Before any breaking DB change in production:
+1. Deploy backwards-compatible version (new column nullable, old + new code paths live)
+2. Verify both paths work in production
+3. Migrate data (Edge Function or SQL job)
+4. Remove old column/code path in a follow-up deploy
+5. Document in ADRs if the change affects the data model significantly
+
+---
+
+# Addendum C — Authentication & Onboarding Flows
+
+**File:** `docs/addenda/C-auth-flows.md`
+
+## C.1 Auth method decisions
+
+| Actor | Auth method | Rationale |
+|---|---|---|
+| Elder | **OTP (SMS or email)** — no password | Passwords are a cognitive barrier; OTP via SMS is familiar to Dutch older adults via iDEAL/DigiD patterns |
+| Family | **Magic link email** or **OTP** | Low friction for initial setup |
+| Carer (Phase 2) | **Email + password + MFA** | Professional context; higher security requirement |
+| Edge Functions | Supabase service role key | Never client-facing |
+
+**Implementation:** Supabase Auth (built-in OTP + magic link support).
+
+---
+
+## C.2 JWT custom claims
+
+Custom claims are injected via a Supabase Auth hook (PostgreSQL function):
+
+```sql
+-- Auth hook: inject role + elder_context into JWT
+CREATE OR REPLACE FUNCTION auth.custom_claims(event jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  user_role text;
+  claims jsonb;
+BEGIN
+  SELECT role INTO user_role
+  FROM profiles
+  WHERE id = (event->>'user_id')::uuid;
+
+  claims := event->'claims';
+  claims := jsonb_set(claims, '{role}', to_jsonb(user_role));
+
+  RETURN jsonb_set(event, '{claims}', claims);
+END;
+$$;
+```
+
+---
+
+## C.3 Onboarding flow (family-initiated, elder-activates)
+
+This is the single most critical UX + auth flow in the product.
+
+```
+STEP 1 — Family registers
+  Family member opens Family Dashboard
+  Enters email → receives magic link
+  Completes profile (name, relation to elder)
+  ↓
+STEP 2 — Family creates elder profile
+  Family enters elder's:
+    - First name (no BSN — see ADR-008)
+    - Date of birth (optional)
+    - Language preference (nl-NL default)
+    - Phone number (for OTP delivery to elder)
+  System creates:
+    - auth.users row for elder (unconfirmed)
+    - profiles row (role = elder)
+    - elder_profiles row
+    - family_relationships row
+      (elder_consented = false, is_active = false)
+  ↓
+STEP 3 — Elder receives activation
+  System sends elder an SMS:
+    "Welkom bij HAVEN. Uw familie heeft een account
+     voor u aangemaakt. Druk op [link] of bel [nummer]
+     om te starten."
+  ↓
+STEP 4 — Elder activates (voice-guided)
+  Elder opens app (deep link from SMS)
+  App presents: "Bent u [Voornaam]?"
+  Elder confirms by tapping large YES button or saying "Ja"
+  Elder receives OTP SMS
+  Elder enters OTP (large keypad, auto-submit on 6 digits)
+  ↓
+STEP 5 — Consent screen (elder grants family permissions)
+  App reads aloud (Dutch, TTS):
+    "[Familienaam] wil uw herinneringsberichten,
+     medicijnen en veiligheidsberichten kunnen zien.
+     Gaat u daarmee akkoord?"
+  Elder taps "Ja, dat is goed" or "Nee"
+  System sets elder_consented = true per permission flag
+  family_relationships.is_active = true
+  ↓
+STEP 6 — Elder onboarding complete
+  App: "Welkom bij HAVEN, [Voornaam]. Ik ben uw
+        digitale hulp. Wat wilt u doen?"
+  Home screen renders
+```
+
+---
+
+## C.4 Session management
+
+| Scenario | Behaviour |
+|---|---|
+| Token expiry (elder app, foreground) | Silent refresh via Supabase SDK |
+| Token expiry (elder app, background/offline) | Show friendly re-auth screen on next open: "Welkom terug! Voer uw code in." |
+| Token expiry (family dashboard) | Redirect to login; preserve intended route |
+| Invalid session | Clear local storage; restart auth flow |
+| Elder device lost/stolen | Family can trigger session revocation from dashboard (service function) |
+
+---
+
+## C.5 Family invite link flow
+
+```
+Family dashboard → "Voeg familielid toe"
+  → System generates signed invite token (expiry: 72h)
+  → Family shares link via WhatsApp/email (standard NL pattern)
+  → New family member clicks link
+  → Registers with email OTP
+  → Relationship row created (elder_consented = false)
+  → Elder receives in-app notification:
+    "[Naam] wil uw HAVEN-hulp kunnen zien. Akkoord?"
+  → Elder approves → elder_consented = true
+```
+
+---
+
+## C.6 Permission revocation (elder withdraws consent)
+
+```
+Elder: Settings → "Mijn Familie" → [Familienaam] → "Toegang intrekken"
+  → Confirm screen (TTS reads aloud)
+  → family_relationships.elder_consented = false
+  → family_relationships.is_active = false
+  → All active sessions for that family member lose access immediately
+  → Family member receives email: "Toegang ingetrokken"
+```
+
+---
+
+# Addendum D — Offline & Sync Strategy
+
+**File:** `docs/addenda/D-offline-sync.md`
+
+## D.1 Offline philosophy
+> **The elder app must never show a dead or broken state.** The family dashboard can tolerate a loading/stale indicator.
+
+---
+
+## D.2 What is cached locally (elder app)
+
+| Data | Cache duration | Storage method |
+|---|---|---|
+| Today's medication reminders | 24 hours | SQLite via Expo SQLite |
+| Today's tasks | 24 hours | SQLite |
+| Last 10 family messages | 7 days | SQLite |
+| Current elder profile | 24 hours | SQLite |
+| Recent life story prompts | 7 days | SQLite |
+| Voice responses (last 5) | Session only | In-memory |
+| Home screen badge counts | 1 hour | SQLite |
+| Safe-zone config | 24 hours | SQLite |
+
+**NOT cached locally:**
+- Scam event full details (privacy + freshness required)
+- Location events (server only)
+- Companion memory (server only)
+
+---
+
+## D.3 Offline-first reminder firing
+
+```
+Scheduled reminder fires (local notification — device-native, not push)
+  ↓
+Elder responds (taken / snooze)
+  ↓
+Action queued in local action queue (SQLite)
+  ↓
+App checks connectivity
+  ├── Online → flush queue immediately
+  └── Offline → retry every 60s with exponential backoff
+              → max 5 retries
+              → if still offline after 5 retries:
+                   mark as "pending_sync"
+                   continue functioning locally
+  ↓
+On next foreground + online:
+  flush all pending_sync actions
+  reconcile with server state
+```
+
+---
+
+## D.4 Conflict resolution rules
+
+| Scenario | Resolution |
+|---|---|
+| Elder marks med taken offline; server already shows escalated | Accept elder's action; clear escalation; log reconciliation |
+| Elder creates task offline; duplicate detected on sync | Keep elder's version; deduplicate by idempotency key |
+| Family message sent while elder offline | Message sits in queue; delivered on reconnect; no duplicate |
+| Companion memory update conflicts | Server wins; local cache refreshed |
+
+**Idempotency key pattern:**
+Every offline action has an `idempotency_key = uuid()` generated at creation time. Edge Functions check for duplicate keys and return the existing result if already processed.
+
+---
+
+## D.5 Family dashboard offline behaviour
+
+The family dashboard is a **web app** — full offline is not a goal. Behaviour:
+
+- **Offline detected:** Show banner "Geen verbinding — gegevens kunnen verouderd zijn"
+- Supabase Realtime subscription pauses; reconnects automatically
+- No queuing of family actions (messages, permission changes) while offline — user must retry manually
+
+---
+
+## D.6 Local notification strategy (elder app)
+
+Medication reminders and daily rhythm events are **local notifications** first (not push-only), so they fire even if push is unavailable:
+
+```typescript
+// Scheduled at onboarding + updated when reminder schedule changes
+import * as Notifications from 'expo-notifications';
+
+async function scheduleLocalReminder(reminder: MedicationReminder) {
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: 'Medicijntijd 💊',
+      body: `Vergeet uw ${reminder.medication_name_nl} niet.`,
+      data: { reminder_id: reminder.id, screen: 'PILLS' },
+    },
+    trigger: {
+      date: new Date(reminder.scheduled_for),
+    },
+    identifier: reminder.id, // idempotent
+  });
+}
+```
+
+Push notifications are used for **family-initiated events** (messages, check-ins) and **escalation events** only.
+
+---
+
+# Addendum E — Supabase Storage Specification
+
+**File:** `docs/addenda/E-storage-spec.md`
+
+## E.1 Bucket definitions
+
+| Bucket name | Access | Purpose |
+|---|---|---|
+| `voice-notes` | Private | Family ↔ Elder audio messages |
+| `life-story-audio` | Private | Elder story recordings |
+| `life-story-photos` | Private | Photos attached to life stories |
+| `profile-photos` | Private | Elder + family profile photos |
+| `document-vault` | Private | Scanned documents (no BSN per ADR-008) |
+| `ocr-inbox` | Private (transient) | Medication photo OCR input; auto-deleted after processing |
+| `tts-cache` | Private (transient) | Pre-generated TTS audio; short TTL |
+
+**No public buckets** — all content served via signed URLs only.
+
+---
+
+## E.2 File path conventions
+
+```
+voice-notes/
+  {elder_id}/{message_id}.m4a
+
+life-story-audio/
+  {elder_id}/{story_id}.m4a
+
+life-story-photos/
+  {elder_id}/{story_id}/{photo_id}.jpg
+
+profile-photos/
+  {user_id}/avatar.jpg
+
+document-vault/
+  {elder_id}/{document_id}/{filename}
+
+ocr-inbox/
+  {elder_id}/pending/{upload_id}.jpg
+
+tts-cache/
+  {elder_id}/{interaction_id}.mp3
+```
+
+---
+
+## E.3 Storage RLS policies
+
+```sql
+-- voice-notes: elder reads/writes own; family reads with permission
+CREATE POLICY "voice_notes_elder_all"
+ON storage.objects FOR ALL
+USING (
+  bucket_id = 'voice-notes'
+  AND (storage.foldername(name))[1] = auth.uid()::text
+);
+
+CREATE POLICY "voice_notes_family_read"
+ON storage.objects FOR SELECT
+USING (
+  bucket_id = 'voice-notes'
+  AND auth.family_can(
+    (storage.foldername(name))[1]::uuid,
+    'messages'
+  )
+);
+
+-- life-story-audio: elder all; family reads with stories permission
+CREATE POLICY "story_audio_elder_all"
+ON storage.objects FOR ALL
+USING (
+  bucket_id = 'life-story-audio'
+  AND (storage.foldername(name))[1] = auth.uid()::text
+);
+
+CREATE POLICY "story_audio_family_read"
+ON storage.objects FOR SELECT
+USING (
+  bucket_id = 'life-story-audio'
+  AND auth.family_can(
+    (storage.foldername(name))[1]::uuid,
+    'stories'
+  )
+);
+
+-- document-vault: elder only (no family access to documents)
+CREATE POLICY "document_vault_elder_only"
+ON storage.objects FOR ALL
+USING (
+  bucket_id = 'document-vault'
+  AND (storage.foldername(name))[1] = auth.uid()::text
+);
+
+-- ocr-inbox: elder write; service-role read for processing
+CREATE POLICY "ocr_inbox_elder_write"
+ON storage.objects FOR INSERT
+WITH CHECK (
+  bucket_id = 'ocr-inbox'
+  AND (storage.foldername(name))[1] = auth.uid()::text
+);
+```
+
+---
+
+## E.4 File size limits
+
+| Bucket | Max file size | Notes |
+|---|---|---|
+| `voice-notes` | 15 MB | ~10 min audio at low bitrate |
+| `life-story-audio` | 50 MB | ~30 min |
+| `life-story-photos` | 8 MB | Compressed on client before upload |
+| `profile-photos` | 2 MB | Compressed to 512×512 max |
+| `document-vault` | 10 MB | PDF or image |
+| `ocr-inbox` | 5 MB | Transient; auto-deleted after OCR |
+| `tts-cache` | 2 MB | Short clips only |
+
+---
+
+## E.5 Retention & deletion
+
+```sql
+-- pg_cron: delete processed OCR inbox files after 24h
+SELECT cron.schedule(
+  'clean-ocr-inbox',
+  '0 * * * *',  -- hourly
+  $$
+    DELETE FROM storage.objects
+    WHERE bucket_id = 'ocr-inbox'
+      AND created_at < now() - interval '24 hours';
+  $$
+);
+
+-- pg_cron: delete TTS cache after 48h
+SELECT cron.schedule(
+  'clean-tts-cache',
+  '30 * * * *',
+  $$
+    DELETE FROM storage.objects
+    WHERE bucket_id = 'tts-cache'
+      AND created_at < now() - interval '48 hours';
+  $$
+);
+```
+
+**GDPR right-to-erasure:** When an elder account is deleted, a service function cascades deletion across all buckets for that `elder_id`. This is a hard requirement.
+
+---
+
+## E.6 Signed URL generation (client pattern)
+
+```typescript
+// Never expose raw storage paths to clients
+// Always generate short-lived signed URLs server-side or via Edge Function
+
+const { data } = await supabase.storage
+  .from('voice-notes')
+  .createSignedUrl(`${elderId}/${messageId}.m4a`, 300); // 5 min TTL
+
+// Family dashboard: signed URL requested per message render
+// Elder app: signed URL cached for session duration of playback
+```
+
+---
+
+# Addendum F — Error States, Empty States & Dutch UI Copy
+
+**File:** `docs/addenda/F-copy-and-states.md`
+
+## F.1 Dutch copy style guide
+
+### F.1.1 Pronoun register (critical for NL elder UX)
+**Use formal "u" / "uw" throughout the elder app.**
+
+This is non-negotiable for a 68–90 year old Dutch audience. Using "jij/je" with older Dutch adults is widely perceived as disrespectful or overly casual.
+
+| ❌ Do not use | ✅ Use instead |
+|---|---|
+| "Je hebt je medicijn genomen" | "U heeft uw medicijn genomen" |
+| "Jij kunt dit later doen" | "U kunt dit later doen" |
+| "Wat wil jij vandaag doen?" | "Wat wilt u vandaag doen?" |
+| "Je bent buiten je veilige zone" | "U bent buiten uw veilige zone" |
+
+**Family dashboard:** informal "je/jij" is acceptable (younger audience).
+
+---
+
+### F.1.2 Sentence length rules (voice + screen)
+
+| Context | Max sentence length | Rationale |
+|---|---|---|
+| TTS voice output (elder) | 15 words per sentence | Working memory load |
+| Screen body text (elder) | 12 words per line | Visual scanning |
+| Alert explanation (elder) | 2 sentences max | Panic prevention |
+| Family dashboard | No strict limit | Standard web copy |
+
+---
+
+### F.1.3 Banned words (enforced in CI)
+
+```typescript
+// From schema constitution tests
+const BANNED_WORDS_NL = [
+  'fout', 'foutmelding', 'error', 'mislukt', 'mislukt',
+  'gevaar', 'gevaarlijk', 'waarschuwing', 'kritiek',
+  'illegaal', 'oplichter', // too scary for elder UI
+  'als AI', 'als taalmodel', // EU AI Act violation
+  'nooit', 'altijd',        // absolute claims
+  'onmogelijk',
+];
+
+// Allowed exceptions for SCHILD screens only
+const SCHILD_EXCEPTIONS = ['verdacht', 'voorzichtig'];
+```
+
+---
+
+### F.1.4 Number & date formatting (NL)
+
+| Format | Correct NL | Incorrect |
+|---|---|---|
+| Date (long) | `maandag 10 juni 2026` | `Monday, June 10, 2026` |
+| Date (short) | `10-06-2026` | `06/10/2026` |
+| Time | `14:30` (24h) | `2:30 PM` |
+| Currency | `€ 1.234,56` | `€1,234.56` |
+| Phone | `06-12345678` (mobile) | `+31612345678` |
+| Decimal separator | `,` (comma) | `.` (period) |
+| Thousands separator | `.` (period) | `,` (comma) |
+
+---
+
+## F.2 Empty states (all MVP screens)
+
+### HOME — no data yet
+**Title:** "Goedemorgen, [Voornaam]"
+**Body:** "Uw familie stelt uw HAVEN nog in."
+**Voice:** "Uw familie stelt alles voor u in. Even geduld."
+
+---
+
+### PILLS — no medications set up
+**Title:** "Geen medicijnen"
+**Body:** "Uw familie kan uw medicijnen hier toevoegen."
+**Voice:** "Er zijn nog geen medicijnen ingesteld."
+**CTA:** none (elder cannot add medications in v1 without family setup)
+
+---
+
+### PILLS — all meds taken today
+**Title:** "Alle medicijnen ingenomen 🎉"
+**Body:** "Goed gedaan. U bent klaar voor vandaag."
+**Voice:** "U heeft al uw medicijnen ingenomen. Heel goed."
+
+---
+
+### BERICHTEN — no messages
+**Title:** "Nog geen berichten"
+**Body:** "Uw familie kan u hier berichten sturen."
+**Voice:** "Er zijn nog geen berichten van uw familie."
+
+---
+
+### MIJN VERHAAL — no stories yet
+**Title:** "Uw verhaal begint hier"
+**Body:** "Vertel uw eerste herinnering."
+**CTA:** "Opname starten"
+**Voice:** "Druk op de knop om uw eerste herinnering te vertellen."
+
+---
+
+## F.3 Error states (Dutch copy)
+
+### Network error (elder app)
+**Title:** "Geen verbinding"
+**Body:** "HAVEN werkt nu zonder internet. Uw herinneringen werken gewoon."
+**Voice:** "Even geen internet. Uw medicijnherinneringen werken gewoon door."
+**Action:** No retry button — app continues in offline mode silently.
+
+---
+
+### Voice not understood
+**Title:** *(no title — voice-only response)*
+**Voice:** "Ik heb u niet goed verstaan. Kunt u het nog eens zeggen?"
+*(after 2 failures):* "Wilt u de knop gebruiken?"
+*(after 3 failures):* *(show button alternatives silently)*
+
+---
+
+### SCHILD — suspicious call (amber)
+**Title:** "Dit nummer is mogelijk verdacht"
+**Body:** "Geef nooit uw pincode of wachtwoord door. U hoeft nu nergens op te klikken."
+**Voice:** "Wees voorzichtig. Dit nummer is mogelijk verdacht. U hoeft niets te doen."
+**CTA:** "Ik begrijp het" / "Terugbellen"
+
+---
+
+### SCHILD — high-risk alert (red)
+**Title:** "Wees voorzichtig"
+**Body:** "Wij hebben uw familie gewaarschuwd. U hoeft niets te doen."
+**Voice:** "Uw familie is gewaarschuwd. U hoeft niets te doen. U bent veilig."
+**CTA:** "Bel familie" / "Bel 112"
+
+---
+
+### Session expired (elder app)
+**Title:** "Welkom terug"
+**Body:** "Voer uw code in om verder te gaan."
+**Voice:** "Welkom terug. Voer uw code in."
+
+---
+
+# Addendum G — Local Development Environment Setup
+
+**File:** `docs/addenda/G-local-dev-setup.md`
+
+## G.1 Prerequisites
+
+| Tool | Required version | Install |
+|---|---|---|
+| Node.js | ≥ 20 LTS | `nvm install 20` |
+| pnpm | ≥ 9 | `npm i -g pnpm` |
+| Docker Desktop | ≥ 4.x | docker.com |
+| Supabase CLI | ≥ 1.200 | `brew install supabase/tap/supabase` |
+| Expo CLI | ≥ 0.18 | `pnpm add -g expo-cli` |
+| iOS Simulator | Xcode 15+ | App Store |
+| Android Emulator | Android Studio | developer.android.com |
+
+---
+
+## G.2 Environment variables
+
+**Never commit `.env` files.** Use `.env.example` as the template.
+
+### Elder app (`apps/elder/.env`)
+
+```bash
+EXPO_PUBLIC_SUPABASE_URL=http://localhost:54321
+EXPO_PUBLIC_SUPABASE_ANON_KEY=<from supabase start output>
+EXPO_PUBLIC_ENV=development
+EXPO_PUBLIC_LOCALE=nl-NL
+EXPO_PUBLIC_TZ=Europe/Amsterdam
+```
+
+### Family dashboard (`apps/family/.env.local`)
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<from supabase start output>
+NEXT_PUBLIC_ENV=development
+NEXT_PUBLIC_LOCALE=nl-NL
+```
+
+### Edge Functions (`supabase/functions/.env`)
+
+```bash
+SUPABASE_SERVICE_ROLE_KEY=<from supabase start output>
+STT_PROVIDER_API_KEY=<openai or whisper key>
+TTS_PROVIDER_API_KEY=<elevenlabs key>
+LLM_API_KEY=<openai key>
+PHONE_REPUTATION_API_KEY=<vendor key>
+PUSH_VAPID_KEY=<expo push token>
+```
+
+---
+
+## G.3 First-time setup (run once)
+
+```bash
+# 1. Clone repo
+git clone https://github.com/knarayanareddy/Haven-build.git
+cd Haven-build
+
+# 2. Install dependencies
+pnpm install
+
+# 3. Start Supabase locally (requires Docker running)
+supabase start
+# Note the output: API URL, anon key, service role key
+# Copy these into your .env files
+
+# 4. Run all migrations + seed data
+supabase db reset
+# This applies all migrations in supabase/migrations/
+# and runs supabase/seed.sql
+
+# 5. Verify DB state
+supabase db diff  # should show no pending changes
+
+# 6. Start Edge Functions locally
+supabase functions serve --env-file ./supabase/functions/.env
+
+# 7. Start elder app
+cd apps/elder
+cp .env.example .env  # fill in values
+pnpm start
+# Then press 'i' for iOS simulator or 'a' for Android
+
+# 8. Start family dashboard
+cd apps/family
+cp .env.example .env.local  # fill in values
+pnpm dev
+# Open http://localhost:3000
+```
+
+---
+
+## G.4 Daily dev workflow
+
+```bash
+# Start everything (from monorepo root)
+pnpm dev
+
+# This runs (via Turborepo):
+#   supabase start (if not already running)
+#   supabase functions serve
+#   apps/elder: expo start
+#   apps/family: next dev
+
+# Reset DB to clean state
+supabase db reset
+
+# Create a new migration
+supabase migration new <name>
+
+# Run tests
+pnpm test               # all tests
+pnpm test:unit          # unit tests only
+pnpm test:integration   # integration (requires local Supabase)
+pnpm test:e2e           # E2E (requires simulators)
+
+# Type check everything
+pnpm typecheck
+
+# Lint
+pnpm lint
+```
+
+---
+
+## G.5 Common issues & fixes
+
+| Issue | Fix |
+|---|---|
+| `supabase start` fails — port conflict | `supabase stop --no-backup && supabase start` |
+| OTP not received locally | Use Supabase Studio (localhost:54323) → Auth → Users → manually confirm |
+| Edge Function not hot-reloading | Kill `supabase functions serve` and restart |
+| Expo QR not scanning | Ensure device + Mac on same Wi-Fi; use tunnel mode |
+| Migration fails | Check for syntax errors; run `supabase db lint` |
+| pgvector extension not found | Ensure Supabase CLI ≥ 1.200 (includes pgvector) |
+
+---
+
+# Addendum H — Monorepo Structure & Code Conventions
+
+**File:** `docs/addenda/H-monorepo-structure.md`
+
+## H.1 Top-level structure
+
+```
+haven/
+├── apps/
+│   ├── elder/          # React Native + Expo (nl-NL first)
+│   └── family/         # Next.js 14 family dashboard
+├── packages/
+│   ├── ui/             # Shared component library (design system)
+│   ├── schema/         # ScreenSchema types + registry (elder app)
+│   ├── database/       # Supabase client factory + typed DB helpers
+│   ├── i18n/           # Translation files (nl-NL primary, en-GB secondary)
+│   ├── hooks/          # Shared React hooks (useRealtime, useMedications, etc.)
+│   └── utils/          # Shared utilities (formatting, validation, dates)
+├── supabase/
+│   ├── functions/      # Edge Functions (Deno)
+│   ├── migrations/     # Numbered SQL migrations
+│   └── seed.sql        # Local dev seed data
+├── docs/               # This design suite
+├── .github/
+│   └── workflows/      # CI/CD pipelines (Addendum I)
+├── turbo.json
+├── pnpm-workspace.yaml
+└── package.json
+```
+
+---
+
+## H.2 Package naming
+
+All internal packages are scoped: `@haven/<name>`
+
+```
+@haven/ui
+@haven/schema
+@haven/database
+@haven/i18n
+@haven/hooks
+@haven/utils
+```
+
+---
+
+## H.3 `@haven/i18n` structure
+
+```
+packages/i18n/
+  locales/
+    nl-NL/
+      common.json       # Shared: button labels, status words
+      elder-app.json    # Elder app screens
+      family-dash.json  # Family dashboard
+      errors.json       # Error + empty state copy
+      voice.json        # Voice prompt scripts
+    en-GB/
+      (same structure — secondary locale)
+  index.ts             # i18next config + exports
+```
+
+**Key rule:** all Dutch copy lives in `nl-NL/*.json` — **no hardcoded Dutch strings in component files.**
+
+---
+
+## H.4 `@haven/schema` structure
+
+```
+packages/schema/
+  types.ts              # ScreenSchema TypeScript interfaces
+  screens/
+    home.schema.ts
+    pills.schema.ts
+    messages.schema.ts
+    story.schema.ts
+    safe-zone.schema.ts
+    schild-alert.schema.ts
+    settings.schema.ts
+  registry.ts           # SCREEN_REGISTRY map
+  validator.ts          # Schema validation (used in CI tests)
+  __tests__/
+    constitution.test.ts  # UX constitution CI tests
+```
+
+---
+
+## H.5 `@haven/database` structure
+
+```
+packages/database/
+  client.ts             # Supabase client factory (env-aware)
+  types.ts              # Generated DB types (supabase gen types typescript)
+  queries/
+    medications.ts
+    reminders.ts
+    messages.ts
+    scam-events.ts
+    location-events.ts
+    family-relationships.ts
+    companion-memory.ts
+  realtime/
+    subscriptions.ts    # Typed realtime subscription helpers
+```
+
+**Type generation (run after every migration):**
+
+```bash
+supabase gen types typescript \
+  --local \
+  > packages/database/types.ts
+```
+
+---
+
+## H.6 Edge Function structure
+
+```
+supabase/functions/
+  _shared/              # Shared Deno modules
+    supabase.ts         # Supabase admin client
+    auth.ts             # JWT verification helpers
+    push.ts             # Push notification helpers
+    errors.ts           # Standard error responses
+  fn-voice-pipeline/
+    index.ts
+  fn-medication-escalation/
+    index.ts
+  fn-location-ingest/
+    index.ts
+  fn-scam-score/
+    index.ts
+  fn-weekly-digest/
+    index.ts
+  fn-companion-memory-update/
+    index.ts
+```
+
+---
+
+## H.7 Git conventions
+
+### Branch strategy
+
+```
+main              ← production-ready; protected; requires PR + review
+staging           ← staging environment; auto-deployed
+develop           ← integration branch
+feature/<ticket>  ← feature branches
+fix/<ticket>      ← bug fixes
+chore/<ticket>    ← infra/tooling/docs
+```
+
+### Commit message format (Conventional Commits)
+
+```
+<type>(<scope>): <subject>
+
+Types: feat | fix | chore | docs | test | refactor | perf | ci
+Scope: elder-app | family-dash | db | edge-fn | schema | i18n | ci
+
+Examples:
+  feat(elder-app): add offline medication reminder queue
+  fix(db): correct RLS policy on life_stories table
+  chore(ci): add schema constitution tests to PR pipeline
+  docs(addenda): add offline sync strategy
+```
+
+### PR requirements
+- At least 1 reviewer approval
+- All CI checks passing (see Addendum I)
+- `pnpm typecheck` passing
+- No new banned words in NL copy
+
+---
+
+# Addendum I — CI/CD Pipeline Specification
+
+**File:** `docs/addenda/I-cicd-pipeline.md`
+
+## I.1 Pipeline overview
+
+```
+PR opened/updated
+  → lint + typecheck
+  → unit tests
+  → schema constitution tests
+  → DB migration lint
+  → RLS integration tests
+  → build check (elder app + family dashboard)
+  ↓
+All pass → PR mergeable
+
+Merge to develop
+  → all above
+  → E2E smoke tests
+  → supabase db push (staging)
+  → deploy Edge Functions (staging)
+  → deploy family dashboard (staging, Vercel preview)
+  → build Expo preview (EAS Build internal)
+  ↓
+Merge to staging → staging.haven.nl
+
+Manual promote to main
+  → human sign-off checklist
+  → supabase db push (production) ← manual step with approval
+  → deploy Edge Functions (production)
+  → deploy family dashboard (production, Vercel)
+  → EAS Build production (TestFlight + Play Store internal track)
+```
+
+---
+
+## I.2 GitHub Actions workflow files
+
+### `pr-checks.yml`
+
+```yaml
+name: PR Checks
+on:
+  pull_request:
+    branches: [develop, staging, main]
+
+jobs:
+  lint-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    needs: lint-typecheck
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:unit --coverage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+
+  schema-constitution:
+    runs-on: ubuntu-latest
+    needs: lint-typecheck
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test --testPathPattern="constitution"
+
+  migration-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: supabase db lint --level warning
+
+  rls-integration-tests:
+    runs-on: ubuntu-latest
+    needs: migration-lint
+    services:
+      docker:
+        image: docker:dind
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: supabase start
+      - run: supabase db reset
+      - uses: pnpm/action-setup@v3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:integration
+      - run: supabase stop
+```
+
+---
+
+### `deploy-staging.yml`
+
+```yaml
+name: Deploy Staging
+on:
+  push:
+    branches: [develop]
+
+jobs:
+  deploy-db-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+      - run: |
+          supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF_STAGING }}
+          supabase db push
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+  deploy-functions-staging:
+    runs-on: ubuntu-latest
+    needs: deploy-db-staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+      - run: |
+          supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF_STAGING }}
+          supabase functions deploy
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+  deploy-family-dashboard-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID_FAMILY }}
+          working-directory: apps/family
+```
+
+---
+
+## I.3 Required secrets (GitHub → Settings → Secrets)
+
+```
+SUPABASE_ACCESS_TOKEN
+SUPABASE_PROJECT_REF_STAGING
+SUPABASE_PROJECT_REF_PRODUCTION
+VERCEL_TOKEN
+VERCEL_ORG_ID
+VERCEL_PROJECT_ID_FAMILY
+EAS_TOKEN
+EXPO_APPLE_APP_SPECIFIC_PASSWORD  (iOS builds)
+```
+
+---
+
+## I.4 Production deploy checklist (human sign-off required)
+
+```
+[ ] DB migration reviewed by 2 engineers
+[ ] No destructive schema changes without data migration
+[ ] RLS tests passing on staging
+[ ] E2E smoke tests passing on staging
+[ ] Rollback plan documented (what SQL reverses this migration?)
+[ ] Privacy review: does this migration touch sensitive data categories?
+[ ] DPO notified if new personal data processing is introduced
+[ ] Supabase DB push to production approved by lead engineer
+```
+
+---
+
+# Addendum J — DPIA Template (AVG Article 35)
+
+**File:** `docs/addenda/J-dpia-template.md`
+
+> ⚠️ **This template must be completed by the responsible DPO or privacy officer before HAVEN begins processing personal data in production. Processing before DPIA completion is an AVG/GDPR violation.**
+
+## J.1 Document information
+
+| Field | Value |
+|---|---|
+| Product | HAVEN |
+| Version | 1.0.0 |
+| Date | *(to be completed)* |
+| Responsible | *(DPO name)* |
+| Status | **DRAFT — must be completed before launch** |
+| AP notification required? | *(to be assessed — likely yes for health-adjacent + location + vulnerable persons)* |
+
+---
+
+## J.2 Description of processing
+
+| Field | Description |
+|---|---|
+| **Purpose** | Voice-first companion for older adults; fraud protection; medication reminders; family connection |
+| **Data subjects** | Older adults (68–90); family members/mantelzorgers; professional carers (Phase 2) |
+| **Personal data categories** | Name, date of birth, phone number, location (fuzzed), medication names + schedules, voice recordings (transient), conversation transcripts, wellness check-ins, family relationships, life stories |
+| **Special category data** | Health-adjacent data (medication, wellness); potentially data about mental health (bereavement state, cognitive check-ins) |
+| **Legal basis** | *(to be determined: consent (Art. 6(1)(a)) + explicit consent for special category (Art. 9(2)(a)) — must be reviewed by legal)* |
+| **Retention periods** | See Doc 05 + Addendum B (B.2.5) + Storage spec (Addendum E.5) |
+| **Processors / sub-processors** | See Addendum K (Vendor Register) |
+
+---
+
+## J.3 Necessity & proportionality assessment
+*(To be completed by DPO)*
+
+| Question | Assessment |
+|---|---|
+| Is the processing necessary for the stated purpose? | |
+| Could the purpose be achieved with less data? | |
+| Is the retention period proportionate? | |
+| Are special category data minimised? | |
+| Is location data fuzzed and short-lived? | |
+| Are voice recordings deleted promptly? | |
+
+---
+
+## J.4 Risk assessment
+
+| Risk | Likelihood | Impact | Mitigation |
+|---|---|---|---|
+| Unauthorised access to health data | Medium | High | RLS + encryption + audit log |
+| Elder voice recording breach | Medium | High | Short retention + encrypted storage |
+| Location tracking misuse by family | Medium | High | Fuzzy storage + elder-controlled permissions |
+| AI companion providing unsafe advice | Medium | Very high | Crisis phrase detection + 112/113 referral |
+| BSN inadvertently collected via document vault | Low | High | UI warnings + no BSN fields in schema |
+| Scam event data used to profile elder | Low | Medium | No third-party data sharing |
+| Breach notification delay (AVG: 72h to AP) | Low | High | Incident response plan (Addendum L) |
+
+---
+
+## J.5 Consultation
+*(To be completed)*
+- [ ] Data subjects consulted? (elder + family representatives)
+- [ ] AP consulted if high residual risk?
+- [ ] Legal counsel reviewed?
+
+---
+
+## J.6 Sign-off
+*(DPO signature + date required before production launch)*
+
+---
+
+# Addendum K — Vendor Register & DPA Tracking
+
+**File:** `docs/addenda/K-vendor-register.md`
+
+## K.1 Vendor register
+
+| Vendor | Purpose | Data shared | Storage location | DPA signed? | SCC needed? | Review date |
+|---|---|---|---|---|---|---|
+| Supabase | Backend + DB + storage | All personal data | EU (to be confirmed: select EU region in Supabase) | ✅ (Supabase DPA available) | No (EU hosted) | Annual |
+| OpenAI | STT (Whisper) + LLM + embeddings | Voice transcript text (no names if possible); context text | USA | ⚠️ Required | Yes — SCC required | Annual |
+| ElevenLabs | TTS voice output | Response text (no personal data) | USA | ⚠️ Required | Yes — SCC required | Annual |
+| Expo (EAS Build) | Mobile build pipeline | App binary (no personal data) | USA | ✅ | Review | Annual |
+| Vercel | Family dashboard hosting | Request logs (IP, headers) | USA/EU | ⚠️ Review | Review | Annual |
+| Sentry | Error tracking | Stack traces, device info | EU option available | ✅ | No if EU region | Annual |
+| APNs (Apple) | iOS push | Push token + notification payload | USA | Review Apple DPA | Review | Annual |
+| FCM (Google) | Android push | Push token + notification payload | USA | Review Google DPA | Review | Annual |
+
+---
+
+## K.2 Adding a new vendor (process)
+
+1. Open a `chore(vendor): add <vendor-name>` PR
+2. Add vendor to this register with all columns filled
+3. DPO reviews + signs off
+4. DPA signed with vendor before any data flows to them
+5. SCC assessment completed if non-EU storage
+6. PR merged only after DPO sign-off
+
+---
+
+## K.3 Removing a vendor (process)
+
+1. Confirm data deletion obligations from existing DPA
+2. Request data deletion from vendor (in writing)
+3. Receive written confirmation of deletion
+4. Archive confirmation + mark vendor as removed in this register
+5. Update Addendum J (DPIA) to reflect changed processing
+
+---
+
+# Addendum L — Incident Response Plan
+
+**File:** `docs/addenda/L-incident-response.md`
+
+## L.1 Scope
+This plan covers **data breaches and security incidents** affecting HAVEN personal data, in compliance with AVG Article 33 (AP notification within 72 hours) and Article 34 (user notification where high risk).
+
+---
+
+## L.2 Severity levels
+
+| Level | Description | Example |
+|---|---|---|
+| P0 — Critical | Mass data exposure; production DB accessible without auth | Supabase misconfiguration; RLS disabled |
+| P1 — High | Individual elder's health or location data exposed | Broken RLS policy; storage bucket made public |
+| P2 — Medium | Session token leaked; limited scope breach | App logging JWT claims |
+| P3 — Low | Suspected anomaly; no confirmed breach | Unusual query patterns |
+
+---
+
+## L.3 Response timeline (AVG-aligned)
+
+```
+T+0h  → Incident detected (automated alert OR manual report)
+T+1h  → Incident lead assigned (on-call engineer)
+T+2h  → Initial triage: scope, severity level, data categories affected
+T+4h  → Containment action (disable affected function / revoke keys / RLS patch)
+T+24h → Internal incident report drafted
+T+48h → DPO notified; breach assessment: does this require AP notification?
+T+72h → AP (Autoriteit Persoonsgegevens) notified IF required (P0/P1 likely)
+T+72h → Affected users notified IF high risk to rights and freedoms (AVG Art. 34)
+T+7d  → Full post-mortem completed
+T+14d → Corrective actions deployed + verified
+```
+
+---
+
+## L.4 AP notification template
+
+```
+Autoriteit Persoonsgegevens
+Postbus 93374
+2509 AJ Den Haag
+meldloket@autoriteitpersoonsgegevens.nl
+
+Subject: Melding datalek - HAVEN [datum]
+
+1. Aard van het datalek:
+   [Beschrijf wat er is gebeurd]
+
+2. Categorieën en (bij benadering) het aantal betrokkenen:
+   [Bijv. gezondheidsgegevens van ~X ouderen]
+
+3. Categorieën en (bij benadering) het aantal persoonsgegevens:
+   [Bijv. medicijnnamen, locatiegegevens]
+
+4. Naam en contactgegevens FG/DPO:
+   [Naam, e-mail, telefoon]
+
+5. Waarschijnlijke gevolgen:
+   [Beschrijf risico's voor betrokkenen]
+
+6. Getroffen maatregelen:
+   [Wat is er gedaan om het lek te dichten en schade te beperken]
+```
+
+---
+
+## L.5 User notification template (Dutch)
+
+```
+Onderwerp: Belangrijke mededeling over uw HAVEN-account
+
+Beste [Voornaam],
+
+Wij willen u informeren dat er een beveiligingsincident heeft
+plaatsgevonden waarbij mogelijk uw gegevens betrokken zijn.
+
+Wat is er gebeurd:
+[Duidelijke, niet-technische beschrijving]
+
+Welke gegevens:
+[Specifiek benoemen]
+
+Wat wij hebben gedaan:
+[Acties]
+
+Wat u kunt doen:
+[Concrete stap(pen)]
+
+Heeft u vragen? Bel ons op [nummer] of mail [adres].
+
+Met vriendelijke groet,
+Het HAVEN team
+```
+
+---
+
+# Addendum M — Accessibility Testing Plan
+
+**File:** `docs/addenda/M-accessibility.md`
+
+## M.1 Standard & target
+
+| Standard | Target |
+|---|---|
+| WCAG | 2.2 AA |
+| EU standard | EN 301 549 (where applicable) |
+| Screen reader (iOS) | VoiceOver — full navigation without visual |
+| Screen reader (Android) | TalkBack — full navigation without visual |
+| Motor accessibility | Switch access (iOS) + Switch Access (Android) |
+
+---
+
+## M.2 Automated accessibility checks (in CI)
+
+```bash
+# React Native / Expo: use jest-native + @testing-library/react-native
+# Every component test must include accessibility assertions:
+
+it('has accessible medication card', () => {
+  const { getByRole } = render(<MedicationCard medication={mockMed} />);
+  expect(getByRole('button', { name: /Metformine ingenomen/i }))
+    .toBeVisible();
+});
+
+# Family dashboard: axe-core via jest-axe
+import { axe, toHaveNoViolations } from 'jest-axe';
+expect.extend(toHaveNoViolations);
+
+it('alerts page has no axe violations', async () => {
+  const { container } = render(<AlertsPage />);
+  const results = await axe(container);
+  expect(results).toHaveNoViolations();
+});
+```
+
+---
+
+## M.3 Manual testing checklist (per screen, per release)
+
+### Elder app — VoiceOver/TalkBack
+
+```
+[ ] Every interactive element has an accessibilityLabel in Dutch
+[ ] Reading order is logical (top-to-bottom, left-to-right)
+[ ] No "unlabelled button" errors
+[ ] Swipe navigation reaches all interactive elements
+[ ] Double-tap activates the correct action
+[ ] All images have accessibilityLabel or are marked decorative
+[ ] Error/empty states are announced correctly
+[ ] Voice companion TTS integrates correctly with screen reader
+    (does not conflict)
+```
+
+---
+
+### Elder app — Visual
+
+```
+[ ] Minimum touch target: 48×48dp (WCAG 2.5.5)
+[ ] Minimum contrast ratio: 4.5:1 for normal text (WCAG 1.4.3)
+[ ] Minimum contrast ratio: 3:1 for large text + UI components
+[ ] High contrast mode tested (iOS + Android system setting)
+[ ] Font scaling tested at 200% (iOS) and 2x (Android)
+[ ] No information conveyed by colour alone
+[ ] Focus indicator visible for keyboard/switch navigation
+```
+
+---
+
+## M.4 Real-user accessibility testing (mandatory before launch)
+
+> **You cannot ship a product for 68–90 year old users without testing with actual 68–90 year old users.** Automated tests catch code issues; they do not catch "I don't understand what this does."
+
+Minimum requirement before closed beta:
+- **5 usability sessions** with Dutch older adults (aged 68+)
+- At least **2 participants with low digital literacy**
+- At least **1 participant using a screen reader**
+- Sessions recorded (with consent) and findings fed back into copy + UX updates
+
+---
+
+# Addendum N — Feature Flags & Rollout Strategy
+
+**File:** `docs/addenda/N-feature-flags.md`
+
+## N.1 Feature flag implementation
+
+Feature flags are stored in a Supabase config table (no external dependency needed for MVP):
+
+```sql
+CREATE TABLE feature_flags (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  flag_key    text UNIQUE NOT NULL,
+  description text,
+  enabled     boolean DEFAULT false,
+  rollout_pct integer DEFAULT 0
+    CHECK (rollout_pct BETWEEN 0 AND 100),
+  elder_ids   uuid[],   -- override: enabled for specific elders
+  created_at  timestamptz DEFAULT now(),
+  updated_at  timestamptz DEFAULT now()
+);
+
+-- No RLS for clients; flags fetched via Edge Function with service role
+```
+
+---
+
+## N.2 Flag evaluation (Edge Function helper)
+
+```typescript
+// packages/utils/flags.ts
+export async function isFlagEnabled(
+  flagKey: string,
+  elderId: string,
+  adminClient: SupabaseClient
+): Promise<boolean> {
+  const { data: flag } = await adminClient
+    .from('feature_flags')
+    .select('enabled, rollout_pct, elder_ids')
+    .eq('flag_key', flagKey)
+    .single();
+
+  if (!flag) return false;
+  if (!flag.enabled) return false;
+  if (flag.elder_ids?.includes(elderId)) return true;
+  if (flag.rollout_pct === 100) return true;
+  if (flag.rollout_pct === 0) return false;
+
+  // Deterministic rollout by hashing elder_id
+  const hash = parseInt(elderId.replace(/-/g, '').slice(0, 8), 16);
+  return (hash % 100) < flag.rollout_pct;
+}
+```
+
+---
+
+## N.3 MVP flag definitions
+
+```sql
+INSERT INTO feature_flags (flag_key, description, enabled, rollout_pct)
+VALUES
+  ('schild_call_reputation',
+   'Show caller reputation indicator',
+   false, 0),
+  ('anker_medication_ocr',
+   'OCR-based medication setup from photo',
+   false, 0),
+  ('kring_life_story_recording',
+   'Enable life story audio recording',
+   true, 100),
+  ('kompas_safe_zone_alerts',
+   'Safe zone exit family notifications',
+   true, 100),
+  ('stem_companion',
+   'Dutch voice companion (STEM)',
+   true, 100),
+  ('companion_memory',
+   'Persistent companion memory',
+   false, 0),    -- Phase 2
+  ('psd2_transaction_intercept',
+   'PSD2 transaction anomaly detection',
+   false, 0),   -- Phase 2
+  ('wacht_professional_portal',
+   'Professional carer portal',
+   false, 0);   -- Phase 2
+```
+
+---
+
+## N.4 Closed beta rollout sequence
+
+```
+Week 1-2:  Internal team only (5 households)
+  → All flags at rollout_pct = 0 except core flows
+  → Focus: auth, medication reminders, family messages
+
+Week 3-4:  Extended pilot (20 households)
+  → Enable: safe-zone alerts, life story recording
+  → Focus: SCHILD alert flows, STEM companion
+
+Month 2:   Closed beta (50 households)
+  → Full MVP feature set
+  → rollout_pct increases to 100 for stable features
+
+Month 3+:  Open beta (invite-only, NL only)
+  → Phase 2 flags begin internal testing
+```
+
+---
+
+# Addendum O — Companion Memory Sub-Specification
+
+**File:** `docs/addenda/O-companion-memory.md`
+
+## O.1 What companion memory is
+
+The STEM voice companion maintains a **persistent, elder-specific memory** of:
+- Personal facts ("mijn kleindochter heet Sofia")
+- Preferences ("ik hou van klassieke muziek")
+- Recurring events ("elke dinsdag belt mijn dochter")
+- Emotional states (grief, celebration)
+- Key life narrative facts (from life stories)
+
+This memory is used to make STEM feel like **a companion who remembers**, not a generic assistant.
+
+---
+
+## O.2 Data model
+
+```sql
+CREATE TYPE memory_type AS ENUM (
+  'personal_fact',     -- name, family, pets
+  'preference',        -- music, food, routines
+  'recurring_event',   -- weekly calls, appointments
+  'life_event',        -- significant past events from stories
+  'emotional_state',   -- current grief, celebration context
+  'medical_context'    -- medication names, conditions (read-only from ANKER)
+);
+
+CREATE TABLE companion_memory (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  elder_id        uuid REFERENCES profiles(id) ON DELETE CASCADE,
+  memory_type     memory_type NOT NULL,
+  content_nl      text NOT NULL,         -- stored in Dutch
+  importance      integer DEFAULT 5      -- 1(low) to 10(high)
+                  CHECK (importance BETWEEN 1 AND 10),
+  embedding       vector(1536),          -- text-embedding-3-small
+  source          text,                  -- 'voice_interaction' | 'life_story' | 'manual'
+  source_id       uuid,                  -- FK to voice_interactions or life_stories
+  last_referenced timestamptz,
+  expires_at      timestamptz,           -- NULL = permanent
+  deleted_at      timestamptz,
+  created_at      timestamptz DEFAULT now(),
+  updated_at      timestamptz DEFAULT now()
+);
+```
+
+---
+
+## O.3 Embedding model spec
+
+| Property | Value |
+|---|---|
+| Model | `text-embedding-3-small` |
+| Dimensions | 1536 |
+| Similarity metric | Cosine |
+| pgvector index | HNSW (m=16, ef_construction=64) — see Addendum B |
+| Language | Dutch (nl-NL) text stored + embedded |
+
+---
+
+## O.4 Memory creation pipeline
+
+```
+Voice interaction completed (fn-voice-pipeline)
+  ↓
+LLM extracts memory candidates from transcript
+  [{"type": "personal_fact", "content": "mijn kleindochter heet Sofia"}]
+  ↓
+fn-companion-memory-update (Edge Function)
+  ↓
+For each candidate:
+  1. Generate embedding
+  2. Search for near-duplicate (cosine similarity > 0.92)
+  ├── Near-duplicate found → update existing + refresh last_referenced
+  └── No duplicate → insert new memory
+  ↓
+Memory stored in companion_memory table
+```
+
+---
+
+## O.5 Memory retrieval (prompt injection)
+
+```typescript
+// At voice pipeline start, retrieve relevant memories for context
+
+async function getRelevantMemories(
+  elderId: string,
+  queryText: string,
+  adminClient: SupabaseClient
+): Promise<CompanionMemory[]> {
+
+  const queryEmbedding = await generateEmbedding(queryText);
+
+  const { data } = await adminClient.rpc('match_companion_memory', {
+    p_elder_id: elderId,
+    p_query_embedding: queryEmbedding,
+    p_match_threshold: 0.75,
+    p_match_count: 8,
+  });
+
+  return data ?? [];
+}
+```
+
+```sql
+-- Supabase RPC function for memory similarity search
+CREATE OR REPLACE FUNCTION match_companion_memory(
+  p_elder_id       uuid,
+  p_query_embedding vector(1536),
+  p_match_threshold float,
+  p_match_count     int
+)
+RETURNS TABLE (
+  id          uuid,
+  memory_type memory_type,
+  content_nl  text,
+  importance  int,
+  similarity  float
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    cm.id,
+    cm.memory_type,
+    cm.content_nl,
+    cm.importance,
+    1 - (cm.embedding <=> p_query_embedding) AS similarity
+  FROM companion_memory cm
+  WHERE cm.elder_id = p_elder_id
+    AND cm.deleted_at IS NULL
+    AND (cm.expires_at IS NULL OR cm.expires_at > now())
+    AND 1 - (cm.embedding <=> p_query_embedding) > p_match_threshold
+  ORDER BY
+    similarity DESC,
+    cm.importance DESC
+  LIMIT p_match_count;
+END;
+$$;
+```
+
+---
+
+## O.6 Context window management (prompt structure)
+
+```typescript
+function buildCompanionPrompt(
+  memories: CompanionMemory[],
+  currentScreen: string,
+  recentInteractions: VoiceInteraction[]
+): string {
+
+  const memoryContext = memories
+    .slice(0, 6) // max 6 memories to keep context window manageable
+    .map(m => `- ${m.content_nl}`)
+    .join('\n');
+
+  return `
+Je bent HAVEN, een vriendelijke digitale hulp voor een oudere in Nederland.
+Je spreekt altijd respectvol Nederlands met "u" en "uw".
+Je geeft korte, duidelijke antwoorden van maximaal twee zinnen.
+Je bent geen arts en geeft geen medisch advies.
+Je bent een AI-hulp. Zeg dit als iemand ernaar vraagt.
+
+Wat je weet over deze persoon:
+${memoryContext}
+
+Huidige situatie: ${currentScreen}
+
+Antwoord altijd in het Nederlands. Wees warm maar beknopt.
+`.trim();
+}
+```
+
+---
+
+## O.7 Memory retention policy
+
+| Memory type | Retention |
+|---|---|
+| `personal_fact` | Permanent (until elder deletes account) |
+| `preference` | 1 year (refreshed on re-confirmation) |
+| `recurring_event` | 6 months (refreshed if event recurs) |
+| `life_event` | Permanent |
+| `emotional_state` | 90 days |
+| `medical_context` | Derived from ANKER; deleted when medication deleted |
+
+```sql
+-- pg_cron: expire old memories
+SELECT cron.schedule(
+  'expire-companion-memories',
+  '0 2 * * *',  -- daily at 02:00
+  $$
+    UPDATE companion_memory
+    SET deleted_at = now()
+    WHERE expires_at IS NOT NULL
+      AND expires_at < now()
+      AND deleted_at IS NULL;
+  $$
+);
+```
+
+---
+
+## O.8 Edge Function: `fn-companion-memory-update`
+
+**Trigger:** called by `fn-voice-pipeline` after each interaction  
+**Auth:** service role only
+
+**Input:**
+```typescript
+interface MemoryUpdateInput {
+  elder_id: string;
+  interaction_id: string;
+  transcript_nl: string;
+  extracted_memories: Array<{
+    type: MemoryType;
+    content_nl: string;
+    importance: number;
+  }>;
+}
+```
+
+**Output:**
+```typescript
+interface MemoryUpdateOutput {
+  memories_created: number;
+  memories_updated: number;
+  memories_skipped: number; // duplicates
+}
+```
+
+---
+
+# Complete Addendum Suite Index
+
+| Addendum | File | Status |
+|---|---|---|
+| A — RLS Policies (complete SQL) | `docs/addenda/A-rls-policies.md` | ✅ |
+| B — DB Indexes + Migration Strategy | `docs/addenda/B-db-indexes-migrations.md` | ✅ |
+| C — Auth & Onboarding Flows | `docs/addenda/C-auth-flows.md` | ✅ |
+| D — Offline & Sync Strategy | `docs/addenda/D-offline-sync.md` | ✅ |
+| E — Supabase Storage Spec | `docs/addenda/E-storage-spec.md` | ✅ |
+| F — Error/Empty States + Dutch Copy | `docs/addenda/F-copy-and-states.md` | ✅ |
+| G — Local Dev Environment Setup | `docs/addenda/G-local-dev-setup.md` | ✅ |
+| H — Monorepo Structure + Conventions | `docs/addenda/H-monorepo-structure.md` | ✅ |
+| I — CI/CD Pipeline | `docs/addenda/I-cicd-pipeline.md` | ✅ |
+| J — DPIA Template (AVG Art. 35) | `docs/addenda/J-dpia-template.md` | ⚠️ Requires DPO completion |
+| K — Vendor Register + DPA Tracking | `docs/addenda/K-vendor-register.md` | ⚠️ Requires DPO review |
+| L — Incident Response Plan | `docs/addenda/L-incident-response.md` | ✅ |
+| M — Accessibility Testing Plan | `docs/addenda/M-accessibility.md` | ✅ |
+| N — Feature Flags + Rollout Strategy | `docs/addenda/N-feature-flags.md` | ✅ |
+| O — Companion Memory Sub-Spec | `docs/addenda/O-companion-memory.md` | ✅ |
+
+---
+
+> **`Havenbuildcompletedesigndoc.md` + these 15 addenda = complete SSOT.**
+>
+> The two items marked ⚠️ (DPIA + Vendor Register) are not engineering gaps — they are **legal process gaps** that require a named DPO or privacy officer to complete before production launch. No engineer can close them. Flag these to leadership immediately if a DPO has not been appointed.
