@@ -1,0 +1,26 @@
+dataset:
+  name: haven-nl-scam-detection
+  version: 1.2.1
+  locale_primary: nl-NL
+  locale_secondary: en-GB
+  pii_policy: all records must be redacted before storage
+  bsn_policy: forbidden; any record containing a BSN is rejected before import
+  target_records: 100000
+  class_balance:
+    scam: 0.50
+    benign: 0.50
+  channel_distribution:
+    phone_call: 0.40
+    sms: 0.20
+    whatsapp: 0.15
+    email: 0.15
+    web_page: 0.08
+    letter: 0.02
+  quality_distribution:
+    gold: 0.20
+    silver: 0.50
+    bronze: 0.25
+    review_needed: 0.05
+  false_positive_target: 0.02
+  false_negative_target: 0.10
+  refresh_cadence: monthly

@@ -1,0 +1,12 @@
+{
+  "name": "@haven/grandchild-app",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": { "start": "expo start" },
+  "dependencies": {
+    "@haven/contracts": "workspace:*",
+    "expo": "latest",
+    "react": "latest",
+    "react-native": "latest"
+  }
+}

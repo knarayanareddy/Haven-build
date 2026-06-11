@@ -1,0 +1,7 @@
+appId: nl.haven.elder
+---
+- launchApp
+- assertVisible: "HAVEN"
+- tapOn: "Shield"
+- tapOn: "Simulate suspicious call"
+- assertVisible: "Call family first"

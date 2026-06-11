@@ -1,0 +1,7 @@
+{
+  "name": "@haven/schema",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/screenSchema.ts",
+  "private": true
+}

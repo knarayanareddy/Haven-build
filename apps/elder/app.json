@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "HAVEN",
+    "slug": "haven-elder",
+    "scheme": "haven",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": { "bundleIdentifier": "nl.haven.elder", "supportsTablet": true },
+    "android": { "package": "nl.haven.elder" },
+    "extra": { "locale": "en-GB", "timezone": "Europe/Amsterdam" }
+  }
+}

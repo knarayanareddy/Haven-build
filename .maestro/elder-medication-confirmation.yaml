@@ -1,0 +1,8 @@
+appId: nl.haven.elder
+---
+- launchApp
+- assertVisible: "HAVEN"
+- tapOn: "My Pills"
+- assertVisible: "I took it"
+- tapOn: "I took it"
+- assertVisible: "Well done"

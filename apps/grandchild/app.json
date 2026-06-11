@@ -1,0 +1,10 @@
+{
+  "expo": {
+    "name": "HAVEN Hello",
+    "slug": "haven-grandchild",
+    "scheme": "havenhello",
+    "orientation": "portrait",
+    "ios": { "bundleIdentifier": "nl.haven.grandchild" },
+    "android": { "package": "nl.haven.grandchild" }
+  }
+}

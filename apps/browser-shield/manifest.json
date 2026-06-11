@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "HAVEN Browser Shield",
+  "version": "1.0.0",
+  "description": "Privacy-preserving scam page detection for HAVEN elders.",
+  "permissions": ["activeTab", "storage"],
+  "host_permissions": ["https://*/*", "http://*/*"],
+  "background": { "service_worker": "src/background.js" },
+  "content_scripts": [
+    { "matches": ["https://*/*", "http://*/*"], "js": ["src/content.js"], "run_at": "document_idle" }
+  ],
+  "action": { "default_title": "HAVEN Shield" }
+}

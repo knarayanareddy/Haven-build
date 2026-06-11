@@ -1,0 +1,34 @@
+{
+  "name": "@haven/elder-app",
+  "version": "1.0.0",
+  "private": true,
+  "main": "expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "ios": "expo run:ios",
+    "android": "expo run:android",
+    "test:constitution": "node ../../tests/edge/screen-schema.test.mjs"
+  },
+  "dependencies": {
+    "@expo/vector-icons": "latest",
+    "@haven/contracts": "workspace:*",
+    "@haven/i18n": "workspace:*",
+    "@react-navigation/native": "latest",
+    "@react-navigation/native-stack": "latest",
+    "@supabase/supabase-js": "latest",
+    "expo": "latest",
+    "expo-av": "latest",
+    "expo-camera": "latest",
+    "expo-crypto": "latest",
+    "expo-file-system": "latest",
+    "expo-haptics": "latest",
+    "expo-notifications": "latest",
+    "expo-secure-store": "latest",
+    "expo-sqlite": "latest",
+    "react": "latest",
+    "react-native": "latest",
+    "react-native-gesture-handler": "latest",
+    "react-native-safe-area-context": "latest",
+    "react-native-screens": "latest"
+  }
+}

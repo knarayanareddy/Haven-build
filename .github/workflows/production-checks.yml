@@ -1,0 +1,25 @@
+name: HAVEN Production Checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  static-suite-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm test
+
+  supabase-layout-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: test -f supabase/config.toml
+      - run: test -f supabase/seed.sql
+      - run: test -d supabase/functions/fn-voice-pipeline
+      - run: test -d supabase/functions/fn-scam-pipeline
+      - run: grep -R "FORCE ROW LEVEL SECURITY" supabase/migrations

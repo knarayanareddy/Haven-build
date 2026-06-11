@@ -1,0 +1,7 @@
+{
+  "name": "@haven/scam-engine",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/rules.ts",
+  "private": true
+}

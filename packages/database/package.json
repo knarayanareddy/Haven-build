@@ -1,0 +1,7 @@
+{
+  "name": "@haven/database",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/types.ts",
+  "private": true
+}

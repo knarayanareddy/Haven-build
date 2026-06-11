@@ -1,0 +1,7 @@
+{
+  "name": "@haven/contracts",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/haven.ts",
+  "private": true
+}

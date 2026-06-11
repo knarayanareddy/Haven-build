@@ -1,0 +1,599 @@
+{
+  "version": "1.2.1-production-build",
+  "generated_at": "2026-06-11",
+  "features": [
+    {
+      "key": "schild_scam_scoring",
+      "status": "implemented",
+      "backend": [
+        "scam_events",
+        "fn-scam-pipeline"
+      ],
+      "ui": [
+        "iphone-suite:shield"
+      ]
+    },
+    {
+      "key": "schild_document_vault",
+      "status": "implemented",
+      "backend": [
+        "documents",
+        "document_analysis_jobs",
+        "fn-document-analyse"
+      ],
+      "ui": [
+        "iphone-suite:shield"
+      ]
+    },
+    {
+      "key": "schild_transaction_intercept",
+      "status": "implemented",
+      "backend": [
+        "financial_accounts",
+        "financial_transactions",
+        "fn-transaction-intercept"
+      ],
+      "ui": [
+        "iphone-suite:shield"
+      ]
+    },
+    {
+      "key": "anker_medication_ocr",
+      "status": "implemented",
+      "backend": [
+        "medication_ocr_jobs",
+        "fn-medication-ocr"
+      ],
+      "ui": [
+        "iphone-suite:pills"
+      ]
+    },
+    {
+      "key": "anker_medication_reminders",
+      "status": "implemented",
+      "backend": [
+        "medication_reminders",
+        "fn-medication-escalation"
+      ],
+      "ui": [
+        "iphone-suite:pills"
+      ]
+    },
+    {
+      "key": "anker_hydration_nutrition_vitals",
+      "status": "implemented",
+      "backend": [
+        "hydration_logs",
+        "nutrition_logs",
+        "vital_signs",
+        "fn-health-log"
+      ],
+      "ui": [
+        "iphone-suite:kompas",
+        "family-dashboard"
+      ]
+    },
+    {
+      "key": "anker_telehealth_transport",
+      "status": "implemented",
+      "backend": [
+        "appointments",
+        "transport_requests",
+        "telehealth_sessions",
+        "fn-telehealth-transport"
+      ],
+      "ui": [
+        "family-dashboard"
+      ]
+    },
+    {
+      "key": "kring_family_messages",
+      "status": "implemented",
+      "backend": [
+        "family_messages",
+        "fn-family-message-send"
+      ],
+      "ui": [
+        "iphone-suite:family",
+        "family-dashboard"
+      ]
+    },
+    {
+      "key": "kring_life_stories",
+      "status": "implemented",
+      "backend": [
+        "life_stories",
+        "life_story_prompts"
+      ],
+      "ui": [
+        "iphone-suite:family"
+      ]
+    },
+    {
+      "key": "buurt_connector",
+      "status": "implemented",
+      "backend": [
+        "neighbourhood_profiles",
+        "neighbourhood_connections",
+        "fn-buurt-discover",
+        "fn-buurt-match"
+      ],
+      "ui": [
+        "iphone-suite:family"
+      ]
+    },
+    {
+      "key": "kompas_safe_zone",
+      "status": "implemented",
+      "backend": [
+        "location_events",
+        "fn-location-ingest"
+      ],
+      "ui": [
+        "iphone-suite:kompas",
+        "family-dashboard"
+      ]
+    },
+    {
+      "key": "kompas_emergency_profile",
+      "status": "implemented",
+      "backend": [
+        "emergency_access_tokens",
+        "fn-emergency-profile"
+      ],
+      "ui": [
+        "iphone-suite:kompas"
+      ]
+    },
+    {
+      "key": "stem_voice_companion",
+      "status": "implemented",
+      "backend": [
+        "voice_interactions",
+        "fn-voice-pipeline"
+      ],
+      "ui": [
+        "iphone-suite:stem"
+      ]
+    },
+    {
+      "key": "stem_companion_memory",
+      "status": "implemented",
+      "backend": [
+        "companion_memory",
+        "fn-companion-memory"
+      ],
+      "ui": [
+        "iphone-suite:stem"
+      ]
+    },
+    {
+      "key": "wacht_carer_portal",
+      "status": "implemented",
+      "backend": [
+        "carer_visit_logs",
+        "incidents"
+      ],
+      "ui": [
+        "iphone-suite:wacht",
+        "family-dashboard"
+      ]
+    },
+    {
+      "key": "platform_consent_erasure",
+      "status": "implemented",
+      "backend": [
+        "consent_records",
+        "deletion_requests",
+        "fn-consent-update",
+        "fn-right-to-erasure"
+      ],
+      "ui": [
+        "iphone-suite:settings"
+      ]
+    },
+    {
+      "key": "platform_storage_observability",
+      "status": "implemented",
+      "backend": [
+        "storage.objects",
+        "perf_metrics"
+      ],
+      "ui": [
+        "runbook"
+      ]
+    },
+    {
+      "key": "platform_onboarding",
+      "status": "implemented",
+      "backend": [
+        "profiles",
+        "elder_profiles",
+        "family_relationships",
+        "fn-onboarding"
+      ],
+      "ui": [
+        "elder-app",
+        "family-dashboard"
+      ]
+    },
+    {
+      "key": "platform_signed_storage_urls",
+      "status": "implemented",
+      "backend": [
+        "storage.buckets",
+        "fn-storage-signed-url"
+      ],
+      "ui": [
+        "elder-app",
+        "family-dashboard"
+      ]
+    },
+    {
+      "key": "platform_daily_reminder_scheduler",
+      "status": "implemented",
+      "backend": [
+        "medication_reminders",
+        "fn-daily-reminder-scheduler"
+      ],
+      "ui": [
+        "elder-app"
+      ]
+    },
+    {
+      "key": "platform_data_export",
+      "status": "implemented",
+      "backend": [
+        "export_elder_data",
+        "fn-data-export"
+      ],
+      "ui": [
+        "settings"
+      ]
+    },
+    {
+      "key": "platform_notification_preferences",
+      "status": "implemented",
+      "backend": [
+        "notification_preferences",
+        "fn-notification-preferences"
+      ],
+      "ui": [
+        "settings"
+      ]
+    },
+    {
+      "key": "kring_life_story_processing",
+      "status": "implemented",
+      "backend": [
+        "life_stories",
+        "companion_memory",
+        "fn-life-story-process"
+      ],
+      "ui": [
+        "elder-app:life-story"
+      ]
+    },
+    {
+      "key": "wacht_care_visit_logging",
+      "status": "implemented",
+      "backend": [
+        "carer_visit_logs",
+        "fn-care-visit-log"
+      ],
+      "ui": [
+        "wacht"
+      ]
+    },
+    {
+      "key": "anker_vital_threshold_check",
+      "status": "implemented",
+      "backend": [
+        "vital_signs",
+        "fn-vital-threshold-check"
+      ],
+      "ui": [
+        "family-dashboard"
+      ]
+    },
+    {
+      "key": "platform_push_token_registration",
+      "status": "implemented",
+      "backend": [
+        "push_tokens",
+        "fn-push-token-register"
+      ],
+      "ui": [
+        "elder-app",
+        "family-dashboard"
+      ]
+    },
+    {
+      "key": "platform_device_sessions",
+      "status": "implemented",
+      "backend": [
+        "device_sessions",
+        "fn-device-session"
+      ],
+      "ui": [
+        "settings"
+      ]
+    },
+    {
+      "key": "platform_release_checks",
+      "status": "implemented",
+      "backend": [
+        "app_release_checks",
+        "fn-release-check"
+      ],
+      "ui": [
+        "release-runbook"
+      ]
+    },
+    {
+      "key": "platform_compliance_register",
+      "status": "implemented",
+      "backend": [
+        "vendor_register",
+        "dpia_assessments",
+        "fn-compliance-register"
+      ],
+      "ui": [
+        "admin"
+      ]
+    },
+    {
+      "key": "platform_breach_incidents",
+      "status": "implemented",
+      "backend": [
+        "data_breach_incidents",
+        "fn-breach-incident"
+      ],
+      "ui": [
+        "admin"
+      ]
+    },
+    {
+      "key": "wacht_care_plans",
+      "status": "implemented",
+      "backend": [
+        "care_plans",
+        "care_plan_items",
+        "fn-care-plan"
+      ],
+      "ui": [
+        "wacht"
+      ]
+    },
+    {
+      "key": "wacht_incident_reporting",
+      "status": "implemented",
+      "backend": [
+        "incidents",
+        "safeguarding_reports",
+        "fn-incident-report"
+      ],
+      "ui": [
+        "wacht"
+      ]
+    },
+    {
+      "key": "anker_medication_refill",
+      "status": "implemented",
+      "backend": [
+        "medication_refill_events",
+        "fn-medication-refill"
+      ],
+      "ui": [
+        "elder-app:pills",
+        "family-dashboard"
+      ]
+    },
+    {
+      "key": "buurt_optout",
+      "status": "implemented",
+      "backend": [
+        "neighbourhood_profiles",
+        "neighbourhood_connections",
+        "fn-buurt-optout"
+      ],
+      "ui": [
+        "settings"
+      ]
+    },
+    {
+      "key": "platform_audit_query",
+      "status": "implemented",
+      "backend": [
+        "audit_log",
+        "fn-audit-query"
+      ],
+      "ui": [
+        "settings",
+        "admin"
+      ]
+    },
+    {
+      "key": "schild_browser_shield",
+      "status": "implemented",
+      "backend": [
+        "domain_reputation_cache",
+        "browser_shield_events",
+        "fn-browser-shield"
+      ],
+      "ui": [
+        "elder-app",
+        "browser-extension-service"
+      ]
+    },
+    {
+      "key": "anker_medmij_fhir_import",
+      "status": "implemented",
+      "backend": [
+        "fhir_import_jobs",
+        "health_record_imports",
+        "fn-medmij-fhir-import"
+      ],
+      "ui": [
+        "settings",
+        "family-dashboard"
+      ]
+    },
+    {
+      "key": "wacht_external_care_sync",
+      "status": "implemented",
+      "backend": [
+        "external_care_sync_jobs",
+        "fn-care-system-sync"
+      ],
+      "ui": [
+        "wacht"
+      ]
+    },
+    {
+      "key": "kring_grandchild_app",
+      "status": "implemented",
+      "backend": [
+        "grandchild_profiles",
+        "fn-grandchild-message-send"
+      ],
+      "ui": [
+        "apps/grandchild"
+      ]
+    },
+    {
+      "key": "platform_observability_alerts",
+      "status": "implemented",
+      "backend": [
+        "app_events",
+        "slo_alerts",
+        "fn-observability-alert",
+        "fn-health-check"
+      ],
+      "ui": [
+        "admin-console"
+      ]
+    },
+    {
+      "key": "schild_call_reputation",
+      "status": "implemented",
+      "backend": [
+        "phone_reputation_cache",
+        "call_reputation_lookups",
+        "fn-call-reputation"
+      ],
+      "ui": [
+        "elder-app",
+        "shield"
+      ]
+    },
+    {
+      "key": "kompas_wandering_wearables",
+      "status": "implemented",
+      "backend": [
+        "wearable_devices",
+        "wandering_events",
+        "fn-wearable-event"
+      ],
+      "ui": [
+        "elder-app:kompas",
+        "family-dashboard"
+      ]
+    },
+    {
+      "key": "kompas_driving_safety",
+      "status": "implemented",
+      "backend": [
+        "driving_events",
+        "fn-driving-event"
+      ],
+      "ui": [
+        "elder-app:kompas"
+      ]
+    },
+    {
+      "key": "kring_community_event_aggregator",
+      "status": "implemented",
+      "backend": [
+        "community_event_sources",
+        "neighbourhood_events",
+        "fn-community-events-ingest"
+      ],
+      "ui": [
+        "buurt"
+      ]
+    },
+    {
+      "key": "kring_skill_exchange",
+      "status": "implemented",
+      "backend": [
+        "skill_offerings",
+        "skill_exchange_matches",
+        "fn-skill-exchange"
+      ],
+      "ui": [
+        "buurt",
+        "family-dashboard"
+      ]
+    },
+    {
+      "key": "schild_legacy_digital_estate",
+      "status": "implemented",
+      "backend": [
+        "legacy_accounts",
+        "fn-legacy-vault"
+      ],
+      "ui": [
+        "settings"
+      ]
+    },
+    {
+      "key": "kompas_bereavement_support",
+      "status": "implemented",
+      "backend": [
+        "bereavement_events",
+        "bereavement_resources",
+        "fn-bereavement-support"
+      ],
+      "ui": [
+        "stem",
+        "family-dashboard"
+      ]
+    },
+    {
+      "key": "anker_g_standaard_catalog_phase3",
+      "status": "implemented",
+      "backend": [
+        "medication_catalog_sync_jobs",
+        "medication_catalog_entries",
+        "fn-medication-catalog-sync"
+      ],
+      "ui": [
+        "admin-console"
+      ]
+    },
+    {
+      "key": "platform_log_drain_config",
+      "status": "implemented",
+      "backend": [
+        "log_drain_configs",
+        "fn-log-drain-config"
+      ],
+      "ui": [
+        "admin-console"
+      ]
+    },
+    {
+      "key": "platform_slo_measurement",
+      "status": "implemented",
+      "backend": [
+        "perf_metrics",
+        "measure_function_slo",
+        "fn-slo-measure"
+      ],
+      "ui": [
+        "admin-console"
+      ]
+    }
+  ]
+}

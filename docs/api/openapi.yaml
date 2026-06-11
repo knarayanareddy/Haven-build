@@ -1,0 +1,68 @@
+openapi: 3.1.0
+info:
+  title: HAVEN Edge Function API
+  version: 1.2.1
+  description: Production API surface for HAVEN Supabase Edge Functions.
+servers:
+  - url: https://{project}.supabase.co/functions/v1
+    variables:
+      project:
+        default: haven-production
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    BasicSuccess:
+      type: object
+      properties:
+        success: { type: boolean }
+paths:
+  /fn-voice-pipeline:
+    post:
+      summary: Voice STT/intent/action pipeline
+      responses: { '200': { description: Voice interaction processed } }
+  /fn-scam-pipeline:
+    post:
+      summary: Score a call, message, link or web signal for scam risk
+      responses: { '200': { description: Scam score and alert level } }
+  /fn-medication-ocr:
+    post:
+      summary: Process medication photo OCR and create medication/reminders
+      responses: { '200': { description: Medication OCR completed } }
+  /fn-document-analyse:
+    post:
+      summary: Analyse document, reject BSN content and create vault record
+      responses: { '200': { description: Document analysis completed } }
+  /fn-transaction-intercept:
+    post:
+      summary: PSD2 transaction anomaly scoring
+      responses: { '200': { description: Transaction scored } }
+  /fn-location-ingest:
+    post:
+      summary: Ingest fuzzy location and optional 24h precise safe-zone event
+      responses: { '200': { description: Location event created } }
+  /fn-buurt-discover:
+    post:
+      summary: Return anonymous BUURT counts, shared interests and events
+      responses: { '200': { description: Anonymous neighbourhood data } }
+  /fn-buurt-match:
+    post:
+      summary: Manage double opt-in BUURT connection lifecycle
+      responses: { '200': { description: BUURT connection updated } }
+  /fn-emergency-profile:
+    post:
+      summary: Create or read emergency profile token access
+      responses: { '200': { description: Emergency profile operation completed } }
+  /fn-right-to-erasure:
+    post:
+      summary: Process AVG/GDPR right-to-erasure request
+      responses: { '200': { description: Erasure request processed } }
+  /fn-data-export:
+    post:
+      summary: Export elder data for portability
+      responses: { '200': { description: Data export returned } }

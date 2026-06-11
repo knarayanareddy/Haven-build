@@ -1,0 +1,7 @@
+[
+  { "id": "NL_BANK_01", "label": "Bank impersonation", "score": 18, "phrases": ["bank", "bankpas", "pin", "pincode", "betaalpas"] },
+  { "id": "NL_URGENCY_01", "label": "Urgency", "score": 14, "phrases": ["meteen", "spoed", "nu direct", "urgent", "laatste kans"] },
+  { "id": "NL_ISOLATION_01", "label": "Isolation", "score": 24, "phrases": ["vertel niemand", "niet ophangen", "geheim", "niet met familie bespreken"] },
+  { "id": "NL_REMOTE_01", "label": "Remote support", "score": 28, "phrases": ["anydesk", "teamviewer", "remote support", "scherm delen"] },
+  { "id": "NL_PAYMENT_01", "label": "Unusual payment", "score": 28, "phrases": ["cadeaukaart", "gift card", "crypto", "bitcoin", "western union"] }
+]

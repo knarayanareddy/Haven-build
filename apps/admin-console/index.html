@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HAVEN Admin Console</title>
+<style>
+body{margin:0;font-family:Nunito,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#F5F3EE;color:#1A1F2E}main{padding:32px;max-width:1200px;margin:auto}h1{font-size:42px;margin:0 0 8px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px;margin-top:24px}.card{background:white;border-radius:24px;padding:22px;box-shadow:0 14px 40px rgba(44,62,107,.12);border:1px solid #E8EBF2}.status{display:inline-block;border-radius:999px;padding:7px 11px;font-weight:900;font-size:12px}.pending{background:#FDF3E0;color:#8A5A00}.pass{background:#EBF4EE;color:#4A7B5A}.risk{background:#FAE8E8;color:#C94A4A}.row{display:flex;justify-content:space-between;border-bottom:1px solid #E8EBF2;padding:12px 0}.row:last-child{border-bottom:0}.muted{color:#6B7490;font-weight:700}</style>
+</head>
+<body><main>
+<h1>HAVEN Admin Console</h1><p class="muted">Compliance, release readiness, vendor register and incident response operations.</p>
+<section class="grid">
+<div class="card"><h2>DPIA</h2><div class="row"><span>MVP core</span><b class="status pending">DPO review</b></div><div class="row"><span>BUURT</span><b class="status pending">DPO review</b></div></div>
+<div class="card"><h2>Vendor register</h2><div class="row"><span>Supabase</span><b class="status pending">DPA review</b></div><div class="row"><span>OpenAI</span><b class="status pending">SCC required</b></div><div class="row"><span>ElevenLabs</span><b class="status pending">SCC required</b></div></div>
+<div class="card"><h2>Release checks</h2><div class="row"><span>RLS review</span><b class="status pass">wired</b></div><div class="row"><span>Pen test</span><b class="status pending">human gate</b></div><div class="row"><span>Elder usability</span><b class="status pending">human gate</b></div></div>
+<div class="card"><h2>Incident response</h2><div class="row"><span>Breach log</span><b class="status pass">ready</b></div><div class="row"><span>AP 72h workflow</span><b class="status pass">runbook</b></div><div class="row"><span>User notification</span><b class="status pass">templates</b></div></div>
+</section>
+</main></body></html>

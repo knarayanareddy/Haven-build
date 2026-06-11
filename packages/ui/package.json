@@ -1,0 +1,7 @@
+{
+  "name": "@haven/ui",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/tokens.ts",
+  "private": true
+}
