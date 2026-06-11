@@ -25,16 +25,18 @@ ON CONFLICT (id) DO NOTHING;
 
 -- Insert family relationship (consented, active)
 INSERT INTO family_relationships (
-  id, family_user_id, elder_id, relationship_type, elder_consented, is_active,
-  can_view_meds, can_view_messages, can_view_location, can_view_alerts, can_view_stories, can_view_financials
+  id, family_member_id, elder_id, relation_label_nl, elder_consented, is_active,
+  can_view_medications, can_view_messages, can_view_location_events, can_view_safety, can_view_stories, can_view_financials,
+  can_view_voice, can_view_health
 ) VALUES (
   gen_random_uuid(),
   '00000000-0000-0000-0000-000000000002',
   '00000000-0000-0000-0000-000000000001',
-  'child',
+  'dochter',
   true,
   true,
-  true, true, true, true, true, true
+  true, true, true, true, true, true,
+  true, true
 ) ON CONFLICT DO NOTHING;
 
 -- Insert some test voice interactions for the elder

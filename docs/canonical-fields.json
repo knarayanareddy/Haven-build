@@ -1,5 +1,5 @@
 {
-  "version": "1.2.2",
+  "version": "1.2.3",
   "last_updated": "2026-06-11",
   "schema": {
     "profiles": {
@@ -56,20 +56,58 @@
     "family_relationships": {
       "columns": {
         "id": { "type": "uuid", "nullable": false },
-        "family_user_id": { "type": "uuid", "nullable": false },
         "elder_id": { "type": "uuid", "nullable": false },
-        "relationship_type": { "type": "text", "nullable": false },
+        "family_member_id": { "type": "uuid", "nullable": false },
+        "relation_label_nl": { "type": "text", "nullable": true },
+        "is_primary": { "type": "boolean", "nullable": false },
         "elder_consented": { "type": "boolean", "nullable": false },
+        "elder_consented_at": { "type": "timestamptz", "nullable": true },
         "is_active": { "type": "boolean", "nullable": false },
-        "can_view_meds": { "type": "boolean", "nullable": false },
+        "can_view_medications": { "type": "boolean", "nullable": false },
         "can_view_messages": { "type": "boolean", "nullable": false },
-        "can_view_location": { "type": "boolean", "nullable": false },
-        "can_view_alerts": { "type": "boolean", "nullable": false },
+        "can_view_location_events": { "type": "boolean", "nullable": false },
         "can_view_stories": { "type": "boolean", "nullable": false },
         "can_view_financials": { "type": "boolean", "nullable": false },
+        "can_view_voice": { "type": "boolean", "nullable": false },
+        "can_view_health": { "type": "boolean", "nullable": false },
+        "can_view_safety": { "type": "boolean", "nullable": false },
+        "notify_on_scam": { "type": "boolean", "nullable": false },
+        "notify_on_missed_medication": { "type": "boolean", "nullable": false },
+        "notify_on_safe_zone_exit": { "type": "boolean", "nullable": false },
+        "notify_on_weekly_digest": { "type": "boolean", "nullable": false },
         "created_at": { "type": "timestamptz", "nullable": false },
         "updated_at": { "type": "timestamptz", "nullable": false },
         "deleted_at": { "type": "timestamptz", "nullable": true }
+      }
+    },
+    "carer_relationships": {
+      "columns": {
+        "id": { "type": "uuid", "nullable": false },
+        "elder_id": { "type": "uuid", "nullable": false },
+        "carer_member_id": { "type": "uuid", "nullable": false },
+        "organisation_nl": { "type": "text", "nullable": true },
+        "role_label_nl": { "type": "text", "nullable": true },
+        "elder_consented": { "type": "boolean", "nullable": true },
+        "elder_consented_at": { "type": "timestamptz", "nullable": true },
+        "is_active": { "type": "boolean", "nullable": true },
+        "can_view_medications": { "type": "boolean", "nullable": true },
+        "can_view_visit_logs": { "type": "boolean", "nullable": true },
+        "can_create_visit_logs": { "type": "boolean", "nullable": true },
+        "can_file_incidents": { "type": "boolean", "nullable": true },
+        "created_at": { "type": "timestamptz", "nullable": false },
+        "updated_at": { "type": "timestamptz", "nullable": false },
+        "deleted_at": { "type": "timestamptz", "nullable": true }
+      }
+    },
+    "push_tokens": {
+      "columns": {
+        "id": { "type": "uuid", "nullable": false },
+        "profile_id": { "type": "uuid", "nullable": false },
+        "token": { "type": "text", "nullable": false },
+        "platform": { "type": "text", "nullable": false },
+        "active": { "type": "boolean", "nullable": false },
+        "created_at": { "type": "timestamptz", "nullable": false },
+        "updated_at": { "type": "timestamptz", "nullable": false }
       }
     },
     "medications": {

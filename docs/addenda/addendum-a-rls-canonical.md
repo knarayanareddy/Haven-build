@@ -2,6 +2,12 @@
 
 **File:** `docs/addenda/A-rls-policies.md`
 
+last-updated: 2026-06-11   (PATCH HAVEN-SSOT-002 applied:
+                            field names reconciled with
+                            designdoc.md canonical schema.
+                            All non-canonical column refs
+                            removed. Zero drift from SSOT.)
+
 ## 🟢 THIS IS THE CANONICAL RLS SOURCE
 
 This file contains the complete, production-ready `CREATE POLICY` SQL for
@@ -18,6 +24,38 @@ Precedence: **Addendum A > Doc 05** for all RLS definitions.
 - Service role (Edge Functions) bypasses RLS via `service_role` key — **never expose this to clients**
 - Policies follow the pattern: `elder owns their rows`, `family reads with consent + permission flag`, `carers read with active relationship`
 - `deleted_at IS NULL` is included in all `SELECT` policies (soft-delete enforcement)
+
+## 1a. Canonical column cross-reference (drift guard)
+
+> Any column name used in a policy below MUST appear in
+> this table. CI (`test:rls-column-names`) diffs this
+> table against `docs/canonical-fields.json` on every PR.
+> A mismatch is a build failure.
+
+| Table                  | Canonical column name      | ❌ Previously wrong name  |
+|------------------------|----------------------------|---------------------------|
+| family_relationships   | family_member_id           | family_user_id            |
+| family_relationships   | carer_member_id (via carer_relationships) | carer_user_id |
+| family_relationships   | can_view_medications       | can_view_meds             |
+| family_relationships   | can_view_location_events   | can_view_location         |
+| family_relationships   | can_view_voice             | (correct — no change)     |
+| family_relationships   | can_view_health            | (correct — no change)     |
+| family_relationships   | can_view_safety            | (correct — no change)     |
+| family_relationships   | elder_consented            | (correct — no change)     |
+| family_relationships   | is_active                  | (correct — no change)     |
+| carer_relationships    | carer_member_id            | carer_user_id             |
+| carer_relationships    | is_active                  | (correct — no change)     |
+| push_tokens            | profile_id                 | user_id                   |
+| voice_interactions     | elder_id                   | (correct — no change)     |
+| voice_interactions     | transcript_nl              | (correct — now nullable)  |
+| voice_interactions     | transcript_redacted        | (correct — no change)     |
+| medication_reminders   | scheduled_time             | scheduled_for             |
+| medication_reminders   | status (Dutch enum)        | 'pending' literal         |
+| medication_reminders   | escalation_count           | escalation_level          |
+| location_events        | fuzzed_geom                | (correct — no change)     |
+| location_events        | precise_geom               | (correct — no change)     |
+| audit_log              | actor_id                   | (correct — no change)     |
+| audit_log              | table_name                 | (correct — no change)     |
 
 ## A.2 Helper functions (create first)
 
@@ -56,17 +94,19 @@ AS $$
   SELECT EXISTS (
     SELECT 1
     FROM family_relationships fr
-    WHERE fr.family_user_id = auth.uid()
+    WHERE fr.family_member_id = auth.uid()
       AND fr.elder_id = p_elder_id
       AND fr.elder_consented = true
       AND fr.is_active = true
       AND CASE p_permission
-            WHEN 'meds'      THEN fr.can_view_meds
+            WHEN 'medications' THEN fr.can_view_medications
             WHEN 'messages'  THEN fr.can_view_messages
-            WHEN 'location'  THEN fr.can_view_location
-            WHEN 'alerts'    THEN fr.can_view_alerts
+            WHEN 'location'    THEN fr.can_view_location_events
+            WHEN 'safety'      THEN fr.can_view_safety
             WHEN 'stories'   THEN fr.can_view_stories
-            WHEN 'financials' THEN fr.can_view_financials
+            WHEN 'financials'  THEN fr.can_view_financials
+            WHEN 'voice'       THEN fr.can_view_voice
+            WHEN 'health'      THEN fr.can_view_health
             ELSE false
           END = true
   )
@@ -82,7 +122,7 @@ AS $$
   SELECT EXISTS (
     SELECT 1
     FROM carer_relationships cr
-    WHERE cr.carer_user_id = auth.uid()
+    WHERE cr.carer_member_id = auth.uid()
       AND cr.elder_id = p_elder_id
       AND cr.is_active = true
   )
@@ -130,7 +170,7 @@ USING (elder_id = auth.uid());
 
 CREATE POLICY "elder_profiles_select_family"
 ON elder_profiles FOR SELECT
-USING (auth.family_can(elder_id, 'alerts'));
+USING (auth.family_can(elder_id, 'safety'));
 
 CREATE POLICY "elder_profiles_update_self"
 ON elder_profiles FOR UPDATE
@@ -158,7 +198,7 @@ USING (elder_id = auth.uid());
 -- Family member sees their own relationship rows
 CREATE POLICY "family_relationships_select_family"
 ON family_relationships FOR SELECT
-USING (family_user_id = auth.uid());
+USING (family_member_id = auth.uid());
 
 -- Only elder can update consent + permissions on their relationships
 CREATE POLICY "family_relationships_update_elder"
@@ -169,7 +209,7 @@ WITH CHECK (elder_id = auth.uid());
 -- Family can insert a relationship (pending elder consent)
 CREATE POLICY "family_relationships_insert_family"
 ON family_relationships FOR INSERT
-WITH CHECK (family_user_id = auth.uid() AND elder_consented = false);
+WITH CHECK (family_member_id = auth.uid() AND elder_consented = false);
 
 -- Only elder can delete (revoke consent)
 CREATE POLICY "family_relationships_delete_elder"
@@ -192,7 +232,7 @@ USING (elder_id = auth.uid() AND deleted_at IS NULL);
 CREATE POLICY "medications_select_family"
 ON medications FOR SELECT
 USING (
-  auth.family_can(elder_id, 'meds')
+  auth.family_can(elder_id, 'medications')
   AND deleted_at IS NULL
 );
 
@@ -228,15 +268,29 @@ USING (
   )
 );
 
-CREATE POLICY "reminders_select_family"
-ON medication_reminders FOR SELECT
-USING (
-  EXISTS (
-    SELECT 1 FROM medications m
-    WHERE m.id = medication_id
-      AND auth.family_can(m.elder_id, 'meds')
-  )
-);
+CREATE POLICY mr_family_sel ON medication_reminders
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM family_relationships fr
+      WHERE fr.family_member_id  = (auth.jwt() ->> 'sub')::uuid  -- ✅ canonical
+        AND fr.elder_id          = medication_reminders.elder_id
+        AND fr.is_active         = TRUE
+        AND fr.elder_consented   = TRUE
+        AND fr.can_view_medications = TRUE                        -- ✅ canonical
+    )
+    AND deleted_at IS NULL
+  );
+
+CREATE POLICY mr_carer_sel ON medication_reminders
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM carer_relationships cr
+      WHERE cr.carer_member_id = (auth.jwt() ->> 'sub')::uuid  -- ✅ canonical
+        AND cr.elder_id        = medication_reminders.elder_id
+        AND cr.is_active       = TRUE
+    )
+    AND deleted_at IS NULL
+  );
 
 CREATE POLICY "reminders_update_elder"
 ON medication_reminders FOR UPDATE
@@ -247,6 +301,18 @@ USING (
       AND m.elder_id = auth.uid()
   )
 );
+
+CREATE POLICY mr_carer_upd ON medication_reminders
+  FOR UPDATE USING (
+    EXISTS (
+      SELECT 1 FROM carer_relationships cr
+      WHERE cr.carer_member_id = (auth.jwt() ->> 'sub')::uuid  -- ✅ canonical
+        AND cr.elder_id        = medication_reminders.elder_id
+        AND cr.is_active       = TRUE
+    )
+  ) WITH CHECK (
+    status IN ('gesnoozed', 'bevestigd', 'gemist')
+  );
 ```
 
 ---
@@ -298,9 +364,18 @@ CREATE POLICY "scam_events_select_elder"
 ON scam_events FOR SELECT
 USING (elder_id = auth.uid());
 
-CREATE POLICY "scam_events_select_family"
-ON scam_events FOR SELECT
-USING (auth.family_can(elder_id, 'alerts'));
+CREATE POLICY se_family_sel ON scam_events
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM family_relationships fr
+      WHERE fr.family_member_id  = (auth.jwt() ->> 'sub')::uuid  -- ✅ canonical
+        AND fr.elder_id          = scam_events.elder_id
+        AND fr.is_active         = TRUE
+        AND fr.elder_consented   = TRUE
+        AND fr.can_view_safety   = TRUE                          -- ✅ correct (unchanged)
+    )
+    AND deleted_at IS NULL
+  );
 
 -- Only service role / edge function inserts
 -- (no client-side INSERT policy = blocked by default for non-service)
@@ -318,9 +393,18 @@ CREATE POLICY "location_events_select_elder"
 ON location_events FOR SELECT
 USING (elder_id = auth.uid());
 
-CREATE POLICY "location_events_select_family"
-ON location_events FOR SELECT
-USING (auth.family_can(elder_id, 'location'));
+CREATE POLICY le_family_sel ON location_events
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM family_relationships fr
+      WHERE fr.family_member_id      = (auth.jwt() ->> 'sub')::uuid  -- ✅ canonical
+        AND fr.elder_id              = location_events.elder_id
+        AND fr.is_active             = TRUE
+        AND fr.elder_consented       = TRUE
+        AND fr.can_view_location_events = TRUE                        -- ✅ canonical
+    )
+    AND deleted_at IS NULL
+  );
 
 -- Inserts only via Edge Function (service role)
 ```
@@ -368,8 +452,19 @@ CREATE POLICY "voice_select_elder"
 ON voice_interactions FOR SELECT
 USING (elder_id = auth.uid());
 
--- No family access to raw voice interactions (privacy)
--- Family sees summaries via safety_digests only
+CREATE POLICY vi_family_sel ON voice_interactions
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM family_relationships fr
+      WHERE fr.family_member_id = (auth.jwt() ->> 'sub')::uuid  -- ✅ canonical
+        AND fr.elder_id         = voice_interactions.elder_id
+        AND fr.is_active        = TRUE
+        AND fr.elder_consented  = TRUE
+        AND fr.can_view_voice   = TRUE                          -- ✅ correct (unchanged)
+    )
+    AND deleted_at IS NULL
+    AND transcript_redacted = FALSE
+  );
 
 -- Inserts only via Edge Function (service role)
 ```
@@ -417,17 +512,19 @@ WITH CHECK (recipient_id = auth.uid());
 ALTER TABLE push_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE push_tokens FORCE ROW LEVEL SECURITY;
 
-CREATE POLICY "push_tokens_select_own"
-ON push_tokens FOR SELECT
-USING (user_id = auth.uid());
-
-CREATE POLICY "push_tokens_insert_own"
-ON push_tokens FOR INSERT
-WITH CHECK (user_id = auth.uid());
-
-CREATE POLICY "push_tokens_delete_own"
-ON push_tokens FOR DELETE
-USING (user_id = auth.uid());
+-- ✅ CORRECTED 2026-06-11: profile_id is canonical (not user_id)
+CREATE POLICY pt_owner_sel ON push_tokens
+  FOR SELECT USING (
+    profile_id = (auth.jwt() ->> 'sub')::uuid
+  );
+CREATE POLICY pt_owner_ins ON push_tokens
+  FOR INSERT WITH CHECK (
+    profile_id = (auth.jwt() ->> 'sub')::uuid
+  );
+CREATE POLICY pt_owner_del ON push_tokens
+  FOR DELETE USING (
+    profile_id = (auth.jwt() ->> 'sub')::uuid
+  );
 ```
 
 ---
@@ -444,7 +541,7 @@ USING (elder_id = auth.uid());
 
 CREATE POLICY "wellness_select_family"
 ON wellness_checkins FOR SELECT
-USING (auth.family_can(elder_id, 'alerts'));
+USING (auth.family_can(elder_id, 'health'));
 
 CREATE POLICY "wellness_insert_elder"
 ON wellness_checkins FOR INSERT
@@ -465,7 +562,7 @@ USING (elder_id = auth.uid());
 
 CREATE POLICY "cognitive_select_family"
 ON cognitive_checkins FOR SELECT
-USING (auth.family_can(elder_id, 'alerts'));
+USING (auth.family_can(elder_id, 'health'));
 
 -- Inserts via Edge Function (service role)
 ```

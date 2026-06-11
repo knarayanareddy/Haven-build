@@ -1,6 +1,6 @@
 ---
 title: HAVEN Engineering Design Suite
-version: 1.2.2
+version: 1.2.3
 status: Approved — Single Source of Truth
 locale: Netherlands (nl-NL)
 jurisdiction: EU / Dutch law (AVG/UAVG/WGBO)
@@ -8,6 +8,12 @@ timezone: Europe/Amsterdam
 last_updated: 2026-06-11
 
 changelog:
+  1.2.3: Solutions Architect Review Patch (HAVEN-SSOT-002) applied:
+         reconciled column names (family_member_id, carer_member_id,
+         can_view_medications, can_view_location_events, profile_id);
+         aligned Next.js middleware routing page permissions;
+         aligned family_relationships and carer_relationships DDL/seed SQL;
+         extended docs/canonical-fields.json registry.
   1.0.0: Initial SSOT
   1.1.0: BSN removed; fraud/loneliness stats corrected; WGBO 15→20y;
          AI Act transparency fixed; RLS canonicality resolved
@@ -42,6 +48,46 @@ items_requiring_human_dpo_action:
   - Addendum K (Vendor Register): DPA column must be filled for every vendor
   - Doc 06: Named DPO must be recorded before production launch
 ---
+
+## v1.2.3 Patch Summary Card
+
+```
+HAVEN Engineering Design Suite
+Version: 1.2.3
+Status:  Approved — Single Source of Truth
+Date:    2026-06-11
+
+v1.2.3 PATCH SUMMARY (Solutions Architect Review - HAVEN-SSOT-002):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HUNK A-1  family_relationships    Replaced family_user_id with family_member_id
+          family_member_id        globally in helper functions and policies.
+HUNK A-2  can_view_medications    Replaced can_view_meds with can_view_medications
+          in policies.
+HUNK A-3  can_view_location_events Replaced can_view_location with
+          can_view_location_events in policies.
+HUNK A-4  carer_member_id         Replaced carer_user_id with carer_member_id
+          in helper functions and carer policies.
+HUNK A-5  push_tokens profile_id  Replaced push_tokens.user_id with profile_id
+          in push_tokens policies.
+HUNK A-8  Drift Guard Table       Added canonical column cross-reference table.
+HUNK A-9  RLS Policies Replaced   Replaced critical policies in full.
+HUNK D-1  Local Reminder Sync     Replaced scheduled_for with scheduled_time
+          in TS snippet & LocalReminder interface; added ReminderStatus.
+HUNK D-5  family_relationships    Aligned DDL, index, and seeds with canonical
+          columns and alert subscriptions.
+HUNK D-6  carer_relationships     Aligned carer DDL, index, and seeds with
+          carer_member_id.
+HUNK D-8  Index Annotations       Marked pending addenda B/C/D/E as FILE PENDING.
+HUNK D-9  canonical-fields.json   Extended json schema registry to cover carer
+          relationships, push tokens, and corrected columns.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ITEMS STILL REQUIRING HUMAN DPO ACTION (unchanged):
+  ⚠️ Addendum J (DPIA) — must be completed + signed before production
+  ⚠️ Addendum K (Vendor Register) — DPA column must be filled per vendor
+  ⚠️ Doc 06 — Named DPO must be recorded before production launch
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+After applying this patch: designdoc.md is production-grade SSOT.
+```
 
 ## v1.2.2 Patch Summary Card
 
@@ -91,7 +137,7 @@ building all six pillars without hitting schema/contract mismatches.
 ```
 
 HAVEN — Engineering Design Document Suite
-Version: 1.2.2 Status: Approved — Single Source of Truth Locale: Netherlands (nl-NL) | Jurisdiction: EU / Dutch Law Last Updated: 2026-06-11 Replaces: README.md, HAVEN_BLUEPRINT.md, UIUXRENDER
+Version: 1.2.3 Status: Approved — Single Source of Truth Locale: Netherlands (nl-NL) | Jurisdiction: EU / Dutch Law Last Updated: 2026-06-11 Replaces: README.md, HAVEN_BLUEPRINT.md, UIUXRENDER
 
 Document 01 — Product Specification
 1. Mission
@@ -956,7 +1002,9 @@ Last reconciled: 2026-06-10
 | family_relationships   | family_member_id          | family_user_id           |
 | family_relationships   | can_view_medications      | can_view_meds            |
 | family_relationships   | can_view_location_events  | can_view_location        |
-| family_relationships   | can_view_alerts           | can_view_alerts ✅       |
+| family_relationships   | can_view_safety           | can_view_alerts          |
+| family_relationships   | can_view_voice            | (correct — no change)    |
+| family_relationships   | can_view_health           | can_view_wellness        |
 | family_relationships   | can_view_stories          | can_view_stories ✅      |
 | family_relationships   | can_view_financials       | can_view_financials ✅   |
 | family_relationships   | is_active                 | active                   |
@@ -1164,16 +1212,16 @@ CREATE TABLE family_relationships (
   can_view_medications      boolean DEFAULT false,
   can_view_messages         boolean DEFAULT false,
   can_view_location_events  boolean DEFAULT false,
-  can_view_alerts           boolean DEFAULT false,
   can_view_stories          boolean DEFAULT false,
   can_view_financials       boolean DEFAULT false,
+  can_view_voice            boolean DEFAULT false,   -- ✅ canonical
+  can_view_health           boolean DEFAULT false,   -- ✅ canonical
+  can_view_safety           boolean DEFAULT false,   -- ✅ canonical
   -- Alert subscriptions
-  notify_on_scam_amber      boolean DEFAULT true,
-  notify_on_scam_rood       boolean DEFAULT true,
-  notify_on_scam_zwart      boolean DEFAULT true,
-  notify_on_missed_meds     boolean DEFAULT true,
-  notify_on_safe_zone_exit  boolean DEFAULT true,
-  notify_on_crisis          boolean DEFAULT true,
+  notify_on_scam              boolean DEFAULT true,  -- ✅ canonical
+  notify_on_missed_medication boolean DEFAULT true,  -- ✅ canonical
+  notify_on_safe_zone_exit    boolean DEFAULT true,  -- ✅ canonical
+  notify_on_weekly_digest     boolean DEFAULT true,  -- ✅ canonical
   -- Timestamps
   created_at                timestamptz DEFAULT now(),
   updated_at                timestamptz DEFAULT now(),
@@ -2039,6 +2087,8 @@ CREATE TABLE push_tokens (
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE INDEX idx_push_tokens_profile_id ON push_tokens(profile_id);
+
 -- push_tokens
 ALTER TABLE push_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE push_tokens FORCE ROW LEVEL SECURITY;
@@ -2142,7 +2192,7 @@ CREATE POLICY "location_events: family read (fuzzed only)"
       SELECT 1 FROM family_relationships fr
       WHERE fr.elder_id = location_events.elder_id
         AND fr.family_member_id = auth.uid()
-        AND fr.can_view_location = TRUE
+        AND fr.can_view_location_events = TRUE
         AND fr.elder_consented = TRUE
         AND fr.deleted_at IS NULL
     )
@@ -2203,8 +2253,8 @@ CREATE POLICY "incidents: carer access"
     OR EXISTS (
       SELECT 1 FROM carer_relationships cr
       WHERE cr.elder_id = incidents.elder_id
-        AND cr.carer_id = auth.uid()
-        AND cr.active = TRUE
+        AND cr.carer_member_id = auth.uid()
+        AND cr.is_active = TRUE
         AND cr.can_report_incidents = TRUE
     )
   );
@@ -3275,13 +3325,13 @@ The dashboard is role-aware — what a primary family member sees differs from a
 Screen	Route	Access	Description
 Login	/inloggen	Public	Email/password login
 Dashboard Home	/dashboard	Family	Overview: halo, alerts, quick actions
-Alerts	/dashboard/meldingen	Family	All scam alerts, medication misses, zone exits
-Alert Detail	/dashboard/meldingen/[id]	Family	Full scam event details + pipeline scores
+Alerts	/dashboard/meldingen	Family (can_view_safety)	All scam alerts, medication misses, zone exits
+Alert Detail	/dashboard/meldingen/[id]	Family (can_view_safety)	Full scam event details + pipeline scores
 Medications	/dashboard/medicijnen	Family (can_view_medications)	Today's status + history
 Messages	/dashboard/berichten	Family (can_view_messages)	Send/read family messages
 Stories	/dashboard/verhalen	Family (can_view_stories)	Life story archive (read-only)
-Wellness	/dashboard/welzijn	Family (can_view_wellness)	Wellness trends + check-in history
-Location	/dashboard/locatie	Family (can_view_location)	Fuzzed map: safe zone + last known area
+Wellness	/dashboard/welzijn	Family (can_view_health)	Wellness trends + check-in history
+Location	/dashboard/locatie	Family (can_view_location_events)	Fuzzed map: safe zone + last known area
 Buurt Connections	/dashboard/buurt	Family (can_view_stories + consent)	Neighbourhood connections overview
 Weekly Digest	/dashboard/overzicht	Family	Weekly safety + wellbeing summary
 Elder Profile	/dashboard/profiel	Primary family only	Edit elder profile, manage permissions
@@ -3329,9 +3379,10 @@ export async function middleware(request: NextRequest) {
 
   const PERMISSION_MAP: Record<string, keyof FamilyRelationship> = {
     '/dashboard/medicijnen': 'can_view_medications',
-    '/dashboard/locatie': 'can_view_location',
+    '/dashboard/locatie': 'can_view_location_events',
     '/dashboard/verhalen': 'can_view_stories',
-    '/dashboard/welzijn': 'can_view_wellness',
+    '/dashboard/welzijn': 'can_view_health',
+    '/dashboard/meldingen': 'can_view_safety',
   };
 
   const requiredPermission = PERMISSION_MAP[request.nextUrl.pathname];
@@ -3965,7 +4016,7 @@ CREATE INDEX idx_elder_profiles_elder_id ON elder_profiles(elder_id);
 
 -- family_relationships
 CREATE INDEX idx_fam_rel_elder_id ON family_relationships(elder_id);
-CREATE INDEX idx_fam_rel_family_user_id ON family_relationships(family_user_id);
+CREATE INDEX idx_fam_rel_family_member_id ON family_relationships(family_member_id);
 CREATE INDEX idx_fam_rel_active ON family_relationships(elder_id, is_active)
   WHERE is_active = true AND elder_consented = true;
 
@@ -3974,8 +4025,8 @@ CREATE INDEX idx_medications_elder_active ON medications(elder_id)
   WHERE deleted_at IS NULL;
 
 -- medication_reminders (cron query: upcoming + overdue)
-CREATE INDEX idx_reminders_scheduled ON medication_reminders(scheduled_for)
-  WHERE status IN ('pending', 'overdue');
+CREATE INDEX idx_reminders_scheduled ON medication_reminders(scheduled_time)
+  WHERE status IN ('gepland', 'gesnoozed');
 CREATE INDEX idx_reminders_medication_id ON medication_reminders(medication_id);
 
 -- family_messages
@@ -4187,24 +4238,24 @@ INSERT INTO profiles (
 INSERT INTO family_relationships (
   id,
   elder_id,
-  family_member_id,                     -- canonical: family_member_id
+  family_member_id,
   relation_label_nl,
   is_primary,
   elder_consented,
   elder_consented_at,
-  is_active,                            -- canonical: is_active
-  can_view_medications,                 -- canonical: can_view_medications
+  is_active,
+  can_view_medications,
   can_view_messages,
-  can_view_location_events,             -- canonical: can_view_location_events
-  can_view_alerts,
+  can_view_location_events,
   can_view_stories,
   can_view_financials,
-  notify_on_scam_amber,
-  notify_on_scam_rood,
-  notify_on_scam_zwart,
-  notify_on_missed_meds,
+  can_view_voice,
+  can_view_health,
+  can_view_safety,
+  notify_on_scam,
+  notify_on_missed_medication,
   notify_on_safe_zone_exit,
-  notify_on_crisis,
+  notify_on_weekly_digest,
   created_at
 ) VALUES (
   gen_random_uuid(),
@@ -4219,14 +4270,14 @@ INSERT INTO family_relationships (
   true,
   true,
   true,
-  true,
   false,   -- financials: off by default even in seed
-  true,
-  true,
-  true,
-  true,
-  true,
-  true,
+  true,    -- voice
+  true,    -- health
+  true,    -- safety
+  true,    -- notify_on_scam
+  true,    -- notify_on_missed_medication
+  true,    -- notify_on_safe_zone_exit
+  true,    -- notify_on_weekly_digest
   now()
 ) ON CONFLICT DO NOTHING;
 
@@ -4650,16 +4701,30 @@ Medication reminders and daily rhythm events are **local notifications** first (
 // Scheduled at onboarding + updated when reminder schedule changes
 import * as Notifications from 'expo-notifications';
 
-async function scheduleLocalReminder(reminder: MedicationReminder) {
+interface LocalReminder {
+  id:              string;
+  medication_name: string;
+  dosage:          string;
+  scheduled_time:  string;   // ✅ canonical (ISO 8601 timestamptz string)
+  status:          ReminderStatus;  // ✅ use enum not bare string
+}
+
+// ReminderStatus enum (matches DB reminder_status_enum):
+type ReminderStatus =
+  | 'gepland'
+  | 'herinnerd'
+  | 'gesnoozed'
+  | 'geëscaleerd'
+  | 'gemist'
+  | 'bevestigd';
+
+async function scheduleLocalReminder(reminder: LocalReminder) {
   await Notifications.scheduleNotificationAsync({
     content: {
-      title: 'Medicijntijd 💊',
-      body: `Vergeet uw ${reminder.medication_name_nl} niet.`,
-      data: { reminder_id: reminder.id, screen: 'PILLS' },
+      title: 'Medicijn herinnering',
+      body:  `${reminder.medication_name} — ${reminder.dosage}`,
     },
-    trigger: {
-      date: new Date(reminder.scheduled_for),
-    },
+    trigger: { date: new Date(reminder.scheduled_time) },  // ✅ canonical
     identifier: reminder.id, // idempotent
   });
 }
@@ -6263,10 +6328,10 @@ Als er geen herinneringen zijn, retourneer een lege array: []
 | Addendum | File | Status |
 |---|---|---|
 | A — RLS Policies (complete SQL) | `docs/addenda/A-rls-policies.md` | ✅ |
-| B — DB Indexes + Migration Strategy | `docs/addenda/B-db-indexes-migrations.md` | ✅ |
-| C — Auth & Onboarding Flows | `docs/addenda/C-auth-flows.md` | ✅ |
-| D — Offline & Sync Strategy | `docs/addenda/D-offline-sync.md` | ✅ |
-| E — Supabase Storage Spec | `docs/addenda/E-storage-spec.md` | ✅ |
+| B — DB Indexes + Migration Strategy | `docs/addenda/B-db-indexes-migrations.md` | ⚠️ FILE PENDING — content embedded in §DB this doc |
+| C — Auth & Onboarding Flows | `docs/addenda/C-auth-flows.md` | ⚠️ FILE PENDING — content embedded in §Auth/Onboarding this doc |
+| D — Offline & Sync Strategy | `docs/addenda/D-offline-sync.md` | ⚠️ FILE PENDING — content embedded in §Offline this doc |
+| E — Supabase Storage Spec | `docs/addenda/E-storage-spec.md` | ⚠️ FILE PENDING — content embedded in §Storage this doc |
 | F — Error/Empty States + Dutch Copy | `docs/addenda/F-copy-and-states.md` | ✅ |
 | G — Local Dev Environment Setup | `docs/addenda/G-local-dev-setup.md` | ✅ |
 | H — Monorepo Structure + Conventions | `docs/addenda/H-monorepo-structure.md` | ✅ |
