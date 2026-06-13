@@ -4,7 +4,8 @@
 create or replace function public.export_elder_data(p_elder_id uuid)
 returns jsonb
 language plpgsql
-security invoker
+security definer
+set search_path = public
 as $$
 begin
   if p_elder_id <> auth.uid() and auth.role() <> 'service_role' then

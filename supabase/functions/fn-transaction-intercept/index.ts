@@ -14,10 +14,15 @@ Deno.serve(async (req) => {
       requireInternalAccess(req);
     } else {
       const secret = Deno.env.get('PSD2_WEBHOOK_SECRET');
-      if (!secret) throw new Error('PSD2_WEBHOOK_SECRET must be configured for transaction webhooks');
-      const valid = await verifyHmacSha256(raw, req.headers.get('x-haven-signature') ?? req.headers.get('x-tink-signature'), secret);
-      await admin().from('webhook_receipts').insert({ integration_key: 'psd2', signature_valid: valid, body_hash: await sha256(raw), event_type: 'transaction' });
-      if (!valid) throw new Error('Invalid PSD2 webhook signature');
+      const isLocal = Deno.env.get('HAVEN_ENV') === 'local' || Deno.env.get('ENVIRONMENT') === 'local';
+      if (!secret && !isLocal) {
+        throw new Error('PSD2_WEBHOOK_SECRET must be configured for non-local transaction webhooks');
+      }
+      if (secret) {
+        const valid = await verifyHmacSha256(raw, req.headers.get('x-haven-signature') ?? req.headers.get('x-tink-signature'), secret);
+        await admin().from('webhook_receipts').insert({ integration_key: 'psd2', signature_valid: valid, body_hash: await sha256(raw), event_type: 'transaction' });
+        if (!valid) throw new Error('Invalid PSD2 webhook signature');
+      }
     }
     const body = JSON.parse(raw);
     requireFields(body, ["elder_id", "account_id_masked", "amount_cents", "transaction_date"]);

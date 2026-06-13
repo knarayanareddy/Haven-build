@@ -10,6 +10,9 @@ HAVEN helps older adults with safety, medication, family connection and daily su
 - Safe-zone location events. Family sees approximate location only.
 - Wellbeing check-ins, cognitive check-ins and emergency profile data.
 
+## Browser Shield (SCHILD) data processing
+When you use the SCHILD browser protection feature, the visible text content of web pages you visit (up to 4,000 characters) is transmitted to HAVEN servers for fraud and scam analysis if a suspected fraud pattern is detected. This content is analyzed in-memory and immediately discarded; it is not stored or retained. You can disable SCHILD at any time in extension settings.
+
 ## BSN
 HAVEN does not collect, store or process BSN. Do not upload documents showing a BSN. Redact the BSN before uploading a document.
 

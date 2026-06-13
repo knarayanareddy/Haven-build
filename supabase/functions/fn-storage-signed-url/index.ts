@@ -4,15 +4,28 @@ import { validateBody } from "../_shared/validation.ts";
 
 const allowedBuckets = new Set(["voice-notes", "life-story-audio", "life-story-photos", "profile-photos", "document-vault", "ocr-inbox"]);
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function firstPathSegment(path: string) {
-  return path.split('/').filter(Boolean)[0] ?? '';
+  // Prevent directory traversal or malformed paths
+  if (path.includes('..') || path.includes('\\')) {
+    throw new Error('Directory traversal or malformed characters detected');
+  }
+  const segment = path.split('/').filter(Boolean)[0] ?? '';
+  if (!UUID_REGEX.test(segment)) {
+    throw new Error('First path segment must be a valid UUID corresponding to the owner');
+  }
+  return segment;
 }
 
 async function assertPathAccess(userId: string, bucket: string, path: string, operation: string) {
   const ownerId = firstPathSegment(path);
-  if (!ownerId) throw new Error('Storage path must include an owner folder');
   if (ownerId === userId) return ownerId;
+  
+  // Non-owners can never upload to someone else's directory
   if (operation === 'upload') throw new Error('Uploads are only allowed to the caller-owned folder');
+  
+  // Handle granular delegate read checks for each bucket type
   if (bucket === 'voice-notes') {
     await assertElderOrFamilyCan(userId, ownerId, 'messages');
     return ownerId;
@@ -21,6 +34,20 @@ async function assertPathAccess(userId: string, bucket: string, path: string, op
     await assertElderOrFamilyCan(userId, ownerId, 'stories');
     return ownerId;
   }
+  if (bucket === 'document-vault') {
+    // Document vault is elder-only. Delegates are blocked.
+    throw new Error('Document vault access is restricted to the elder only');
+  }
+  if (bucket === 'ocr-inbox') {
+    // OCR setup directory is elder-only. Delegates are blocked.
+    throw new Error('OCR inbox access is restricted to the elder only');
+  }
+  if (bucket === 'profile-photos') {
+    // Profile photos read can be open or limited to active relations, let's allow elder self check or active contacts
+    await assertElderOrFamilyCan(userId, ownerId, 'messages');
+    return ownerId;
+  }
+  
   throw new Error('Caller is not allowed to sign this storage path');
 }
 
