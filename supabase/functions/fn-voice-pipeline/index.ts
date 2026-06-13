@@ -58,8 +58,7 @@ Deno.serve(async (req) => {
             ? (locale === "nl-NL" ? "Goed gedaan. Ik heb het genoteerd." : "Well done. I recorded it.")
             : await companionReply({ locale, transcript, memories, screenId: body.screen_id });
 
-        let embedding = null;
-        try { embedding = await generateEmbedding(transcript); } catch (_) { embedding = null; }
+        const embedding = await generateEmbedding(transcript).catch(() => null);
 
         const { data: interaction, error } = await db.from("voice_interactions").insert({
           elder_id: body.elder_id,
@@ -98,8 +97,7 @@ Deno.serve(async (req) => {
           await Promise.all((family ?? []).map((f) => dispatchNotification({ recipient_id: f.family_member_id, elder_id: body.elder_id, notification_type: "crisis_gedetecteerd", title_nl: "HAVEN hulpvraag", title_en: "HAVEN help request", body_nl: "Er is een mogelijke hulpvraag uitgesproken. Bel rustig meteen even.", body_en: "A possible help request was spoken. Please calmly call now.", data: { interaction_id: interaction.id } })));
         }
 
-        let audioUrl = null;
-        try { audioUrl = await synthesizeSpeechToStorage({ elderId: body.elder_id, interactionId: interaction.id, text: responseText, locale }); } catch (_) { audioUrl = null; }
+        const audioUrl = await synthesizeSpeechToStorage({ elderId: body.elder_id, interactionId: interaction.id, text: responseText, locale }).catch(() => null);
         if (audioUrl) {
           const { error: updateError } = await db.from("voice_interactions").update({ response_audio_path: `tts-cache/${body.elder_id}/${interaction.id}.mp3` }).eq("id", interaction.id);
           if (updateError) throw updateError;
