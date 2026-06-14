@@ -12,7 +12,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
       - uses: supabase/setup-cli@v1
         with:
           version: latest
@@ -36,7 +35,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
       - run: corepack enable
       - run: corepack pnpm install --frozen-lockfile
       - id: secrets_gate
