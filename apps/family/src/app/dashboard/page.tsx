@@ -7,6 +7,7 @@ import { AlertList } from '../../../components/AlertList';
 import { DailyStatusPill } from '../../../components/DailyStatusPill';
 import { TrustSignalPanel } from '../../../components/TrustSignalPanel';
 import { DEMO_DASHBOARD } from '../../../services/dashboard-fixtures';
+import { CallButton } from '../../../components/CallButton';
 
 export default function DashboardPage() {
   const data = DEMO_DASHBOARD;
@@ -18,6 +19,19 @@ export default function DashboardPage() {
       </header>
 
       <DailyStatusPill status={data.dailyStatus} />
+
+      {/* ─── Phase 2.1: Call Grandma button ─── */}
+      <DashboardCard title="Bellen" subtitle="Eén tik om een videogesprek te starten met {data.elderName}" tone="safe">
+        <CallButton
+          elderId={data.elderId}
+          elderName={data.elderName}
+          supabaseUrl="https://example.supabase.co"
+          accessToken="demo-token"
+        />
+        <p style={{ color: '#6B7490', fontWeight: 700, fontSize: 14, marginTop: 12 }}>
+          Dit is een demo-knop. In productie verbindt deze met de echte HAVEN backend.
+        </p>
+      </DashboardCard>
 
       <DashboardCard title="Halo" subtitle="Drie dimensies, één rustig beeld">
         <HaloStatus axes={data.haloAxes} />

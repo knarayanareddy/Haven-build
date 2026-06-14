@@ -146,5 +146,15 @@ verify_jwt = true
 verify_jwt = false # COMPENSATING CONTROL: Z-Index/G-Standaard legal catalog sync
 [functions.fn-log-drain-config]
 verify_jwt = false # COMPENSATING CONTROL: admin only, matches administrative token
+
+[functions.fn-photo-checkin]
+verify_jwt = true
+[functions.fn-shift-summary]
+verify_jwt = true
+[functions.fn-whatsapp-webhook]
+verify_jwt = false # COMPENSATING CONTROL: Meta webhook HMAC verification via x-hub-signature-256
+[functions.fn-bank-connect]
+verify_jwt = false # COMPENSATING CONTROL: GET handler for Tink OAuth redirect; POST handler verifies JWT internally
+
 [functions.fn-slo-measure]
 verify_jwt = false # COMPENSATING CONTROL: internal logging measuring

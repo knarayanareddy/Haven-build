@@ -23,6 +23,26 @@ button.ghost{background:#FFFFFF;color:#2C3E6B;border:2px solid #2C3E6B}
 .muted{color:#6B7490;font-weight:700}
 .pending-list{list-style:none;padding:0;margin:0}
 .offline-pill{background:#FDF3E0;color:#A56A00;padding:6px 12px;border-radius:999px;font-weight:900;display:inline-block}
+
+@media (max-width: 600px) {
+  body { font-size: 16px; }
+  main { padding: 16px; }
+  h1 { font-size: 26px; }
+  h2 { font-size: 20px; margin: 18px 0 10px; }
+  .grid { grid-template-columns: 1fr; gap: 12px; }
+  .card { padding: 16px; border-radius: 18px; }
+  input[type=number], select, textarea { font-size: 16px; padding: 12px 10px; }
+  button, button.ghost { width: 100%; font-size: 18px; min-height: 56px; padding: 16px; margin-bottom: 8px; }
+  label { font-size: 16px; margin: 14px 0 6px; }
+  .row { padding: 10px 0; font-size: 16px; }
+  .offline-pill { font-size: 14px; padding: 8px 14px; display: block; text-align: center; margin-bottom: 12px; }
+}
+@media (max-width: 380px) {
+  h1 { font-size: 22px; }
+  .card { padding: 12px; }
+  button, button.ghost { font-size: 16px; }
+}
+
 </style>
 </head>
 <body>

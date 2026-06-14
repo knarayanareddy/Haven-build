@@ -237,7 +237,45 @@ export async function dispatchNotification(params: {
         body: JSON.stringify(pushPayload),
       });
       await db.from("notifications").update({ send_error: null }).eq("id", note.id);
-    } catch (_) { /* swallow */ }
+    } catch (_) { /* swallow — already recorded send_error above */ }
   }
+
+  // ─── Phase 1.5: WhatsApp fallback for P0/P1 alerts ───
+  // If push notification failed and this is a critical alert, try WhatsApp.
+  const criticalTypes = new Set([
+    "crisis", "scam_rood", "scam_zwart", "scam_amber",
+    "crisis_gedetecteerd", "welzijnscheck", "veilige_zone_verlaten",
+    "photo_checkin_requested", "photo_checkin_fulfilled"
+  ]);
+  if (criticalTypes.has(params.notification_type)) {
+    try {
+      const { data: prefs } = await db
+        .from("notification_preferences")
+        .select("whatsapp_enabled, whatsapp_phone")
+        .eq("profile_id", params.recipient_id)
+        .maybeSingle();
+      if (prefs?.whatsapp_enabled && prefs?.whatsapp_phone) {
+        // Dynamic import to avoid bundling WhatsApp for all FNs
+        const { sendWhatsAppMessage } = await import("./whatsapp.ts");
+        const elderName = params.data?.elder_name
+          ? String(params.data.elder_name)
+          : undefined;
+        const result = await sendWhatsAppMessage(
+          prefs.whatsapp_phone,
+          params.body_nl,
+          elderName,
+        );
+        if (result.success) {
+          await db.from("notifications").update({
+            whatsapp_sent: true,
+            whatsapp_sent_at: new Date().toISOString(),
+          }).eq("id", note.id);
+        }
+      }
+    } catch (_) {
+      // WhatsApp fallback is best-effort. Never throw from it.
+    }
+  }
+
   return note;
 }

@@ -6,6 +6,9 @@ import { colors, touch } from '@haven/ui/src/tokens';
 import { detectCrisisPhrase } from '../services/crisis';
 import { shouldSuppressForQuietHours } from '../services/notifications';
 import type { Locale } from '@haven/contracts/src/haven';
+import { FloatingVoiceButton } from '../components/FloatingVoiceButton';
+import { HelpOverlay } from '../components/HelpOverlay';
+import * as Haptics from 'expo-haptics';
 
 export interface ElderProfile {
   id: string;
@@ -275,6 +278,7 @@ export function screenTitleFor(id: ScreenId, locale: Locale) {
     STEM: 'voice',
     WACHT: 'care',
     SETTINGS: 'settings',
+    MORE: 'today',
   };
   return t(locale, map[id]);
 }
@@ -672,6 +676,10 @@ export interface ScreenRendererProps {
   context: ScreenContext;
 }
 
+function hapticTrigger() {
+  try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle?.Medium ?? 'medium'); } catch (_) {}
+}
+
 export function ScreenRenderer({ schema, context }: ScreenRendererProps) {
   const titleEn = schema.titleEn;
   const titleNl = schema.titleNl;
@@ -686,13 +694,50 @@ export function ScreenRenderer({ schema, context }: ScreenRendererProps) {
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 160, gap: 12 }}>
         {renderFor(schema.screenId, context)}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16 }}>
-          {productionScreens.map((screen) => (
+          {/* ─── Phase 1.2: Simplified home — only primary screens + MORE ─── */}
+          {productionScreens
+            .filter((screen) => screen.isPrimary && screen.screenId !== 'MORE')
+            .map((screen) => (
             <TouchableOpacity key={screen.screenId} accessibilityRole="button" accessibilityLabel={`Open ${locale === 'nl-NL' ? screen.titleNl : screen.titleEn}`} onPress={() => context.onPrimaryAction(`NAV_${screen.screenId}`)} style={{ minHeight: 56, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, backgroundColor: schema.screenId === screen.screenId ? colors.slate : colors.paper, borderWidth: 1, borderColor: colors.mist }}>
               <Text style={{ color: schema.screenId === screen.screenId ? 'white' : colors.slate, fontSize: 16, fontWeight: '900' }}>{locale === 'nl-NL' ? screen.titleNl : screen.titleEn}</Text>
             </TouchableOpacity>
           ))}
+          {/* MORE button — shows secondary screens */}
+          <TouchableOpacity
+            key="MORE"
+            accessibilityRole="button"
+            accessibilityLabel={locale === 'nl-NL' ? 'Meer' : 'More'}
+            onPress={() => context.onPrimaryAction('NAV_MORE')}
+            style={{
+              minHeight: 56, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16,
+              backgroundColor: schema.screenId === 'MORE' ? colors.slate : colors.paper,
+              borderWidth: 1, borderColor: colors.mist,
+              flexDirection: 'row', alignItems: 'center', gap: 6,
+            }}
+          >
+            <Text style={{ fontSize: 18 }}>⋯</Text>
+            <Text style={{ color: schema.screenId === 'MORE' ? 'white' : colors.slate, fontSize: 16, fontWeight: '900' }}>
+              {locale === 'nl-NL' ? 'Meer' : 'More'}
+            </Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
+      {/* ─── Phase 1.1: Floating voice button (always-visible mic) ─── */}
+      {schema.showFloatingVoice ? (
+        <FloatingVoiceButton
+          locale={locale}
+          screenId={schema.screenId}
+          voiceFallback={locale === 'nl-NL' ? schema.voiceFallbackNl : schema.voiceFallbackEn}
+          hapticTrigger={hapticTrigger}
+        />
+      ) : null}
+      {/* ─── Phase 1.3: "What do I do?" help button ─── */}
+      <HelpOverlay
+        locale={locale}
+        screenTitle={locale === 'nl-NL' ? titleNl : titleEn}
+        helpText={locale === 'nl-NL' ? schema.helpTextNl : schema.helpTextEn}
+        voiceFallback={locale === 'nl-NL' ? schema.voiceFallbackNl : schema.voiceFallbackEn}
+      />
       {schema.emergencyButton ? (
         <TouchableOpacity accessibilityRole="button" accessibilityLabel={t(locale, 'emergency')} onPress={() => context.onPrimaryAction('EMERGENCY')} style={{ position: 'absolute', right: 18, bottom: 90, minWidth: 72, minHeight: 72, borderRadius: 36, backgroundColor: colors.rose, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } }}>
           <Text style={{ color: 'white', fontSize: 28, fontWeight: '900' }}>🆘</Text>
@@ -760,6 +805,31 @@ function renderIncomingCall(ctx: ScreenContext) {
   );
 }
 
+function renderMore(ctx: ScreenContext) {
+  const { locale } = ctx;
+  const secondary = productionScreens.filter((s) => !s.isPrimary && s.screenId !== 'ONBOARDING' && s.screenId !== 'INCOMING_CALL');
+  return (
+    <View style={{ gap: 14 }}>
+      <Text accessibilityRole="header" style={{ fontSize: 30, fontWeight: '900', color: colors.ink }}>{locale === 'nl-NL' ? 'Meer' : 'More'}</Text>
+      <Text style={{ fontSize: 16, color: colors.pewter, fontWeight: '700' }}>{locale === 'nl-NL' ? 'Aanvullende functies van HAVEN' : 'Additional HAVEN features'}</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+        {secondary.map((screen) => (
+          <TouchableOpacity
+            key={screen.screenId}
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${locale === 'nl-NL' ? screen.titleNl : screen.titleEn}`}
+            onPress={() => ctx.onPrimaryAction(`NAV_${screen.screenId}`)}
+            style={{ minHeight: 72, minWidth: 140, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 20, backgroundColor: colors.paper, borderWidth: 1, borderColor: colors.mist, flex: 1, minWidth: '44%' }}
+          >
+            <Text style={{ fontSize: 20, fontWeight: '900', color: colors.ink }}>{locale === 'nl-NL' ? screen.titleNl : screen.titleEn}</Text>
+            <Text style={{ fontSize: 14, color: colors.pewter, fontWeight: '700', marginTop: 4 }} numberOfLines={2}>{locale === 'nl-NL' ? screen.helpTextNl : screen.helpTextEn}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function renderFor(id: ScreenId, ctx: ScreenContext): React.ReactNode {
   const map: Record<ScreenId, (ctx: ScreenContext) => React.ReactNode> = {
     HOME: renderHome,
@@ -774,6 +844,7 @@ function renderFor(id: ScreenId, ctx: ScreenContext): React.ReactNode {
     SETTINGS: renderSettings,
     ONBOARDING: renderOnboarding,
     INCOMING_CALL: renderIncomingCall,
+    MORE: renderMore,
   };
   return map[id](ctx);
 }

@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "HAVEN Carer",
+    "slug": "haven-carer",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": { "backgroundColor": "#2C3E6B" },
+    "ios": { "supportsTablet": true, "bundleIdentifier": "nl.haven.carer" },
+    "android": { "adaptiveIcon": { "backgroundColor": "#2C3E6B" }, "package": "nl.haven.carer" },
+    "plugins": ["expo-secure-store", "expo-local-authentication"]
+  }
+}
