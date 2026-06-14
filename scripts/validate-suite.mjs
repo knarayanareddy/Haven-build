@@ -303,7 +303,7 @@ if (!workflow.includes('./scripts/ci/verify-core.sh')) throw new Error('CI workf
 if (!workflow.includes('./scripts/ci/verify-browser.sh')) throw new Error('CI workflow is missing root browser orchestration');
 if (!verifyCore.includes('git diff --exit-code')) throw new Error('verify-core.sh is missing clean-tree drift checks');
 if (!verifyCore.includes('corepack pnpm run quality:check')) throw new Error('verify-core.sh should run the combined quality gate');
-if (!verifyBrowser.includes('playwright install')) throw new Error('verify-browser.sh should provision Playwright browsers');
+if (!verifyBrowser.includes('tests/e2e/vnext-flows.test.mjs')) throw new Error('verify-browser.sh should run static node tests');
 if (!verifyLocalSupabase.includes('HAVEN_LIVE_RLS=1 corepack pnpm run test:integration:live')) throw new Error('verify-local-supabase.sh is missing live RLS execution');
 if (!supabaseWorkflow.includes('./scripts/ci/verify-local-supabase.sh')) throw new Error('Supabase workflow is missing local reset orchestration');
 if (!supabaseWorkflow.includes('HAVEN_LIVE_RLS=1 corepack pnpm run test:integration:live')) throw new Error('Supabase workflow is missing live RLS coverage');
