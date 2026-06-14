@@ -174,7 +174,7 @@ globalThis.__HAVEN_SUPABASE_MOCK__ = mock;
 // ---------- Strip-types loader (TypeScript transpileModule) ----------
 const sharedDir = fileURLToPath(new URL('../../supabase/functions/_shared/', import.meta.url));
 async function loadAuthzModule() {
-  const tsPath = '/tmp/haven-test-deps/node_modules/typescript/lib/typescript.js';
+  const tsPath = 'typescript';
   let ts;
   try {
     ts = (await import(tsPath)).default ?? (await import(tsPath));
