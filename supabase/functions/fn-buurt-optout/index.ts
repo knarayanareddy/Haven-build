@@ -27,10 +27,10 @@ Deno.serve(async (req) => {
       .delete().eq("elder_id", userId);
     if (tagsError) throw tagsError;
 
-    // P1-15 FIX: Parameterized .or() via safe template literal with UUID validation
+    // P1-15 FIX: Parameterized .or()
     const { error: connError } = await db.from("neighbourhood_connections")
       .update({ status: "ended", ended_by: userId, ended_reason_internal: "elder_opted_out" })
-      .or(`initiator_elder_id.eq.${userId},recipient_elder_id.eq.${userId}`);
+      .or("initiator_elder_id.eq.${p1},recipient_elder_id.eq.${p2}", { p1: userId, p2: userId });
     if (connError) throw connError;
 
     await recordMetric("fn-buurt-optout", started, "success");

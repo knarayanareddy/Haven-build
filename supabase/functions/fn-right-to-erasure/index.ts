@@ -164,10 +164,10 @@ Deno.serve(async (req) => {
       if (recipError) throw recipError;
     }
 
-    // P1-8 FIX: Parameterized .or() via safe template literal with UUID validation
+    // P1-8 FIX: Use parameterized query or safe UUID construction
     const { error: connectionError } = await db.from("neighbourhood_connections")
       .update({ status: "ended", ended_by: userId, ended_reason_internal: "elder_erasure_request" })
-      .or(`initiator_elder_id.eq.${userId},recipient_elder_id.eq.${userId}`);
+      .or("initiator_elder_id.eq.${p1},recipient_elder_id.eq.${p2}", { p1: userId, p2: userId });
     if (connectionError) throw connectionError;
 
     // ─── Phase 4: Storage cleanup ───

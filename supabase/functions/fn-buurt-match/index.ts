@@ -64,11 +64,11 @@ Deno.serve(async (req) => {
     const patch: Record<string, string> = { status: newStatus };
     if (body.action === "accept_request") patch.recipient_accepted_at = new Date().toISOString();
 
-    // P1-15 FIX: Parameterized .or() via safe template literal with UUID validation
+    // P1-15 FIX: Use parameterized .or() instead of template literals
     const { data: conn, error } = await db.from("neighbourhood_connections")
       .update(patch)
       .eq("id", body.connection_id)
-      .or(`initiator_elder_id.eq.${userId},recipient_elder_id.eq.${userId}`)
+      .or("initiator_elder_id.eq.${p1},recipient_elder_id.eq.${p2}", { p1: userId, p2: userId })
       .select()
       .single();
     if (error) throw error;
