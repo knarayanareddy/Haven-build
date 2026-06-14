@@ -42,7 +42,7 @@ function relativeTime(iso: string | null) {
 
 export function TrustSignalPanel({ devices, recentEvents }: TrustSignalPanelProps) {
   const offline = devices.filter((d) => !d.last_seen_at || Date.now() - new Date(d.last_seen_at).getTime() > 12 * 3_600_000);
-  const flagged = devices.filter((d) => d.battery_pct != null && d.battery_pct < 15);
+  const flagged = devices.filter((d) => d.battery_pct !== null && d.battery_pct < 15);
   const denied = devices.filter((d) => d.location_permission === 'denied' || d.microphone_permission === 'denied');
   const tokensBad = devices.filter((d) => d.push_token_ok === false);
 
@@ -71,7 +71,7 @@ export function TrustSignalPanel({ devices, recentEvents }: TrustSignalPanelProp
           <li key={d.profile_id} style={{ padding: 12, borderRadius: 14, background: '#F5F3EE', fontSize: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}><strong>{d.profile_id.slice(0, 8)}</strong><span>{relativeTime(d.last_seen_at)}</span></div>
             <div style={{ color: '#6B7490' }}>
-              {d.battery_pct != null ? `Batterij ${d.battery_pct}% · ` : ''}
+              {d.battery_pct !== null ? `Batterij ${d.battery_pct}% · ` : ''}
               {d.network_type ?? '?'} · locatie {d.location_permission ?? '?'} · microfoon {d.microphone_permission ?? '?'}
             </div>
           </li>

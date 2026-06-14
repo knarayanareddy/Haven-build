@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { DashboardCard } from '../../../../components/DashboardCard';
+import { DashboardCard } from '../../../components/DashboardCard';
 
 export default function FamiliarVoicePage() {
   return (

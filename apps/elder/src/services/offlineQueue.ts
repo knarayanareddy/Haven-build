@@ -1,4 +1,4 @@
-export type OfflineActionType = 'CONFIRM_MEDICATION' | 'SNOOZE_MEDICATION' | 'CREATE_TASK' | 'SEND_MESSAGE' | 'WELLNESS_CHECKIN';
+export type OfflineActionType = 'CONFIRM_MEDICATION' | 'SNOOZE_MEDICATION' | 'CREATE_TASK' | 'SEND_MESSAGE' | 'WELLNESS_CHECKIN' | 'SYNC_CALENDAR';
 
 export interface OfflineAction {
   idempotencyKey: string;

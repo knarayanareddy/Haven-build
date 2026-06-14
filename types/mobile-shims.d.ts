@@ -9,7 +9,12 @@ declare module 'react-native' {
   export const SafeAreaView: any;
   export const Button: any;
   export const Platform: { OS: string };
+  export const Animated: any;
+  export const Easing: any;
+  export const Modal: any;
 }
+
+declare module 'expo-calendar';
 
 declare module 'react-native-safe-area-context' {
   export const SafeAreaProvider: any;

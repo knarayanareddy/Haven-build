@@ -35,7 +35,7 @@ async function sendDigestEmail(
     "",
     `${statusEmoji} Status: ${digest.rood_count > 0 || digest.zwart_count > 0 ? "Aandacht nodig" : digest.amber_count > 0 ? "Rustig — kleine aandachtspunten" : "Alles goed"}`,
     "",
-    `💊 Medicijnen: ${digest.medications_taken_pct != null ? `${digest.medications_taken_pct}% ingenomen` : "geen gegevens"}`,
+    `💊 Medicijnen: ${digest.medications_taken_pct !== null ? `${digest.medications_taken_pct}% ingenomen` : "geen gegevens"}`,
     `🛡️ Veiligheid: ${digest.scam_events_count} meldingen (${digest.amber_count} amber, ${digest.rood_count} rood, ${digest.zwart_count} zwart)`,
     `👋 Familiecontact: ${digest.family_interactions} berichten`,
     "",

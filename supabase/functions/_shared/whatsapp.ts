@@ -36,7 +36,7 @@ export async function sendWhatsAppMessage(
   }
 
   // Sanitize phone number to E.164-ish format (remove spaces, +, ensure NL prefix)
-  const to = phoneNumber.replace(/[\s\-\(\)]/g, '').replace(/^00/, '+').replace(/^0/, '+31');
+  const to = phoneNumber.replace(/[\s\-()]/g, '').replace(/^00/, '+').replace(/^0/, '+31');
 
   // Truncate message to WhatsApp's 4096 char limit, leave room for prefix
   const prefix = elderName ? `HAVEN — ${elderName}: ` : 'HAVEN: ';

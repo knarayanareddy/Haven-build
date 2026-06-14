@@ -15,9 +15,9 @@ Deno.serve(async (req) => {
     const userId = await getJwtUserId(req);
     assertSelf(userId, String(body.elder_id), "elder");
 
-    const mood = body.mood_score == null ? null : Math.max(1, Math.min(5, Number(body.mood_score)));
-    const energy = body.energy_score == null ? null : Math.max(1, Math.min(5, Number(body.energy_score)));
-    const pain = body.pain_score == null ? null : Math.max(1, Math.min(5, Number(body.pain_score)));
+    const mood = (body.mood_score === null || body.mood_score === undefined) ? null : Math.max(1, Math.min(5, Number(body.mood_score)));
+    const energy = (body.energy_score === null || body.energy_score === undefined) ? null : Math.max(1, Math.min(5, Number(body.energy_score)));
+    const pain = (body.pain_score === null || body.pain_score === undefined) ? null : Math.max(1, Math.min(5, Number(body.pain_score)));
     const idem = req.headers.get("idempotency-key") ?? body.idempotency_key ?? body.client_event_id;
 
     const result = await withIdempotency({
@@ -43,14 +43,14 @@ Deno.serve(async (req) => {
 
         // Pattern detection: 3 consecutive "morning" check-ins with mood <= 2 → calm family notification.
         let escalate = false;
-        if (body.checkin_type === "morning" && mood != null && mood <= 2) {
+        if (body.checkin_type === "morning" && mood !== null && mood <= 2) {
           const { data: recent } = await db.from("wellness_checkins")
             .select("mood_score")
             .eq("elder_id", body.elder_id)
             .eq("checkin_type", "morning")
             .order("checked_in_at", { ascending: false })
             .limit(3);
-          if ((recent ?? []).filter((r) => r.mood_score != null && r.mood_score <= 2).length >= 3) escalate = true;
+          if ((recent ?? []).filter((r) => r.mood_score !== null && r.mood_score <= 2).length >= 3) escalate = true;
         }
 
         if (escalate) {

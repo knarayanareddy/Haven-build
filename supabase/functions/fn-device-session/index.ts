@@ -11,7 +11,7 @@ Deno.serve(async (req) => {
     const userId = await getJwtUserId(req);
     assertSelf(userId, String(body.profile_id), "device session");
     const device_id_hash = await sha256(String(body.device_id));
-    const battery_pct = body.battery_pct == null ? null : Math.max(0, Math.min(100, Number(body.battery_pct)));
+    const battery_pct = (body.battery_pct === null || body.battery_pct === undefined) ? null : Math.max(0, Math.min(100, Number(body.battery_pct)));
 
     const { data, error } = await userClient(req)
       .from("device_sessions")
@@ -32,7 +32,7 @@ Deno.serve(async (req) => {
         last_push_token_ok_at: body.push_token_ok ? new Date().toISOString() : null,
         last_location_permission: body.location_permission ?? null,
         last_microphone_permission: body.microphone_permission ?? null,
-        last_background_refresh_ok: body.background_refresh_ok == null ? null : Boolean(body.background_refresh_ok),
+        last_background_refresh_ok: (body.background_refresh_ok === null || body.background_refresh_ok === undefined) ? null : Boolean(body.background_refresh_ok),
         last_error: body.last_error ?? null,
         updated_at: new Date().toISOString(),
       }, { onConflict: "profile_id,device_id_hash" })
@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
 
     // Write device_health_events when telemetry reports problems.
     const dbAdmin = admin();
-    if (battery_pct != null && battery_pct < 15) {
+    if (battery_pct !== null && battery_pct < 15) {
       await dbAdmin.from("device_health_events").insert({
         profile_id: userId,
         device_session_id: data.id,
@@ -89,7 +89,7 @@ Deno.serve(async (req) => {
 
     // Compute a health status for the client.
     let status: "ok" | "degraded" | "offline_risk" = "ok";
-    if (battery_pct != null && battery_pct < 15) status = "degraded";
+    if (battery_pct !== null && battery_pct < 15) status = "degraded";
     if (body.location_permission === "denied" || body.microphone_permission === "denied") status = "degraded";
     if (body.network_type === "none") status = "offline_risk";
     if (body.push_token_ok === false) status = "degraded";

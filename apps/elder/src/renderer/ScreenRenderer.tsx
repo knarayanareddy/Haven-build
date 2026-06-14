@@ -8,7 +8,6 @@ import { shouldSuppressForQuietHours } from '../services/notifications';
 import type { Locale } from '@haven/contracts/src/haven';
 import { FloatingVoiceButton } from '../components/FloatingVoiceButton';
 import { HelpOverlay } from '../components/HelpOverlay';
-import * as Haptics from 'expo-haptics';
 
 export interface ElderProfile {
   id: string;
@@ -87,6 +86,22 @@ export interface ScreenContext {
   buurt: BuurtRow;
   visits: VisitLogRow[];
   onPrimaryAction: (id: string) => void;
+  documents?: Array<{ id: string; label: string }>;
+  pendingConsentPack?: {
+    title_nl: string;
+    title_en: string;
+    description_nl: string;
+    description_en: string;
+    pack_key: string;
+  } | null;
+  completedConsentPackCount?: number;
+  totalConsentPackCount?: number;
+  incomingCall?: {
+    avatar_emoji?: string;
+    from_name?: string;
+    video_call_session_id?: string;
+    is_test?: boolean;
+  } | null;
 }
 
 const TR_NL: Record<string, string> = {
@@ -120,7 +135,6 @@ const TR_NL: Record<string, string> = {
   privacyFuzzed: '100 m gebied — geen precieze locatie',
   privacyNoBsn: 'Geen burgerservicenummer verwerkt',
   consentRequired: 'Toestemming eerst',
-  voice: 'Praat met HAVEN',
   iHaveTaken: 'Ik heb het ingenomen',
   tellMeAbout: 'Vertel over mijn pillen',
   notYet: 'Nog niet',
@@ -199,7 +213,6 @@ const TR_EN: Record<string, string> = {
   privacyFuzzed: '100 m area — no precise location',
   privacyNoBsn: 'No citizen service number is processed',
   consentRequired: 'Consent required first',
-  voice: 'Talk with HAVEN',
   iHaveTaken: 'I have taken it',
   tellMeAbout: 'Tell me about my pills',
   notYet: 'Not yet',
@@ -279,6 +292,8 @@ export function screenTitleFor(id: ScreenId, locale: Locale) {
     WACHT: 'care',
     SETTINGS: 'settings',
     MORE: 'today',
+    ONBOARDING: 'today',
+    INCOMING_CALL: 'today',
   };
   return t(locale, map[id]);
 }
@@ -424,7 +439,7 @@ function renderPills(ctx: ScreenContext) {
 }
 
 function renderShield(ctx: ScreenContext) {
-  const { locale, scamEvents, documents } = ctx;
+  const { locale, scamEvents, documents = [] } = ctx;
   const top = scamEvents[0];
   const tone = top?.level === 'zwart' || top?.level === 'rood' ? 'rose' : top?.level === 'amber' ? 'amber' : 'safe';
   const bg = tone === 'rose' ? colors.rosePale : tone === 'amber' ? colors.amberPale : colors.sagePale;
@@ -653,7 +668,7 @@ function renderScreen(ctx: ScreenContext) {
   }
   // Use screen id routing via the schema registry order (productionScreens order).
   // We use a flat map keyed by ScreenId for direct dispatch.
-  const dispatch: Record<ScreenId, (ctx: ScreenContext) => React.ReactNode> = {
+  const dispatch: Partial<Record<ScreenId, (ctx: ScreenContext) => React.ReactNode>> = {
     HOME: renderHome,
     TODAY: renderToday,
     PILLS: renderPills,
@@ -688,7 +703,7 @@ export function ScreenRenderer({ schema, context }: ScreenRendererProps) {
     <View style={{ flex: 1, backgroundColor: colors.linen }}>
       <View style={{ padding: 20, paddingTop: 8 }}>
         <Text accessibilityRole="header" style={{ fontSize: 30, fontWeight: '900', color: colors.ink }}>{locale === 'nl-NL' ? titleNl : titleEn}</Text>
-        <Text style={{ fontSize: 16, color: colors.pewter, fontWeight: '700' }}>{locale === 'nl-NL' ? `${titleEn} · ${schema.maxPrimaryItems} ${locale === 'nl-NL' ? 'kaarten' : 'cards'}` : `${titleNl} · ${schema.maxPrimaryItems} ${locale === 'nl-NL' ? 'kaarten' : 'cards'}`}</Text>
+        <Text style={{ fontSize: 16, color: colors.pewter, fontWeight: '700' }}>{locale === 'nl-NL' ? `${titleEn} · ${schema.maxPrimaryItems} kaarten` : `${titleNl} · ${schema.maxPrimaryItems} cards`}</Text>
         <Text style={{ fontSize: 14, color: colors.pewter, fontWeight: '700' }}>{locale === 'nl-NL' ? 'Offline-cache' : 'Offline cache'}: {schema.offlineCacheTtlSeconds}s · {schema.emergencyButton ? (locale === 'nl-NL' ? 'Noodknop aanwezig' : 'Emergency access available') : (locale === 'nl-NL' ? 'Geen noodknop' : 'No emergency access')}</Text>
       </View>
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 160, gap: 12 }}>
@@ -819,7 +834,7 @@ function renderMore(ctx: ScreenContext) {
             accessibilityRole="button"
             accessibilityLabel={`Open ${locale === 'nl-NL' ? screen.titleNl : screen.titleEn}`}
             onPress={() => ctx.onPrimaryAction(`NAV_${screen.screenId}`)}
-            style={{ minHeight: 72, minWidth: 140, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 20, backgroundColor: colors.paper, borderWidth: 1, borderColor: colors.mist, flex: 1, minWidth: '44%' }}
+            style={{ minHeight: 72, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 20, backgroundColor: colors.paper, borderWidth: 1, borderColor: colors.mist, flex: 1, minWidth: '44%' }}
           >
             <Text style={{ fontSize: 20, fontWeight: '900', color: colors.ink }}>{locale === 'nl-NL' ? screen.titleNl : screen.titleEn}</Text>
             <Text style={{ fontSize: 14, color: colors.pewter, fontWeight: '700', marginTop: 4 }} numberOfLines={2}>{locale === 'nl-NL' ? screen.helpTextNl : screen.helpTextEn}</Text>

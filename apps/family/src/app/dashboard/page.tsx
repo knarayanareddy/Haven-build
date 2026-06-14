@@ -1,13 +1,13 @@
 import React from 'react';
 import Link from 'next/link';
-import { DashboardCard } from '../../../components/DashboardCard';
-import { HaloStatus } from '../../../components/HaloStatus';
-import { MedicationList } from '../../../components/MedicationList';
-import { AlertList } from '../../../components/AlertList';
-import { DailyStatusPill } from '../../../components/DailyStatusPill';
-import { TrustSignalPanel } from '../../../components/TrustSignalPanel';
-import { DEMO_DASHBOARD } from '../../../services/dashboard-fixtures';
-import { CallButton } from '../../../components/CallButton';
+import { DashboardCard } from '../../components/DashboardCard';
+import { HaloStatus } from '../../components/HaloStatus';
+import { MedicationList } from '../../components/MedicationList';
+import { AlertList } from '../../components/AlertList';
+import { DailyStatusPill } from '../../components/DailyStatusPill';
+import { TrustSignalPanel } from '../../components/TrustSignalPanel';
+import { DEMO_DASHBOARD } from '../../services/dashboard-fixtures';
+import { CallButton } from '../../components/CallButton';
 
 export default function DashboardPage() {
   const data = DEMO_DASHBOARD;

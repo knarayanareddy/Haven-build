@@ -3,7 +3,7 @@
 // Consent-gated: only visible if elder has shared appointment data.
 
 import React from 'react';
-import { DashboardCard } from '../../../../components/DashboardCard';
+import { DashboardCard } from '../../../components/DashboardCard';
 
 interface AgendaEvent {
   id: string;
