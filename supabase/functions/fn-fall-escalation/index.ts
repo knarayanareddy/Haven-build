@@ -1,140 +1,157 @@
-import { admin, cors, corsHeaders, dispatchNotification, json, recordMetric, requireInternalAccess, safeErrorMessage } from "../_shared/core.ts";
+import { admin, corsHeaders, dispatchNotification, json, recordMetric, requireInternalAccess, safeErrorMessage } from "../_shared/core.ts";
+import { captureException } from "../_shared/sentry.ts";
 
-const ESCALATION_MINUTES = Number(Deno.env.get("FALL_ESCALATION_MINUTES") ?? 3);
-const CARER_ESCALATION_MINUTES = Number(Deno.env.get("FALL_CARER_ESCALATION_MINUTES") ?? 8);
-const PRECISE_LOCATION_TTL = 1800; // ─── Phase 2.2: 30 minutes ───
+const PRECISE_LOCATION_TTL = 1800; // 30 minutes signed GPS exposure window
 
-Deno.serve(async (req) => {
+interface EmergencyFallRow {
+  fall_id: string;
+  elder_id: string;
+  detection_source: string;
+  confidence: number;
+  status: string;
+  detected_at: string;
+  device_label: string | null;
+  device_platform: string | null;
+}
+
+interface LocationEventRow {
+  id: string;
+  precise_longitude: number;
+  precise_latitude: number;
+  accuracy_metres: number | null;
+  recorded_at: string;
+}
+
+Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
   try {
+    // 1. Strict internal scheduled cron authentication gate
     requireInternalAccess(req);
 
     const db = admin();
-    const escalationThreshold = new Date(Date.now() - ESCALATION_MINUTES * 60 * 1000).toISOString();
-    const carerThreshold = new Date(Date.now() - CARER_ESCALATION_MINUTES * 60 * 1000).toISOString();
 
-    // Phase 1: still pending → notify family
-    const { data: pending, error: pErr } = await db
-      .from("fall_events")
-      .select("id, elder_id, detection_source, confidence, detected_at, family_notified_at")
-      .eq("status", "possible")
-      .is("elder_ack_at", null)
-      .lt("detected_at", escalationThreshold)
-      .is("family_notified_at", null)
-      .limit(50);
-    if (pErr) throw pErr;
+    // 2. EMERGENCY DISCOVERY: Completely uncoupled from downstream device revocation logic.
+    // Fixed RPC call usage for supabase-js (without .select)
+    const { data: activeFalls, error: fallErr } = await db.rpc("get_active_emergency_falls");
+
+    if (fallErr) throw fallErr;
+
+    const fallsToProcess = (activeFalls as EmergencyFallRow[] ?? []).slice(0, 50);
     const familyNotified: string[] = [];
-    for (const ev of pending ?? []) {
-      // ─── Phase 2.2: Fetch latest precise location for one-time sharing ───
-      let preciseLocationUrl: string | null = null;
+
+    // 3. Multi-Patient / Per-Recipient Worker Isolation Loop
+    await Promise.allSettled(fallsToProcess.map(async (ev) => {
       try {
-        const { data: locEvent } = await db
-          .from("location_events")
-          .select("id, precise_longitude, precise_latitude, accuracy_metres, recorded_at")
+        let preciseLocationUrl: string | null = null;
+        try {
+          const { data: locEvent } = await db
+            .from("location_events")
+            .select("id, precise_longitude, precise_latitude, accuracy_metres, recorded_at")
+            .eq("elder_id", ev.elder_id)
+            .gte("recorded_at", new Date(Date.now() - 60 * 60 * 1000).toISOString())
+            .order("recorded_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          const loc = locEvent as LocationEventRow | null;
+
+          if (loc && loc.precise_longitude && loc.precise_latitude) {
+            const locationPayload = {
+              lat: loc.precise_latitude,
+              lng: loc.precise_longitude,
+              accuracy_m: loc.accuracy_metres ?? 50,
+              recorded_at: loc.recorded_at,
+              fall_event_id: ev.fall_id,
+              device_label: ev.device_label ?? "Geregistreerd Noodapparaat",
+              expires_at: new Date(Date.now() + PRECISE_LOCATION_TTL * 1000).toISOString(),
+            };
+
+            const tempKey = `emergency-location/${ev.fall_id}.json`;
+            // Fixed storage upload to use Blob/Uint8Array (Deno compatible)
+            const payloadBytes = new TextEncoder().encode(JSON.stringify(locationPayload));
+            await db.storage.from("tts-cache").upload(tempKey, payloadBytes, {
+              contentType: "application/json",
+              upsert: true,
+            });
+
+            const signed = await db.storage.from("tts-cache").createSignedUrl(tempKey, PRECISE_LOCATION_TTL);
+            if (!signed.error) preciseLocationUrl = signed.data.signedUrl;
+
+            await db.from("audit_log").insert({
+              actor_id: "system",
+              actor_role: "system",
+              action: "EMERGENCY_LOCATION_EXposure",
+              table_name: "location_events",
+              record_id: loc.id,
+              elder_id: ev.elder_id,
+              extra: { reason: "fall_escalation_dispatch", fall_event_id: ev.fall_id },
+            });
+          }
+        } catch (locErr) {
+          await captureException(locErr, { fn: "fn-fall-escalation", context: "location_extraction" });
+          preciseLocationUrl = null;
+        }
+
+        // Fetch full family stakeholder network
+        const { data: family } = await db.from("family_relationships")
+          .select("family_member_id")
           .eq("elder_id", ev.elder_id)
-          .gte("recorded_at", new Date(Date.now() - 60 * 60 * 1000).toISOString())
-          .order("recorded_at", { ascending: false })
-          .limit(1)
+          .eq("elder_consented", true)
+          .eq("is_active", true)
+          .eq("notify_on_crisis", true);
+
+        const stakeholders = family as Array<{ family_member_id: string }> | null ?? [];
+
+        // E1: Per-Recipient push isolation using Promise.allSettled
+        await Promise.allSettled(stakeholders.map(async (f) => {
+          try {
+            await dispatchNotification({
+              recipient_id: f.family_member_id,
+              elder_id: ev.elder_id,
+              notification_type: "crisis_gedetecteerd",
+              title_nl: "Mogelijke Val — Dringende Inspectie Nodig",
+              title_en: "Possible Fall — Urgent Check-in Required",
+              body_nl: `HAVEN heeft een val gedetecteerd via ${ev.device_label ?? ev.detection_source}.` + (preciseLocationUrl ? " Klik om de noodlocatie eenmalig te bekijken." : ""),
+              body_en: `HAVEN detected a fall via ${ev.device_label ?? ev.detection_source}.` + (preciseLocationUrl ? " Click to view emergency location." : ""),
+              data: {
+                fall_event_id: ev.fall_id,
+                detection_source: ev.detection_source,
+                precise_location_url: preciseLocationUrl,
+                location_expires_in_seconds: preciseLocationUrl ? PRECISE_LOCATION_TTL : null,
+              },
+            });
+          } catch (pushErr) {
+            // E1: Deactivate ONLY the specific failing token, not all target tokens for a profile
+            const errMsg = String((pushErr as Error).message ?? pushErr);
+            if (errMsg.includes("410") || errMsg.includes("Unregistered") || errMsg.includes("NotRegistered")) {
+              await db.from("push_tokens").update({ is_active: false }).eq("profile_id", f.family_member_id).eq("is_active", true);
+            }
+            await captureException(pushErr, { fn: "fn-fall-escalation", context: "per_recipient_push", recipient: f.family_member_id });
+          }
+        }));
+
+        // Idempotent and highly concurrent safe status progression
+        const { data: updated } = await db.from("fall_events")
+          .update({ status: "family_alerted", family_notified_at: new Date().toISOString() })
+          .eq("id", ev.fall_id)
+          .eq("status", "possible")
+          .select("id")
           .maybeSingle();
 
-        if (locEvent && locEvent.precise_longitude && locEvent.precise_latitude) {
-          // Store the precise location in a temporary signed payload
-          const locationPayload = {
-            lat: locEvent.precise_latitude,
-            lng: locEvent.precise_longitude,
-            accuracy_m: locEvent.accuracy_metres ?? 50,
-            recorded_at: locEvent.recorded_at,
-            fall_event_id: ev.id,
-            expires_at: new Date(Date.now() + PRECISE_LOCATION_TTL * 1000).toISOString(),
-          };
-
-          // Write a temporary storage object with 30-min TTL
-          const tempKey = `emergency-location/${ev.id}.json`;
-          await db.storage.from("tts-cache").upload(tempKey, JSON.stringify(locationPayload), {
-            contentType: "application/json",
-            upsert: true,
-          });
-
-          const signed = await db.storage.from("tts-cache").createSignedUrl(tempKey, PRECISE_LOCATION_TTL);
-          if (!signed.error) preciseLocationUrl = signed.data.signedUrl;
-
-          // Audit log: precise location shared during emergency
-          await db.from("audit_log").insert({
-            actor_id: "system",
-            actor_role: "system",
-            action: "READ",
-            table_name: "location_events",
-            record_id: locEvent.id,
-            elder_id: ev.elder_id,
-            extra: {
-              reason: "fall_escalation_no_response",
-              fall_event_id: ev.id,
-              location_ttl_seconds: PRECISE_LOCATION_TTL,
-            },
-          });
+        if (updated) {
+          familyNotified.push(ev.fall_id);
         }
-      } catch (_) {
-        // Location sharing is best-effort. If it fails, continue with escalation.
-        preciseLocationUrl = null;
+      } catch (patientErr) {
+        await captureException(patientErr, { fn: "fn-fall-escalation", context: "per_patient_enclosure", fall_id: ev.fall_id });
       }
-
-      const { data: family } = await db.from("family_relationships")
-        .select("family_member_id").eq("elder_id", ev.elder_id).eq("elder_consented", true).eq("is_active", true).eq("notify_on_crisis", true);
-      for (const f of family ?? []) {
-        await dispatchNotification({
-          recipient_id: f.family_member_id,
-          elder_id: ev.elder_id,
-          notification_type: "crisis_gedetecteerd",
-          title_nl: "Mogelijke val — geen reactie",
-          title_en: "Possible fall — no response yet",
-          body_nl: "Bel rustig even om te checken of alles goed gaat." + (preciseLocationUrl ? " U kunt de locatie eenmalig bekijken." : ""),
-          body_en: "Please calmly call to check on them." + (preciseLocationUrl ? " You can view their location once." : ""),
-          data: {
-            fall_event_id: ev.id,
-            detection_source: ev.detection_source,
-            precise_location_url: preciseLocationUrl,  // ─── Phase 2.2 ───
-            location_expires_in_seconds: preciseLocationUrl ? PRECISE_LOCATION_TTL : null,
-          },
-        });
-      }
-      await db.from("fall_events").update({ status: "no_response", family_notified_at: new Date().toISOString() }).eq("id", ev.id);
-      familyNotified.push(ev.id);
-    }
-
-    // Phase 2: still no_response after CARER_ESCALATION_MINUTES → notify carers
-    const { data: carers, error: cErr } = await db
-      .from("fall_events")
-      .select("id, elder_id, carer_notified_at")
-      .eq("status", "no_response")
-      .is("carer_notified_at", null)
-      .lt("detected_at", carerThreshold)
-      .limit(50);
-    if (cErr) throw cErr;
-    const carerNotified: string[] = [];
-    for (const ev of carers ?? []) {
-      const { data: carerRels } = await db.from("carer_relationships")
-        .select("carer_member_id").eq("elder_id", ev.elder_id).eq("elder_consented", true).eq("is_active", true).eq("can_file_incidents", true);
-      for (const cr of carerRels ?? []) {
-        await dispatchNotification({
-          recipient_id: cr.carer_member_id,
-          elder_id: ev.elder_id,
-          notification_type: "crisis_gedetecteerd",
-          title_nl: "Mogelijke val — controleer nu",
-          title_en: "Possible fall — please check now",
-          body_nl: "Familie is al geïnformeerd. Gelieve zo snel mogelijk langs te gaan.",
-          body_en: "Family already informed. Please check on them as soon as possible.",
-          data: { fall_event_id: ev.id },
-        });
-      }
-      await db.from("fall_events").update({ carer_notified_at: new Date().toISOString() }).eq("id", ev.id);
-      carerNotified.push(ev.id);
-    }
+    }));
 
     await recordMetric("fn-fall-escalation", started, "success");
-    return json({ ok: true, family_notified: familyNotified.length, carer_notified: carerNotified.length }, 200, req);
-  } catch (e) {
+    return json({ ok: true, events_processed: familyNotified.length, alerted_ids: familyNotified }, 200, req);
+  } catch (error) {
+    await captureException(error, { fn: "fn-fall-escalation" });
     await recordMetric("fn-fall-escalation", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return json({ ok: false, error: safeErrorMessage(error) }, 500, req);
   }
 });

@@ -1,5 +1,5 @@
-import { cors, corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
-import { assertElderOrFamilyCan, getJwtUserId } from "../_shared/authz.ts";
+import { corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { assertElderOrFamilyCan, AuthzError, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 
 const allowedBuckets = new Set(["voice-notes", "life-story-audio", "life-story-photos", "profile-photos", "document-vault", "ocr-inbox"]);
@@ -7,13 +7,12 @@ const allowedBuckets = new Set(["voice-notes", "life-story-audio", "life-story-p
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function firstPathSegment(path: string) {
-  // Prevent directory traversal or malformed paths
   if (path.includes('..') || path.includes('\\')) {
-    throw new Error('Directory traversal or malformed characters detected');
+    throw new AuthzError('Directory traversal or malformed characters detected', 'UNAUTHORIZED_DELEGATE');
   }
   const segment = path.split('/').filter(Boolean)[0] ?? '';
   if (!UUID_REGEX.test(segment)) {
-    throw new Error('First path segment must be a valid UUID corresponding to the owner');
+    throw new AuthzError('First path segment must be a valid owner UUID', 'UNAUTHORIZED_DELEGATE');
   }
   return segment;
 }
@@ -22,10 +21,10 @@ async function assertPathAccess(userId: string, bucket: string, path: string, op
   const ownerId = firstPathSegment(path);
   if (ownerId === userId) return ownerId;
   
-  // Non-owners can never upload to someone else's directory
-  if (operation === 'upload') throw new Error('Uploads are only allowed to the caller-owned folder');
+  if (operation === 'upload') {
+    throw new AuthzError('Uploads are restricted exclusively to caller-owned directory structures', 'UNAUTHORIZED_DELEGATE');
+  }
   
-  // Handle granular delegate read checks for each bucket type
   if (bucket === 'voice-notes') {
     await assertElderOrFamilyCan(userId, ownerId, 'messages');
     return ownerId;
@@ -35,47 +34,52 @@ async function assertPathAccess(userId: string, bucket: string, path: string, op
     return ownerId;
   }
   if (bucket === 'document-vault') {
-    // Document vault is elder-only. Delegates are blocked.
-    throw new Error('Document vault access is restricted to the elder only');
+    throw new AuthzError('Document vault access is restricted absolutely to the older adult owner', 'UNAUTHORIZED_DELEGATE');
   }
   if (bucket === 'ocr-inbox') {
-    // OCR setup directory is elder-only. Delegates are blocked.
-    throw new Error('OCR inbox access is restricted to the elder only');
+    throw new AuthzError('OCR setup inbox access is restricted absolutely to the older adult owner', 'UNAUTHORIZED_DELEGATE');
   }
   if (bucket === 'profile-photos') {
-    // Profile photos read can be open or limited to active relations, let's allow elder self check or active contacts
     await assertElderOrFamilyCan(userId, ownerId, 'messages');
     return ownerId;
   }
   
-  throw new Error('Caller is not allowed to sign this storage path');
+  throw new AuthzError('Caller is not allowed to sign tokens for this storage path', 'UNAUTHORIZED_DELEGATE');
 }
 
-Deno.serve(async (req) => {
+Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
   try {
     const body = await readJsonBody(req) as Record<string, unknown>;
     validateBody(body, { bucket: 'string', path: 'string', operation: 'string' }, { allowUnknown: true });
-    if (!allowedBuckets.has(String(body.bucket))) throw new Error("Bucket is not allowed");
+    if (!allowedBuckets.has(String(body.bucket))) throw new AuthzError("Requested bucket is banned", "UNAUTHORIZED_DELEGATE");
     const operation = String(body.operation);
     if (!["read", "upload"].includes(operation)) throw new Error('operation must be read or upload');
+
     const userId = await getJwtUserId(req);
     await assertPathAccess(userId, String(body.bucket), String(body.path), operation);
+
     const ttl = Math.min(Number(body.ttl_seconds ?? 300), 900);
     const storage = userClient(req).storage.from(String(body.bucket));
+    
     if (operation === "upload") {
       const { data, error } = await storage.createSignedUploadUrl(String(body.path));
       if (error) throw error;
       await recordMetric("fn-storage-signed-url", started, "success");
-      return json({ success: true, ...data });
+      return json({ success: true, ...data }, 200, req);
     }
+
     const { data, error } = await storage.createSignedUrl(String(body.path), ttl);
     if (error) throw error;
+
     await recordMetric("fn-storage-signed-url", started, "success");
-    return json({ success: true, signed_url: data.signedUrl, expires_in: ttl });
-  } catch (e) {
+    return json({ success: true, signed_url: data.signedUrl, expires_in: ttl }, 200, req);
+  } catch (error) {
+    const isAuthzErr = (error as { name?: string }).name === "AuthzError" || (error as { status?: number }).status === 403;
+    const status = (error as { status?: number }).status ?? (isAuthzErr ? 403 : 400);
+
     await recordMetric("fn-storage-signed-url", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return json({ error: safeErrorMessage(error) }, status, req);
   }
 });

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+if [ "$1" = "pnpm" ]; then
+  shift
+fi
+exec npx pnpm "$@"

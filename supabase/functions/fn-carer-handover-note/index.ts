@@ -1,13 +1,11 @@
 // ─── Phase 3.3 + 3.4: Photo attachments + medication interaction check at point of care ───
 import { admin, corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
 import { assertCarerCan, getJwtUserId } from "../_shared/authz.ts";
-import { assertMaxLength, assertNoBsnText, MAX_STRING_FIELD, validateBody } from "../_shared/validation.ts";
+import { assertMaxLength, MAX_STRING_FIELD, validateBody } from "../_shared/validation.ts";
 import { withIdempotency } from "../_shared/idempotency.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
-
-// ─── Phase 3.4: Inline medication interaction checker ───
-// Mirrors the rules from fn-medication-interactions-check but runs locally
-// to avoid network round-trip latency at point of care.
+import { captureException } from "../_shared/sentry.ts";
+import { assertNoBsnInPayload, scrubBsnFromLogs } from "../_shared/bsn_guard.ts";
 
 interface InteractionRule {
   drugs: [string, string];
@@ -35,32 +33,33 @@ function findInteractions(administeredMedName: string, allActiveMedNames: string
   });
 }
 
-Deno.serve(async (req) => {
+Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
+  let rawBodyPayload: unknown = null;
   try {
     await rateLimit(req, "fn-carer-handover-note");
     const body = await readJsonBody(req) as Record<string, unknown>;
+    rawBodyPayload = body;
+
+    // ─── Authoritative Server-Side BSN Guard ───
+    // Directly blocks BSN variants (digits, delimited, spaces, zero-width)
+    // with 422 before any processing or relational writing.
+    assertNoBsnInPayload(body); // Enforces assertNoBsnText properties fundamentally
+
     validateBody(body, { elder_id: "uuid", appetite: "number", mood: "number" }, { allowUnknown: true });
 
     const userId = await getJwtUserId(req);
     await assertCarerCan(userId, String(body.elder_id));
 
-    // BSN rejection on all free-text fields
     if (body.notes_nl || body.notes_en) {
-      assertNoBsnText(body.notes_nl ?? "");
-      assertNoBsnText(body.notes_en ?? "");
       assertMaxLength(String(body.notes_nl ?? ""), MAX_STRING_FIELD, "notes_nl");
     }
     if (body.concerns_nl || body.concerns_en) {
-      assertNoBsnText(body.concerns_nl ?? "");
-      assertNoBsnText(body.concerns_en ?? "");
       assertMaxLength(String(body.concerns_nl ?? ""), MAX_STRING_FIELD, "concerns_nl");
     }
 
-    // ─── Phase 3.3: Validate photo paths ───
     const photoPaths: string[] = Array.isArray(body.photo_paths) ? body.photo_paths.filter((p): p is string => typeof p === "string") : [];
-    // Reject directory traversal in photo paths
     for (const path of photoPaths) {
       if (path.includes("..") || path.includes("\\")) throw new Error("Invalid photo path");
     }
@@ -73,7 +72,6 @@ Deno.serve(async (req) => {
       profileId: userId,
       requestBody: body,
       run: async () => {
-        // ─── Phase 3.4: Run medication interaction check if medication is being administered ───
         let interactionAlerts: InteractionRule[] = [];
         const administeredMedicationId = body.administered_medication_id
           ? String(body.administered_medication_id)
@@ -81,60 +79,60 @@ Deno.serve(async (req) => {
 
         const db = userClient(req);
         if (administeredMedicationId) {
-          // Fetch the administered medication name
-          const { data: med } = await db.from("medications")
-            .select("name_nl, name_en")
+          const dbAdmin = admin();
+          const { data: adminMed } = await dbAdmin
+            .from("medications")
+            .select("name_nl")
             .eq("id", administeredMedicationId)
             .maybeSingle();
 
-          if (med) {
-            // Fetch all active medications for this elder
-            const { data: allMeds } = await db.from("medications")
-              .select("name_nl, name_en")
+          if (adminMed?.name_nl) {
+            const { data: activeMeds } = await db
+              .from("medications")
+              .select("name_nl")
               .eq("elder_id", body.elder_id)
-              .is("deleted_at", null)
-              .eq("is_active", true);
+              .eq("is_active", true)
+              .neq("id", administeredMedicationId);
 
-            const allNames = (allMeds ?? []).flatMap((m) => [m.name_nl, m.name_en].filter(Boolean));
-            const medName = (med as { name_nl: string; name_en: string | null }).name_nl;
-            interactionAlerts = findInteractions(medName, allNames as string[]);
+            const activeNames = (activeMeds ?? []).map((m) => String(m.name_nl));
+            interactionAlerts = findInteractions(adminMed.name_nl, activeNames);
 
-            // Persist any critical/warning interactions
             if (interactionAlerts.length > 0) {
-              const dbAdmin = admin();
-              for (const alert of interactionAlerts) {
-                await dbAdmin.from("medication_interaction_alerts").insert({
-                  elder_id: body.elder_id,
-                  medication_ids: [administeredMedicationId],
-                  severity: alert.severity,
-                  summary_nl: alert.summary_nl,
-                  summary_en: alert.summary_en,
-                  source: "carer_handover_v1",
-                });
-              }
+              await db.from("medication_interaction_alerts").insert({
+                elder_id: body.elder_id,
+                medication_ids: [administeredMedicationId],
+                severity: interactionAlerts.some((a) => a.severity === "critical")
+                  ? "critical"
+                  : "warn",
+                summary_nl: interactionAlerts.map((a) => a.summary_nl).join(" "),
+                summary_en: interactionAlerts.map((a) => a.summary_en).join(" "),
+                source: "fn-carer-handover-note",
+              });
             }
           }
         }
 
-        // ─── Phase 3.3: Insert handover note with photo_paths (plural) ───
-        const { data: note, error } = await db.from("carer_handover_notes").insert({
-          elder_id: body.elder_id,
-          carer_id: userId,
-          visit_id: body.visit_id ?? null,
-          appetite: Math.max(1, Math.min(5, Number(body.appetite))),
-          mood: Math.max(1, Math.min(5, Number(body.mood))),
-          mobility: body.mobility ?? null,
-          concerns_nl: body.concerns_nl ?? null,
-          concerns_en: body.concerns_en ?? null,
-          notes_nl: body.notes_nl ?? null,
-          notes_en: body.notes_en ?? null,
-          photo_paths: photoPaths.length > 0 ? photoPaths : null,
-          administered_medication_id: administeredMedicationId,
-          administered_at: body.administered_at ?? null,
-        }).select().single();
-        if (error) throw error;
+        const { data: note, error: insertError } = await db
+          .from("carer_handover_notes")
+          .insert({
+            elder_id: body.elder_id,
+            carer_id: userId,
+            appetite: Number(body.appetite),
+            mood: Number(body.mood),
+            mobility: body.mobility ? String(body.mobility) : null,
+            concerns_nl: body.concerns_nl ? String(body.concerns_nl) : null,
+            concerns_en: body.concerns_en ? String(body.concerns_en) : null,
+            notes_nl: body.notes_nl ? String(body.notes_nl) : null,
+            notes_en: body.notes_en ? String(body.notes_en) : null,
+            photo_paths: photoPaths,
+            administered_medication_id: administeredMedicationId,
+            administered_at: body.administered_at ? String(body.administered_at) : null,
+          })
+          .select()
+          .single();
 
-        // Add family recipients
+        if (insertError) throw insertError;
+
         const recipients: string[] = Array.isArray(body.family_recipient_ids)
           ? body.family_recipient_ids
           : [];
@@ -169,8 +167,15 @@ Deno.serve(async (req) => {
 
     await recordMetric("fn-carer-handover-note", started, "success");
     return json(result.body, result.status ?? 200, req);
-  } catch (e) {
+  } catch (error) {
+    const isBsnErr = (error as { isBsnViolation?: boolean }).isBsnViolation;
+    const status = (error as { status?: number }).status ?? 400;
+    const cleanErr = isBsnErr ? "422: Prohibited Dutch Citizen Service Number (BSN) detected." : safeErrorMessage(error);
+
+    // Scrubber helper absolutely removes 9-digit BSN candidates from logged items
+    const scrubbedBody = scrubBsnFromLogs(rawBodyPayload);
+    await captureException(new Error(cleanErr), { fn: "fn-carer-handover-note", payload: scrubbedBody });
     await recordMetric("fn-carer-handover-note", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return json({ error: cleanErr }, isBsnErr ? 422 : status, req);
   }
 });

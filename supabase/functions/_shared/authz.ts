@@ -1,12 +1,48 @@
 import { admin } from './core.ts';
 
+export class AuthzError extends Error {
+  constructor(message: string, public readonly reasonCode: "SYSTEM_UNCERTAINTY" | "UNAUTHORIZED_DELEGATE" | "MISSING_PERMISSION" | "INVALID_TOKEN") {
+    super(message);
+    this.name = "AuthzError";
+    (this as unknown as { status: number }).status = 403;
+  }
+}
+
+async function logDenyAudit(actorId: string, elderId: string | null, resource: string, reasonCode: string) {
+  const db = admin();
+  // Add structured audit_log entries for DENY (reason codes; absolutely no PII)
+  await db.from("audit_log").insert({
+    actor_id: actorId ? String(actorId) : "00000000-0000-0000-0000-000000000001",
+    actor_role: "system",
+    action: "AUTHZ_DENY_GATE",
+    table_name: resource,
+    elder_id: elderId ? String(elderId) : null,
+    extra: { reason_code: reasonCode, timestamp: new Date().toISOString() },
+  }).catch(() => undefined);
+}
+
 export async function getJwtUser(req: Request) {
   const auth = req.headers.get('authorization') ?? '';
   const token = auth.replace(/^Bearer\s+/i, '');
-  if (!token) throw new Error('Missing bearer token');
-  const { data, error } = await admin().auth.getUser(token);
-  if (error || !data.user) throw new Error('Invalid bearer token');
-  return data.user;
+  if (!token) {
+    await logDenyAudit("", null, "auth_gateway", "INVALID_TOKEN");
+    throw new AuthzError('Missing bearer token', 'INVALID_TOKEN');
+  }
+  let user: unknown = null;
+  let authError: unknown;
+  try {
+    const { data, error } = await admin().auth.getUser(token);
+    user = data?.user;
+    authError = error ?? null;
+  } catch (err) {
+    authError = err;
+  }
+
+  if (authError || !user) {
+    await logDenyAudit("", null, "auth_gateway", "INVALID_TOKEN");
+    throw new AuthzError('Invalid bearer token', 'INVALID_TOKEN');
+  }
+  return user as { id: string; [key: string]: unknown };
 }
 
 export async function getJwtUserId(req: Request) {
@@ -14,38 +50,82 @@ export async function getJwtUserId(req: Request) {
 }
 
 export async function getProfileRole(userId: string) {
-  const { data, error } = await admin().from('profiles').select('role').eq('id', userId).single();
-  if (error || !data?.role) throw new Error('Could not determine caller role');
+  let queryResult: unknown = null;
+  let dbError: unknown;
+
+  try {
+    const { data, error } = await admin().from('profiles').select('role').eq('id', userId).single();
+    queryResult = data;
+    dbError = error ?? null;
+  } catch (err) {
+    dbError = err;
+  }
+
+  if (dbError || !queryResult) {
+    await logDenyAudit(userId, null, "profiles", "SYSTEM_UNCERTAINTY");
+    throw new AuthzError('Could not determine caller role due to system uncertainty', 'SYSTEM_UNCERTAINTY');
+  }
+
+  const data = queryResult as { role: unknown };
   return String(data.role);
 }
 
 export function assertSelf(userId: string, claimedId: string, label = 'resource owner') {
-  if (userId !== claimedId) throw new Error(`Caller is not allowed to act for this ${label}`);
+  if (userId !== claimedId) {
+    throw new AuthzError(`Caller ${userId} is not allowed to act for this ${label}`, 'UNAUTHORIZED_DELEGATE');
+  }
   return true;
 }
 
 export async function assertSelfOrAdmin(userId: string, claimedId: string) {
   if (userId === claimedId) return true;
   if (await getProfileRole(userId) === 'admin') return true;
-  throw new Error('Caller is not allowed to access this elder record');
+  await logDenyAudit(userId, claimedId, "elder_record", "UNAUTHORIZED_DELEGATE");
+  throw new AuthzError('Caller is not allowed to access this older adult record', 'UNAUTHORIZED_DELEGATE');
 }
 
 export function assertActorMatches(userId: string, claimedId: string | undefined, fieldName: string) {
-  if (claimedId && claimedId !== userId) throw new Error(`${fieldName} must match the authenticated caller`);
+  if (claimedId && claimedId !== userId) {
+    throw new AuthzError(`${fieldName} must match the authenticated caller`, 'UNAUTHORIZED_DELEGATE');
+  }
   return true;
 }
 
 export async function assertElderOrFamilyCan(userId: string, elderId: string, permission: string) {
   if (userId === elderId) return true;
-  const { data } = await admin()
-    .from('family_relationships')
-    .select('*')
-    .eq('elder_id', elderId)
-    .eq('family_member_id', userId)
-    .eq('elder_consented', true)
-    .eq('is_active', true)
-    .maybeSingle();
-  if (!data) throw new Error('No active elder consent');
+
+  let queryResult: unknown = null;
+  let dbError: unknown;
+
+  try {
+    const { data, error } = await admin()
+      .from('family_relationships')
+      .select('*')
+      .eq('elder_id', elderId)
+      .eq('family_member_id', userId)
+      .eq('elder_consented', true)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    queryResult = data;
+    dbError = error ?? null;
+  } catch (err) {
+    dbError = err;
+  }
+
+  // DENY on any error/uncertainty (timeouts, DB errors)
+  if (dbError) {
+    await logDenyAudit(userId, elderId, permission, "SYSTEM_UNCERTAINTY");
+    throw new AuthzError('Relational policy check aborted due to storage subsystem error or timeout.', 'SYSTEM_UNCERTAINTY');
+  }
+
+  // DENY on missing rows (unknown delegate)
+  if (!queryResult) {
+    await logDenyAudit(userId, elderId, permission, "UNAUTHORIZED_DELEGATE");
+    throw new AuthzError('No active verified older adult consent delegate credentials.', 'UNAUTHORIZED_DELEGATE');
+  }
+
+  const data = queryResult as Record<string, unknown>;
   const field = {
     medications: 'can_view_medications',
     messages: 'can_view_messages',
@@ -54,39 +134,90 @@ export async function assertElderOrFamilyCan(userId: string, elderId: string, pe
     stories: 'can_view_stories',
     financials: 'can_view_financials',
   }[permission] ?? permission;
-  if (!data[field]) throw new Error(`Missing permission: ${permission}`);
+
+  if (!data[field]) {
+    await logDenyAudit(userId, elderId, permission, "MISSING_PERMISSION");
+    throw new AuthzError(`Missing specific required RBAC capability: ${permission}`, 'MISSING_PERMISSION');
+  }
+
   return true;
 }
 
 export async function assertCarerCan(userId: string, elderId: string) {
-  const { data } = await admin()
-    .from('carer_relationships')
-    .select('id')
-    .eq('elder_id', elderId)
-    .eq('carer_member_id', userId)
-    .eq('elder_consented', true)
-    .eq('is_active', true)
-    .maybeSingle();
-  if (!data) throw new Error('No active carer consent');
+  let queryResult: unknown = null;
+  let dbError: unknown;
+
+  try {
+    const { data, error } = await admin()
+      .from('carer_relationships')
+      .select('id')
+      .eq('elder_id', elderId)
+      .eq('carer_member_id', userId)
+      .eq('elder_consented', true)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    queryResult = data;
+    dbError = error ?? null;
+  } catch (err) {
+    dbError = err;
+  }
+
+  if (dbError) {
+    await logDenyAudit(userId, elderId, "carer_portal", "SYSTEM_UNCERTAINTY");
+    throw new AuthzError('Storage database subsystem error or timeout during carer check.', 'SYSTEM_UNCERTAINTY');
+  }
+
+  if (!queryResult) {
+    await logDenyAudit(userId, elderId, "carer_portal", "UNAUTHORIZED_DELEGATE");
+    throw new AuthzError('No active professional carer relationship or consent.', 'UNAUTHORIZED_DELEGATE');
+  }
+
   return true;
 }
 
 export async function assertCarerPermission(userId: string, elderId: string, permission: string) {
-  const { data } = await admin()
-    .from('carer_relationships')
-    .select('*')
-    .eq('elder_id', elderId)
-    .eq('carer_member_id', userId)
-    .eq('elder_consented', true)
-    .eq('is_active', true)
-    .maybeSingle();
-  if (!data) throw new Error('No active carer consent');
+  let queryResult: unknown = null;
+  let dbError: unknown;
+
+  try {
+    const { data, error } = await admin()
+      .from('carer_relationships')
+      .select('*')
+      .eq('elder_id', elderId)
+      .eq('carer_member_id', userId)
+      .eq('elder_consented', true)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    queryResult = data;
+    dbError = error ?? null;
+  } catch (err) {
+    dbError = err;
+  }
+
+  if (dbError) {
+    await logDenyAudit(userId, elderId, permission, "SYSTEM_UNCERTAINTY");
+    throw new AuthzError('Database subsystem error or timeout during specific carer capability check.', 'SYSTEM_UNCERTAINTY');
+  }
+
+  if (!queryResult) {
+    await logDenyAudit(userId, elderId, permission, "UNAUTHORIZED_DELEGATE");
+    throw new AuthzError('No active professional carer relationship or consent.', 'UNAUTHORIZED_DELEGATE');
+  }
+
+  const data = queryResult as Record<string, unknown>;
   const field = {
     visit_logs: 'can_view_visit_logs',
     create_visit_logs: 'can_create_visit_logs',
     incidents: 'can_file_incidents',
     medications: 'can_view_medications',
   }[permission] ?? permission;
-  if (!data[field]) throw new Error(`Missing carer permission: ${permission}`);
+
+  if (!data[field]) {
+    await logDenyAudit(userId, elderId, permission, "MISSING_PERMISSION");
+    throw new AuthzError(`Missing specific required professional carer capability: ${permission}`, 'MISSING_PERMISSION');
+  }
+
   return true;
 }

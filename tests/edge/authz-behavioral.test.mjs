@@ -122,9 +122,10 @@ function chainable(query, final) {
       return chainable(query, final);
     };
   });
-  obj.maybeSingle = () => final(query);
-  obj.single = () => final(query);
+  obj.maybeSingle = () => final(query, 'maybeSingle');
+  obj.single = () => final(query, 'single');
   obj.then = (resolve) => resolve(final(query));
+  obj.insert = () => Promise.resolve({ data: null, error: null });
   return obj;
 }
 
@@ -139,7 +140,7 @@ const mock = {
   },
   from(table) {
     const query = { table };
-    const final = (q) => {
+    const final = (q, mode = 'single') => {
       // Apply ALL .eq filters as a conjunction, then simulate SQL RLS by also
       // filtering out soft-deleted rows (deleted_at IS NULL). This mirrors what
       // the Postgres RLS policies do in production.
@@ -149,17 +150,20 @@ const mock = {
       if (q.table === 'family_relationships') {
         const eqs = q.eq ?? [];
         const row = familyRows.find((r) => matchesEq(r, eqs) && notSoftDeleted(r)) ?? null;
-        return { data: row, error: row ? null : { code: 'PGRST116', message: 'not found' } };
+        return { data: row, error: row ? null : (mode === 'maybeSingle' ? null : { code: 'PGRST116', message: 'not found' }) };
       }
       if (q.table === 'carer_relationships') {
         const eqs = q.eq ?? [];
         const row = carerRows.find((r) => matchesEq(r, eqs) && notSoftDeleted(r)) ?? null;
-        return { data: row, error: row ? null : { code: 'PGRST116', message: 'not found' } };
+        return { data: row, error: row ? null : (mode === 'maybeSingle' ? null : { code: 'PGRST116', message: 'not found' }) };
       }
       if (q.table === 'profiles') {
         const eqs = q.eq ?? [];
         const row = Array.from(profileRows.values()).find((r) => matchesEq(r, eqs) && notSoftDeleted(r)) ?? null;
-        return { data: row, error: row ? null : { code: 'PGRST116', message: 'not found' } };
+        return { data: row, error: row ? null : (mode === 'maybeSingle' ? null : { code: 'PGRST116', message: 'not found' }) };
+      }
+      if (q.table === 'audit_log') {
+        return { data: null, error: null };
       }
       return { data: null, error: { message: `mock has no table ${q.table}` } };
     };
@@ -293,35 +297,35 @@ test('assertElderOrFamilyCan: family with consent + permission is allowed', asyn
 test('assertElderOrFamilyCan: family with consent but missing permission throws', async () => {
   resetFixtures();
   familyRows = [fam(FAMILY_WITH_CONSENT, { can_view_financials: false })];
-  await assert.rejects(authz.assertElderOrFamilyCan(FAMILY_WITH_CONSENT, ELDER_ID, 'financials'), /Missing permission: financials/);
+  await assert.rejects(authz.assertElderOrFamilyCan(FAMILY_WITH_CONSENT, ELDER_ID, 'financials'), /Missing specific required RBAC capability: financials/);
 });
 
 test('assertElderOrFamilyCan: family without consent throws', async () => {
   resetFixtures();
   familyRows = [fam(FAMILY_NO_CONSENT, { elder_consented: false, is_active: false })];
-  await assert.rejects(authz.assertElderOrFamilyCan(FAMILY_NO_CONSENT, ELDER_ID, 'medications'), /No active elder consent/);
+  await assert.rejects(authz.assertElderOrFamilyCan(FAMILY_NO_CONSENT, ELDER_ID, 'medications'), /No active verified older adult consent/);
 });
 
 test('assertElderOrFamilyCan: pending family (consented=false, active=true) throws', async () => {
   resetFixtures();
   familyRows = [fam(FAMILY_PENDING, { elder_consented: false })];
-  await assert.rejects(authz.assertElderOrFamilyCan(FAMILY_PENDING, ELDER_ID, 'medications'), /No active elder consent/);
+  await assert.rejects(authz.assertElderOrFamilyCan(FAMILY_PENDING, ELDER_ID, 'medications'), /No active verified older adult consent/);
 });
 
 test('assertElderOrFamilyCan: soft-deleted relationship throws', async () => {
   resetFixtures();
   familyRows = [fam(FAMILY_WITH_CONSENT, { deleted_at: '2026-06-10T00:00:00Z' })];
-  await assert.rejects(authz.assertElderOrFamilyCan(FAMILY_WITH_CONSENT, ELDER_ID, 'medications'), /No active elder consent/);
+  await assert.rejects(authz.assertElderOrFamilyCan(FAMILY_WITH_CONSENT, ELDER_ID, 'medications'), /No active verified older adult consent/);
 });
 
 test('assertElderOrFamilyCan: carer does not inherit family permissions', async () => {
   resetFixtures();
-  await assert.rejects(authz.assertElderOrFamilyCan(CARER_ACTIVE, ELDER_ID, 'medications'), /No active elder consent/);
+  await assert.rejects(authz.assertElderOrFamilyCan(CARER_ACTIVE, ELDER_ID, 'medications'), /No active verified older adult consent/);
 });
 
 test('assertElderOrFamilyCan: unrelated user throws', async () => {
   resetFixtures();
-  await assert.rejects(authz.assertElderOrFamilyCan('00000000-0000-0000-0000-000000000099', ELDER_ID, 'medications'), /No active elder consent/);
+  await assert.rejects(authz.assertElderOrFamilyCan('00000000-0000-0000-0000-000000000099', ELDER_ID, 'medications'), /No active verified older adult consent/);
 });
 
 test('assertCarerCan: active carer is allowed', async () => {
@@ -331,18 +335,18 @@ test('assertCarerCan: active carer is allowed', async () => {
 
 test('assertCarerCan: elder is not a carer', async () => {
   resetFixtures();
-  await assert.rejects(authz.assertCarerCan(ELDER_ID, ELDER_ID), /No active carer consent/);
+  await assert.rejects(authz.assertCarerCan(ELDER_ID, ELDER_ID), /No active professional carer relationship/);
 });
 
 test('assertCarerCan: family is not a carer', async () => {
   resetFixtures();
-  await assert.rejects(authz.assertCarerCan(FAMILY_WITH_CONSENT, ELDER_ID), /No active carer consent/);
+  await assert.rejects(authz.assertCarerCan(FAMILY_WITH_CONSENT, ELDER_ID), /No active professional carer relationship/);
 });
 
 test('assertCarerCan: inactive carer relationship throws', async () => {
   resetFixtures();
   carerRows = [carer({ is_active: false })];
-  await assert.rejects(authz.assertCarerCan(CARER_ACTIVE, ELDER_ID), /No active carer consent/);
+  await assert.rejects(authz.assertCarerCan(CARER_ACTIVE, ELDER_ID), /No active professional carer relationship/);
 });
 
 test('assertCarerPermission: carer with create_visit_logs is allowed', async () => {
@@ -353,7 +357,7 @@ test('assertCarerPermission: carer with create_visit_logs is allowed', async () 
 test('assertCarerPermission: carer without specific permission throws', async () => {
   resetFixtures();
   carerRows = [carer({ can_file_incidents: false })];
-  await assert.rejects(authz.assertCarerPermission(CARER_ACTIVE, ELDER_ID, 'incidents'), /Missing carer permission: incidents/);
+  await assert.rejects(authz.assertCarerPermission(CARER_ACTIVE, ELDER_ID, 'incidents'), /Missing specific required professional carer capability: incidents/);
 });
 
 test('getProfileRole: returns role for known user', async () => {

@@ -1,6 +1,8 @@
-import { admin, cors, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
 import { assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
+import { captureException } from "../_shared/sentry.ts";
+import { assertNoBsnInPayload, scrubBsnFromLogs } from "../_shared/bsn_guard.ts";
 
 function looksLikeBsn(text: string) {
   const compact = text.replace(/\D/g, "");
@@ -13,11 +15,17 @@ function assertOwnedStoragePath(userId: string, storagePath: string) {
   if (ownerId !== userId) throw new Error('storage_path must belong to the authenticated elder');
 }
 
-Deno.serve(async (req) => {
+Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
+  let rawBodyPayload: unknown = null;
   try {
     const body = await readJsonBody(req) as Record<string, unknown>;
+    rawBodyPayload = body;
+
+    // ─── Authoritative Server-Side BSN Guard ───
+    assertNoBsnInPayload(body);
+
     validateBody(body, { elder_id: 'uuid', storage_path: 'string', document_type: 'string', label_nl: 'string' }, { allowUnknown: true });
     const userId = await getJwtUserId(req);
     assertSelf(userId, String(body.elder_id), 'document analysis');
@@ -58,8 +66,15 @@ Deno.serve(async (req) => {
     }
     await recordMetric("fn-document-analyse", started, "success");
     return json({ success: true, document_id: doc.id, analysis_job_id: job.id, redaction_required: bsnDetected, status: job.status });
-  } catch (e) {
+  } catch (error) {
+    const isBsnErr = (error as { isBsnViolation?: boolean }).isBsnViolation;
+    const status = (error as { status?: number }).status ?? 400;
+    const cleanErr = isBsnErr ? "422: Prohibited Dutch Citizen Service Number (BSN) detected." : safeErrorMessage(error);
+
+    // Scrubber helper entirely removes 9-digit BSN candidates from logged payloads
+    const scrubbedBody = scrubBsnFromLogs(rawBodyPayload);
+    await captureException(new Error(cleanErr), { fn: "fn-document-analyse", payload: scrubbedBody });
     await recordMetric("fn-document-analyse", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return json({ error: cleanErr }, isBsnErr ? 422 : status, req);
   }
 });
