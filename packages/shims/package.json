@@ -1,0 +1,13 @@
+{
+  "name": "@haven/shims",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./index.ts",
+  "dependencies": {
+    "expo-camera": "56.0.8",
+    "expo-haptics": "56.0.3",
+    "expo-notifications": "56.0.17",
+    "expo-secure-store": "56.0.4",
+    "expo-sqlite": "56.0.5"
+  }
+}

@@ -4,6 +4,7 @@
 // because they log in/out multiple times per shift across different elders.
 
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { createClient, Session, SupabaseClient } from '@supabase/supabase-js';
@@ -78,9 +79,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signInWithBiometric(): Promise<boolean> {
+    const promptMsg = Platform.OS === 'macos' ? 'HAVEN verificatie op Mac' : Platform.OS === 'android' ? 'HAVEN Verificatie\nBevestig uw identiteit om door te gaan' : 'Log in als zorgverlener';
     const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: 'Log in als zorgverlener',
+      promptMessage: promptMsg,
       fallbackLabel: 'Gebruik pincode',
+      ...(Platform.OS === 'android' ? { promptMessage: 'HAVEN Verificatie', subtitle: 'Bevestig uw identiteit om door te gaan' } : {}),
     });
     return result.success;
   }

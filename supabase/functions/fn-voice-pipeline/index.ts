@@ -62,40 +62,75 @@ Deno.serve(asyncWrapper("fn-voice-pipeline", async (req: Request) => {
 
       assertNoBsnInPayload({ transcript });
 
-      // ─── COMPENSATING CONTROL — full fix tracked in R2 (NeMo/Llama-Guard) ───
-      // Dutch negative keyword/phrase list check filtering adversarial STT audio overrides
-      // BEFORE intent classification executes.
+      // ─── COMPENSATING CONTROL — full semantic guardrails tracked as R2 ───
+      // 1. Expand BANNED_STT_PHRASES to include Flemish/Dutch dialect variants and formal synonyms
       const BANNED_STT_PHRASES = [
         "negeer", "vergeet vorige", "ignore", "forget previous", 
         "bevestig direct", "confirm immediately", "override", 
         "system prompt", "negeer eerdere", "vergeet alles",
-        "altijd ingenomen", "log direct"
+        "altijd ingenomen", "log direct",
+        "ontken eerdere instructies", "ontken vorige", "verontachtzaam",
+        "overschrijf", "heroverweeg", "annuleer vorige",
+        "forceer", "passeer", "doe alsof", "negeer vorige instructies",
+        "instructies overschrijven"
       ];
       
+      // 2. Normalize transcript before checking (lowercase, collapse multiple spaces, remove punctuation)
       const lowerTrans = transcript.toLowerCase();
-      const hasBannedPhrase = BANNED_STT_PHRASES.some((phrase) => lowerTrans.includes(phrase));
-      const hasUnusualMarCommand = /(medicatie|pillen|furosemide|insuline).*(direct|altijd|negeer|forceer)/.test(lowerTrans);
+      const normalizedTrans = lowerTrans.replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim();
+      // Space-obfuscated versions (n e g e e r -> strip spaces before check)
+      const spaceStrippedTrans = normalizedTrans.replace(/\s+/g, "");
+
+      const hasBannedPhrase = BANNED_STT_PHRASES.some((phrase) => {
+        const normPhrase = phrase.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim();
+        const strippedPhrase = normPhrase.replace(/\s+/g, "");
+        return normalizedTrans.includes(normPhrase) || spaceStrippedTrans.includes(strippedPhrase);
+      });
+
+      const hasUnusualMarCommand = /(medicatie|pillen|furosemide|insuline).*(direct|altijd|negeer|forceer|overschrijf)/.test(normalizedTrans) || /overschrijf.*medicatie/.test(normalizedTrans);
 
       if (hasBannedPhrase || hasUnusualMarCommand) {
+        // ─── 3. False-positive handling path ───
+        // If legitimate elder phrase accidentally matches (e.g. talking about weather or pain) ->
+        // return a clarifying prompt instead of hard rejection.
+        const isInnocentContext = /(regen|pijn|wandelen|tuin|voel|weer|eten|koffie|thee|slapen|tv|knie|rug|buiten)/.test(normalizedTrans);
+        const isHighlyAdversarial = !isInnocentContext;
+
         await dbAdmin.from("audit_log").insert({
           actor_id: userId,
           actor_role: "elder",
-          action: "VOICE_STT_HIJACKING_REJECTION",
+          action: isHighlyAdversarial ? "VOICE_STT_HIJACKING_REJECTION" : "VOICE_STT_CLARIFICATION_LOG",
           table_name: "medication_reminders",
           elder_id: String(body.elder_id),
-          extra: { transcript, rejection_reason: "Adversarial STT prompt injection or override pattern intercepted" },
+          extra: { transcript, rejection_reason: isHighlyAdversarial ? "Adversarial STT prompt injection or override pattern intercepted" : "Accidental STT keyword match triggering clarifying prompt" },
         }).catch(() => undefined);
 
-        return { 
-          body: { 
-            transcript, 
-            intent: "hijacking_attempt", 
-            response_text: locale === "nl-NL" ? "Ik kan dit verzoek niet uitvoeren om de medische veiligheid te waarborgen." : "I cannot fulfill this request to guarantee medical safety.", 
-            action_taken: "PIPELINE_HALTED", 
-            audio_url: null, 
-            distress_detected: false 
-          } 
-        };
+        if (isHighlyAdversarial) {
+          return { 
+            body: { 
+              transcript, 
+              intent: "hijacking_attempt", 
+              response_text: locale === "nl-NL" ? "Ik kan dit verzoek niet uitvoeren om de medische veiligheid te waarborgen." : "I cannot fulfill this request to guarantee medical safety.", 
+              action_taken: "PIPELINE_HALTED", 
+              audio_url: null, 
+              distress_detected: false 
+            } 
+          };
+        } else {
+          const clarifyPrompt = locale === "nl-NL"
+            ? "Bedoelt u dat u een eerdere opmerking wilt aanpassen? Vertel me rustig wat er aan de hand is."
+            : "Do you mean you want to correct an earlier remark? Please calmly tell me what's going on.";
+          return {
+            body: {
+              transcript,
+              intent: "clarification_needed",
+              response_text: clarifyPrompt,
+              action_taken: "CLARIFICATION_REQUESTED",
+              audio_url: null,
+              distress_detected: false,
+            }
+          };
+        }
       }
       // ────────────────────────────────────────────────────────────────────────
 

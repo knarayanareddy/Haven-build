@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#1A2B4C" />
+  <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+  <title>HAVEN Patiëntportaal</title>
+  <style>
+    /* CONFIG 4: Responsive Web Layout accessibility focus outlines and global styling */
+    body, html, #root {
+      margin: 0; padding: 0; width: 100%; height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background-color: #1A2B4C;
+    }
+    :focus {
+      outline: 4px solid #4A6B82 !important;
+      outline-offset: 2px !important;
+    }
+    .install-banner {
+      display: none; position: fixed; bottom: 0; left: 0; right: 0; background: #2C3E6B; color: white; padding: 14px 20px; z-index: 999999; justify-content: space-between; align-items: center;
+      border-top: 2px solid #1A2B4C;
+    }
+    .install-banner button {
+      background: #4A6B82; border: none; color: white; padding: 10px 16px; border-radius: 10px; font-weight: bold; cursor: pointer;
+    }
+    .install-banner button:hover {
+      background: #5A7B92;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  
+  <!-- CONFIG 2: Install prompt for Add to Home Screen -->
+  <div id="installAppPrompt" class="install-banner">
+    <span>📲 Installeer HAVEN als toegankelijke PWA app op uw computer of tablet.</span>
+    <button id="installAppBtn">Installeer PWA</button>
+  </div>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('%PUBLIC_URL%/service-worker.js').catch(() => undefined);
+      });
+    }
+
+    let deferredPrompt;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      const promptBanner = document.getElementById('installAppPrompt');
+      if (promptBanner) promptBanner.style.display = 'flex';
+    });
+
+    const installBtn = document.getElementById('installAppBtn');
+    if (installBtn) {
+      installBtn.addEventListener('click', async () => {
+        const promptBanner = document.getElementById('installAppPrompt');
+        if (promptBanner) promptBanner.style.display = 'none';
+        if (deferredPrompt) {
+          deferredPrompt.prompt();
+          await deferredPrompt.userChoice;
+          deferredPrompt = null;
+        }
+      });
+    }
+  </script>
+</body>
+</html>

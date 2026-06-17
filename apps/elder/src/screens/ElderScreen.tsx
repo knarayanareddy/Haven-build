@@ -1,10 +1,11 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { productionScreens } from '@haven/schema/src/screenSchema';
 import { ScreenRenderer, ScreenContext, ElderProfile, FamilyMember, MedicationRow, TaskRow, MessageRow, ScamEventRow, BuurtRow, VisitLogRow } from '../renderer/ScreenRenderer';
 import { ElderStackParamList } from '../navigation/AppNavigator';
 import { useHavenActions } from '../hooks/useHavenActions';
 import { useAuth } from '../auth/AuthProvider';
+import { initializeAndroidDozeGuard } from '../services/dozeGuard';
 
 type Props = NativeStackScreenProps<ElderStackParamList>;
 
@@ -71,6 +72,9 @@ function loadSeed(): {
 }
 
 export function ElderScreen({ route, navigation }: Props) {
+  useEffect(() => {
+    initializeAndroidDozeGuard().catch(() => undefined);
+  }, []);
   const schema = productionScreens.find((screen) => screen.screenId === route.name) ?? productionScreens[0];
   const actions = useHavenActions(schema.screenId);
   const { session } = useAuth();

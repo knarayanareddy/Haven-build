@@ -1,5 +1,5 @@
-import React, { useCallback, useRef, useState } from 'react';
-import { Animated, Easing, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Animated, Easing, Platform, Text, TouchableOpacity, View } from 'react-native';
 import { colors } from '@haven/ui/src/tokens';
 import type { Locale } from '@haven/contracts/src/haven';
 
@@ -7,17 +7,18 @@ export interface FloatingVoiceButtonProps {
   locale: Locale;
   screenId: string;
   voiceFallback: string;
-  audioVolumePct?: number; // Raw incoming un-throttled audio meter level (0-100)
+  audioVolumePct?: number; // Raw incoming un-throttled audio meter level
   hapticTrigger: () => void;
-  onRenderFrame?: () => void; // Telemetry helper proving exact JS component re-render frequency
+  onRenderFrame?: () => void; // Telemetry helper
+  navigation?: any;
 }
 
-function FloatingVoiceButtonComponent({ locale, screenId, voiceFallback, audioVolumePct = 0, hapticTrigger, onRenderFrame }: FloatingVoiceButtonProps) {
+function FloatingVoiceButtonComponent({ locale, screenId, voiceFallback, audioVolumePct = 0, hapticTrigger, onRenderFrame, navigation }: FloatingVoiceButtonProps) {
   const [isListening, setListening] = useState(false);
+  const [macosVoiceState, setMacosState] = useState<'idle' | 'listening' | 'processing'>('idle');
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const lastRenderTime = useRef(Date.now());
   
-  // Measurement telemetry proof: record whenever JavaScript thread executes a full component render
   if (onRenderFrame) onRenderFrame();
   lastRenderTime.current = Date.now();
 
@@ -40,17 +41,66 @@ function FloatingVoiceButtonComponent({ locale, screenId, voiceFallback, audioVo
   const handlePress = useCallback(() => {
     hapticTrigger();
     setListening(true);
+    setMacosState('listening');
     startPulse();
-    setTimeout(() => { setListening(false); stopPulse(); }, 60_000); // 60s listening scenario
+    setTimeout(() => { setListening(false); setMacosState('idle'); stopPulse(); }, 60_000); // 60s listening scenario
   }, [hapticTrigger, startPulse, stopPulse]);
+
+  // CONFIG 4: Global keyboard shortcuts for macOS (Cmd+Shift+V -> activate voice input, Escape -> dismiss, Cmd+1/2/3 -> main navigation tabs)
+  useEffect(() => {
+    if (Platform.OS !== 'macos' && Platform.OS !== 'web') return;
+
+    const handleKeyDown = (e: any) => {
+      // Cmd+Shift+V -> activate voice input
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key?.toLowerCase() === 'v') {
+        e.preventDefault();
+        setListening(true);
+        setMacosState('listening');
+        setTimeout(() => { setListening(false); setMacosState('idle'); }, 60_000);
+      }
+      // Escape -> dismiss voice input
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setListening(false);
+        setMacosState('idle');
+      }
+      // Cmd+1/2/3 -> main navigation tabs
+      if ((e.metaKey || e.ctrlKey) && ['1', '2', '3'].includes(e.key)) {
+        e.preventDefault();
+        if (e.key === '1') navigation?.navigate?.('VisitList');
+        if (e.key === '2') navigation?.navigate?.('ShiftSummary');
+        if (e.key === '3') navigation?.navigate?.('HandoverForm');
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [navigation]);
 
   const label = locale === 'nl-NL' ? 'Praat met HAVEN' : 'Talk to HAVEN';
   const hint = locale === 'nl-NL'
     ? 'Tik en spreek. HAVEN luistert rustig.'
     : 'Tap and speak. HAVEN is listening calmly.';
 
-  // Native Animated Driver interpolation for visual halo ring (100% off main JS render loop)
   const haloOpacity = pulseAnim.interpolate({ inputRange: [1, 1.12], outputRange: [0.1, 0.35] });
+
+  // CONFIG 5: On macOS, replace the floating button with a keyboard shortcut indicator in the toolbar.
+  // Show current voice state (idle/listening/processing) as a toolbar icon rather than a floating overlay.
+  if (Platform.OS === 'macos' || Platform.OS === 'web') {
+    return (
+      <View accessibilityRole="toolbar" style={{ height: 44, backgroundColor: '#2C3E6B', borderBottomWidth: 1, borderColor: '#1A2B4C', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, justifyContent: 'space-between' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <Text style={{ fontSize: 18 }}>{macosVoiceState === 'listening' ? '🔴' : macosVoiceState === 'processing' ? '🟡' : '🎙️'}</Text>
+          <Text style={{ color: 'white', fontWeight: '700', fontSize: 14 }}>
+            {macosVoiceState === 'listening' ? 'HAVEN luistert...' : macosVoiceState === 'processing' ? 'Aan het verwerken...' : 'Cmd+Shift+V om te praten'}
+          </Text>
+        </View>
+        <Text style={{ color: '#8899BB', fontSize: 12, fontWeight: '600' }}>Esc: stopt · Cmd+1/2/3: navigatie</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={{ position: 'absolute', left: 18, bottom: 90, alignItems: 'center' }}>
@@ -60,7 +110,6 @@ function FloatingVoiceButtonComponent({ locale, screenId, voiceFallback, audioVo
         </View>
       )}
       <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-        {/* Animated GPU-accelerated volume meter halo ring */}
         {isListening && (
           <Animated.View style={{ position: 'absolute', top: -6, left: -6, right: -6, bottom: -6, borderRadius: 42, backgroundColor: colors.sage, opacity: haloOpacity }} />
         )}
@@ -73,15 +122,11 @@ function FloatingVoiceButtonComponent({ locale, screenId, voiceFallback, audioVo
   );
 }
 
-// ─── Authoritative Memoization & Throttling Boundary ───
-// Prop equalizer custom comparator explicitly throttles incoming audio meter updates to 10% buckets.
-// E.g., incoming volume updates at 60Hz skip main JS thread re-rendering entirely!
 export const FloatingVoiceButton = React.memo(FloatingVoiceButtonComponent, (prevProps, nextProps) => {
   if (prevProps.locale !== nextProps.locale) return false;
   if (prevProps.screenId !== nextProps.screenId) return false;
   if (prevProps.voiceFallback !== nextProps.voiceFallback) return false;
   
-  // Throttle audio meter re-renders to 10% step buckets
   const prevBucket = Math.floor((prevProps.audioVolumePct ?? 0) / 10);
   const nextBucket = Math.floor((nextProps.audioVolumePct ?? 0) / 10);
   

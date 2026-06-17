@@ -7,8 +7,22 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": { "backgroundColor": "#2C3E6B" },
-    "ios": { "supportsTablet": true, "bundleIdentifier": "nl.haven.carer" },
-    "android": { "adaptiveIcon": { "backgroundColor": "#2C3E6B" }, "package": "nl.haven.carer" },
+    "ios": { 
+      "supportsTablet": true, 
+      "bundleIdentifier": "nl.haven.carer",
+      "infoPlist": {
+        "UISupportsDocumentBrowser": true
+      }
+    },
+    "mac": {
+      "bundleIdentifier": "nl.haven.app.mac",
+      "minimumMacOSVersion": "12.0"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "android": { "adaptiveIcon": { "backgroundColor": "#2C3E6B" }, "package": "nl.haven.carer", "windowSoftInputMode": "adjustResize" },
     "plugins": ["expo-secure-store", "expo-local-authentication"]
   }
 }

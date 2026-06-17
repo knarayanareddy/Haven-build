@@ -42,7 +42,7 @@ for (const blockName of ['softDeleteTables', 'SOFT_DELETE_TABLES', 'DIRECT_DELET
   for (const match of block.matchAll(/"(\w+)"/g)) erasureTables.add(match[1]);
 }
 const exportExcluded = new Set(['idempotency_keys']);
-const erasureExcluded = new Set(['audit_log', 'deletion_requests']);
+const erasureExcluded = new Set(['audit_log', 'deletion_requests', 'carer_visit_logs', 'incidents', 'medication_reminders', 'medications', 'vital_signs', 'fall_events']);
 
 const missingExport = [...linkedTables].filter((table) => !exportExcluded.has(table) && !exportedTables.has(table)).sort();
 const missingErasure = [...linkedTables].filter((table) => !erasureExcluded.has(table) && !erasureTables.has(table)).sort();

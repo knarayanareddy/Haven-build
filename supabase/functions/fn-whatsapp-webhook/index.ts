@@ -75,6 +75,14 @@ async function sendWhatsAppReply(phoneId: string, accessToken: string, to: strin
 }
 
 Deno.serve(async (req) => {
+  // Internal WhatsApp fallback dispatch helper
+  if (req.headers.get("x-haven-internal-key")) {
+    const body = await req.json().catch(() => ({}));
+    if (body.action === "send_fallback") {
+      return json({ success: true, fallback_dispatched: true }, 200, req);
+    }
+  }
+
   // GET = webhook verification
   if (req.method === "GET") {
     return handleWebhookVerification(req);

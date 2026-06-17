@@ -28,13 +28,47 @@ setInterval(() => {
   }
 }, 60_000);
 
-async function supabaseRateLimit(req: Request, fnName: string, maxRequests: number, windowMs: number): Promise<'allowed' | 'limited' | 'error'> {
+async function resolveCallerId(req: Request): Promise<string> {
+  let jwtSub = "";
   const auth = req.headers.get("authorization") ?? "";
-  const jwtHint = auth.replace(/^Bearer\s+/i, "").slice(-20);
-  const ip = req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for") ?? "unknown";
+  if (auth.startsWith("Bearer ")) {
+    try {
+      const { getJwtUserId } = await import("./authz.ts");
+      jwtSub = await getJwtUserId(req);
+    } catch {
+      // invalid or expired JWT
+    }
+  }
+
   const deviceHint = req.headers.get("x-haven-device-session-id") ?? req.headers.get("x-haven-device-id") ?? "";
-  
-  const callerId = deviceHint || jwtHint || ip;
+  const ip = req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for") ?? "unknown";
+
+  // FIX B1: Do not use device header unless it matches JWT subject.
+  // If headers don't match JWT -> use JWT sub as key only.
+  // If no JWT -> use IP only (never use arbitrary header value).
+  let callerId = "";
+  if (jwtSub) {
+    callerId = (deviceHint === jwtSub) ? deviceHint : jwtSub;
+  } else {
+    callerId = ip;
+  }
+
+  // FIX B2: If caller ID resolves to "unknown" (no JWT, no valid IP, no header):
+  // Return HTTP 400 Bad Request immediately. Do not apply rate limit bucket to "unknown".
+  if (!callerId || callerId === "unknown") {
+    const err = new Error("400 Bad Request: Anonymous requests missing valid IP or Auth gateway identifiers sit blocked immediately.");
+    (err as unknown as { status: number }).status = 400;
+    throw err;
+  }
+
+  return callerId;
+}
+
+export function getRateLimitBuckets() {
+  return buckets;
+}
+
+async function supabaseRateLimit(fnName: string, callerId: string, maxRequests: number, windowMs: number): Promise<'allowed' | 'limited' | 'error'> {
   const key = `${fnName}:${callerId}`;
   const windowStart = new Date(Date.now() - windowMs).toISOString();
 
@@ -67,10 +101,11 @@ export async function rateLimit(
   windowSeconds = 60
 ): Promise<void> {
   const windowMs = windowSeconds * 1000;
+  const callerId = await resolveCallerId(req);
 
   if (useSupabaseRL) {
     try {
-      const status = await supabaseRateLimit(req, fnName, maxRequests, windowMs);
+      const status = await supabaseRateLimit(fnName, callerId, maxRequests, windowMs);
       if (status === 'limited') {
         throw new RateLimitBreachError(`429 Too Many Requests: Rate limit exceeded for ${fnName}.`, windowSeconds);
       } else if (status === 'error') {
@@ -84,12 +119,6 @@ export async function rateLimit(
   }
 
   // ─── In-memory fallback (per-user / per-device sliding/fixed window) ───
-  const auth = req.headers.get("authorization") ?? "";
-  const jwtHint = auth.replace(/^Bearer\s+/i, "").slice(-20);
-  const ip = req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for") ?? "unknown";
-  const deviceHint = req.headers.get("x-haven-device-session-id") ?? req.headers.get("x-haven-device-id") ?? "";
-  
-  const callerId = deviceHint || jwtHint || ip;
   const key = `${fnName}:${callerId}`;
   const now = Date.now();
 

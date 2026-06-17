@@ -41,7 +41,8 @@ Deno.serve(async (req: Request) => {
     return json({ success: true, emergency_profile: data }, 200, req);
   } catch (error) {
     const isAuthzErr = (error as { name?: string }).name === "AuthzError" || (error as { status?: number }).status === 403;
-    const status = (error as { status?: number }).status ?? (isAuthzErr ? 403 : 400);
+    const errMsg = String((error as Error)?.message ?? error);
+    const status = errMsg.includes("404") ? 404 : ((error as { status?: number }).status ?? (isAuthzErr ? 403 : 400));
 
     await recordMetric("fn-emergency-profile", started, "error");
     return json({ error: safeErrorMessage(error) }, status, req);

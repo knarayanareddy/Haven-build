@@ -5,7 +5,21 @@
     "scheme": "haven",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "ios": { "bundleIdentifier": "nl.haven.elder", "supportsTablet": true },
+    "ios": { 
+      "bundleIdentifier": "nl.haven.elder", 
+      "supportsTablet": true,
+      "infoPlist": {
+        "UISupportsDocumentBrowser": true
+      }
+    },
+    "mac": {
+      "bundleIdentifier": "nl.haven.app.mac",
+      "minimumMacOSVersion": "12.0"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
     "android": { "package": "nl.haven.elder" },
     "extra": { "locale": "en-GB", "timezone": "Europe/Amsterdam" }
   }

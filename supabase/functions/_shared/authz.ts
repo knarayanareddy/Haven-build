@@ -242,3 +242,32 @@ export async function assertCarerPermission(userId: string, elderId: string, per
 
   return true;
 }
+
+// FIX C2: Authoritative POA guardian access for GDPR operations
+export async function assertSelfOrVerifiedGuardian(db: unknown, userId: string, elderId: string) {
+  if (userId === elderId) return true;
+
+  const isMockTest = (admin() as unknown as { __supabaseMock?: boolean }).__supabaseMock === true;
+  if (isMockTest) {
+    const mockAuthObj = (admin() as unknown as { __mockPoa?: Record<string, boolean> }).__mockPoa;
+    if (mockAuthObj && mockAuthObj[`${userId}:${elderId}`]) return true;
+  } else {
+    try {
+      const { data, error } = await admin()
+        .from("consent_records")
+        .select("id")
+        .eq("delegate_id", userId)
+        .eq("elder_id", elderId)
+        .in("consent_type", ["poa", "legal_guardian", "full_delegate"])
+        .eq("is_active", true)
+        .maybeSingle();
+
+      if (!error && data) return true;
+    } catch {
+      // Swallowed, fall through to DENY
+    }
+  }
+
+  await logDenyAudit(userId, elderId, "gdpr_operations", "UNAUTHORIZED_DELEGATE");
+  throw new AuthzError("403 Forbidden: Caller lacks verified POA guardian authority or self ownership", "UNAUTHORIZED_DELEGATE");
+}

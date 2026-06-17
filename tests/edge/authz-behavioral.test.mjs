@@ -223,7 +223,7 @@ async function loadAuthzModule() {
   }
   // Rewrite both the esm.sh import and the relative scam-engine import.
   const coreRewritten = coreResult.outputText
-    .replace(/from\s+['"]https:\/\/esm\.sh\/@supabase\/supabase-js@2['"]/g, `from './supabase-stub.mjs'`)
+    .replace(/from\s+['"]https:\/\/esm\.sh\/@supabase\/supabase-js@2.*['"]/g, `from './supabase-stub.mjs'`)
     .replace(/from\s+['"]\.\.\/\.\.\/\.\.\/packages\/scam-engine\/src\/catalog\.mjs['"]/g, `from './catalog-stub.mjs'`);
   writeFileSync(join(stubDir, 'core.mjs'), coreRewritten);
 

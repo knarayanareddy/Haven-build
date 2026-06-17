@@ -62,6 +62,29 @@ Deno.serve(asyncWrapper("fn-fall-escalation", async (req: Request) => {
   // 3. Multi-Patient / Per-Recipient Worker Isolation Loop
   await Promise.allSettled(fallsToProcess.map(async (ev) => {
     try {
+      // FIX A3: Atomic test-and-set claim using RETURNING * supporting both possible and stale processing claims
+      const { data: claimed, error: claimErr } = await db.from("fall_events")
+        .update({ status: "processing" })
+        .eq("id", ev.fall_id)
+        .in("status", ["possible", "processing"])
+        .select()
+        .maybeSingle();
+
+      if (claimErr || !claimed) return; // already claimed by another worker
+
+      // FIX A3: When claiming a 'processing' row that was stale, log a 'STALE_CLAIM_RECOVERED' entry to audit_log
+      if (ev.status === "processing") {
+        await db.from("audit_log").insert({
+          actor_id: "00000000-0000-0000-0000-000000000001",
+          actor_role: "system",
+          action: "STALE_CLAIM_RECOVERED",
+          table_name: "fall_events",
+          record_id: ev.fall_id,
+          elder_id: ev.elder_id,
+          extra: { reason: "Recovered stale orphaned processing emergency fall claim", timestamp: new Date().toISOString() },
+        }).catch(() => undefined);
+      }
+
       let preciseLocationUrl: string | null = null;
       try {
         const { data: locEvent } = await db
@@ -150,7 +173,7 @@ Deno.serve(asyncWrapper("fn-fall-escalation", async (req: Request) => {
       const { data: updated } = await db.from("fall_events")
         .update({ status: "family_alerted", family_notified_at: new Date().toISOString() })
         .eq("id", ev.fall_id)
-        .eq("status", "possible")
+        .eq("status", "processing")
         .select("id")
         .maybeSingle();
 

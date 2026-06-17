@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.43.0";
 import { alertLevelFromScore, scoreScamText } from "../../../packages/scam-engine/src/catalog.mjs";
 
 // ─── P0-1 FIX: CORS — dynamic origin validation, not wildcard ───
@@ -223,7 +223,6 @@ export async function dispatchNotification(params: {
       await db.from("notifications").update({ sent_at: new Date().toISOString() }).eq("id", note.id);
     } else {
       const text = await response.text();
-      await db.from("notifications").update({ sent_at: new Date().toISOString(), send_error: text.slice(0, 480) }).eq("id", note.id);
       if (text.includes("DeviceNotRegistered") || text.includes("InvalidCredentials")) {
         await db.from("push_tokens").update({ is_active: false }).eq("profile_id", params.recipient_id);
         await db.from("device_health_events").insert({
@@ -235,18 +234,43 @@ export async function dispatchNotification(params: {
           details: { source: "dispatch_notification", error: text.slice(0, 240) },
         });
       }
+      throw new Error(text.slice(0, 480));
     }
   } catch (error) {
-    await db.from("notifications").update({ sent_at: new Date().toISOString(), send_error: String((error as Error).message ?? error).slice(0, 480) }).eq("id", note.id);
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      await fetch("https://exp.host/--/api/v2/push/send", {
-        method: "POST",
-        headers,
-        body: JSON.stringify(pushPayload),
+    const errorStr = String((error as Error).message ?? error);
+    await db.from("notifications").update({ sent_at: new Date().toISOString(), send_error: errorStr.slice(0, 480) }).eq("id", note.id);
+
+    // FIX B6: In the push failure catch block, for high-priority types (crisis_gedetecteerd, scam_zwart):
+    // invoke fn-whatsapp-webhook as fallback after push failure. Log fallback attempt + outcome to audit_log.
+    if (params.notification_type === "crisis_gedetecteerd" || params.notification_type === "scam_zwart") {
+      let fallbackOutcome = "failure";
+      try {
+        const res = await fetch("https://haven.internal/functions/v1/fn-whatsapp-webhook", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-haven-internal-key": "haven_internal_cron_secret_2026" },
+          body: JSON.stringify({
+            action: "send_fallback",
+            recipient_id: params.recipient_id,
+            elder_id: params.elder_id,
+            notification_type: params.notification_type,
+            body_nl: params.body_nl,
+          }),
+        });
+        if (res.ok) fallbackOutcome = "success";
+      } catch {
+        fallbackOutcome = "failure";
+      }
+
+      await db.from("audit_log").insert({
+        actor_id: params.recipient_id,
+        actor_role: "system",
+        action: "WHATSAPP_FALLBACK_DISPATCH",
+        table_name: "notifications",
+        record_id: note.id,
+        elder_id: params.elder_id ?? null,
+        extra: { notification_type: params.notification_type, outcome: fallbackOutcome, error: errorStr, timestamp: new Date().toISOString() },
       });
-      await db.from("notifications").update({ send_error: null }).eq("id", note.id);
-    } catch (_) { /* swallow — already recorded send_error above */ }
+    }
   }
 
   // ─── Phase 1.5: WhatsApp fallback for P0/P1 alerts ───

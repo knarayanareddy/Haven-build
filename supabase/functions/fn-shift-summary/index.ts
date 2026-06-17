@@ -97,6 +97,7 @@ Deno.serve(async (req) => {
       db.from("carer_handover_notes")
         .select("recorded_at, appetite, mood, mobility, concerns_nl")
         .eq("elder_id", elderId)
+        .eq("carer_member_id", userId)
         .gte("recorded_at", shiftStart)
         .lte("recorded_at", shiftEnd)
         .order("recorded_at", { ascending: false })

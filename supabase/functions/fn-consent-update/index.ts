@@ -1,5 +1,5 @@
 import { admin, corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
-import { assertSelf, getJwtUserId } from "../_shared/authz.ts";
+import { assertSelf, getJwtUserId, invalidateRelationshipCache } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { captureException } from "../_shared/sentry.ts";
 
@@ -59,12 +59,18 @@ Deno.serve(async (req: Request) => {
 
     // Mutate corresponding operational family relationships if consent is retracted
     if (body.relationship_id && body.relationship_kind === "family") {
+      const { data: relRow } = await db.from("family_relationships").select("family_member_id").eq("id", body.relationship_id).maybeSingle();
       const { error: relError } = await db.from("family_relationships")
         .update({ elder_consented: Boolean(body.granted), elder_consented_at: body.granted ? new Date().toISOString() : null, is_active: Boolean(body.granted) })
         .eq("id", body.relationship_id)
         .eq("elder_id", userId);
 
       if (relError) throw relError;
+
+      // FIX B3: After updating family_relationships.is_active = false, call invalidateRelationshipCache(delegate_id, elder_id).
+      if (body.granted === false && (relRow?.family_member_id || body.delegate_id)) {
+        invalidateRelationshipCache(String(relRow?.family_member_id || body.delegate_id), userId);
+      }
     }
 
     await recordMetric("fn-consent-update", started, "success");

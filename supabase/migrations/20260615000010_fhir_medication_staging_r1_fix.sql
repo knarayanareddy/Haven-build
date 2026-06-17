@@ -62,23 +62,24 @@ END;
 $$;
 
 -- ─── 3. Professional Clinician Promotion RPC (Staging -> Active) ───
-CREATE OR REPLACE FUNCTION promote_fhir_medication_staging(p_staging_id UUID, p_clinician_id UUID)
+CREATE OR REPLACE FUNCTION promote_fhir_medication_staging(p_staging_id UUID)
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE
   v_staging RECORD;
   v_role TEXT;
   v_crit_count INTEGER := 0;
   v_med_id UUID;
+  v_clinician_id UUID := auth.uid();
 BEGIN
-  -- 1. Validate caller possesses accredited physician or dedicated DPO privileges
-  SELECT role INTO v_role FROM profiles WHERE id = p_clinician_id;
+  -- 1. Validate caller possesses accredited physician or dedicated DPO privileges via auth.uid()
+  SELECT role INTO v_role FROM profiles WHERE id = v_clinician_id;
   IF (v_role NOT IN ('system', 'admin', 'carer_professional')) THEN
     RAISE EXCEPTION '403 Forbidden: Direct activation attempt without authorized clinical approval is strictly rejected';
   END IF;
 
-  -- 2. Retrieve staging record
+  -- 2. Retrieve staging record with explicit row-level locking (FOR UPDATE)
   SELECT id, elder_id, extracted_name_nl, extracted_dosage_nl, proposed_schedule_times, status
-  INTO v_staging FROM fhir_medication_staging WHERE id = p_staging_id;
+  INTO v_staging FROM fhir_medication_staging WHERE id = p_staging_id FOR UPDATE;
 
   IF (v_staging IS NULL) THEN RAISE EXCEPTION '404: Staging record non-existent'; END IF;
   IF (v_staging.status <> 'pending_review') THEN
@@ -95,7 +96,7 @@ BEGIN
     VALUES (v_staging.elder_id, 'critical', 'CRITICAL FHIR INTERACTION: Voorgesteld medicijn ' || v_staging.extracted_name_nl || ' heeft een ernstige wisselwerking met huidige medicatie.', 'promote_fhir_medication_staging');
 
     UPDATE fhir_medication_staging 
-    SET status = 'rejected', reviewed_by_id = p_clinician_id, reviewed_at = now()
+    SET status = 'rejected', reviewed_by_id = v_clinician_id, reviewed_at = now()
     WHERE id = p_staging_id;
 
     RAISE EXCEPTION '409 Conflict: Lethal contraindication detected. Prescription automatically flagged and promotion blocked.';
@@ -112,12 +113,12 @@ BEGIN
 
   -- Update staging status
   UPDATE fhir_medication_staging 
-  SET status = 'approved', reviewed_by_id = p_clinician_id, reviewed_at = now(), created_medication_id = v_med_id
+  SET status = 'approved', reviewed_by_id = v_clinician_id, reviewed_at = now(), created_medication_id = v_med_id
   WHERE id = p_staging_id;
 
   -- Record non-repudiable NEN 7510 audit log row
   INSERT INTO audit_log (actor_id, actor_role, action, table_name, record_id, elder_id, extra)
-  VALUES (p_clinician_id, 'carer_professional', 'FHIR_STAGING_PROMOTION', 'medications', v_med_id, v_staging.elder_id, jsonb_build_object('staging_id', p_staging_id, 'med_name', v_staging.extracted_name_nl));
+  VALUES (v_clinician_id, 'carer_professional', 'FHIR_STAGING_PROMOTION', 'medications', v_med_id, v_staging.elder_id, jsonb_build_object('staging_id', p_staging_id, 'med_name', v_staging.extracted_name_nl));
 
   RETURN jsonb_build_object('ok', true, 'status', 'approved', 'medication_id', v_med_id);
 END;
@@ -128,7 +129,7 @@ COMMIT;
 -- Rollback (DOWN Migration)
 /*
 BEGIN;
-DROP FUNCTION IF EXISTS promote_fhir_medication_staging(UUID, UUID);
+DROP FUNCTION IF EXISTS promote_fhir_medication_staging(UUID);
 DROP FUNCTION IF EXISTS check_medication_interactions_sql(UUID, TEXT);
 DROP TABLE IF EXISTS fhir_medication_staging CASCADE;
 DROP TYPE IF EXISTS fhir_staging_status;

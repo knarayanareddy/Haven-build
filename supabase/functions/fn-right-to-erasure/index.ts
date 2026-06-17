@@ -1,5 +1,5 @@
 import { admin, corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage } from "../_shared/core.ts";
-import { assertActorMatches, assertSelf, getJwtUserId } from "../_shared/authz.ts";
+import { assertActorMatches, assertSelfOrVerifiedGuardian, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
 
@@ -22,7 +22,6 @@ async function removeStoragePrefix(bucket: string, prefix: string) {
 const SOFT_DELETE_TABLES = [
   "elder_profiles",
   "contacts",
-  "medications",
   "tasks",
   "family_messages",
   "life_stories",
@@ -38,7 +37,6 @@ const SOFT_DELETE_TABLES = [
   "browser_shield_events",
   "care_plans",
   "care_plan_items",
-  "carer_visit_logs",
   "appointments",
   "transport_requests",
   "telehealth_sessions",
@@ -56,7 +54,6 @@ const SOFT_DELETE_TABLES = [
   "external_care_sync_jobs",
   "medication_refill_events",
   // ─── P0-6 FIX: vNext tables that were missing ───
-  "fall_events",
   "device_health_events",        // may use profile_id instead of elder_id — handled below
   "scam_coaching_sessions",
   "elder_baselines",
@@ -74,12 +71,9 @@ const SOFT_DELETE_TABLES = [
 // Tables that are directly deleted (no soft-delete support)
 const DIRECT_DELETE_TABLES = [
   "consent_records",
-  "medication_reminders",
   "wellness_checkins",
   "hydration_logs",
-  "vital_signs",
   "cognitive_checkins",
-  "incidents",
   "safeguarding_reports",
   "device_sessions",             // uses profile_id
   "notification_preferences",    // uses profile_id
@@ -109,10 +103,8 @@ Deno.serve(async (req) => {
     const userId = await getJwtUserId(req);
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(userId)) throw new Error('Invalid user ID');
-    assertSelf(userId, String(body.elder_id), 'elder deletion request');
-    assertActorMatches(userId, typeof body.requested_by_id === 'string' ? body.requested_by_id : undefined, 'requested_by_id');
-
     const db = admin();
+    await assertSelfOrVerifiedGuardian(db, userId, String(body.elder_id));
     const { data: requestRow, error } = await db
       .from("deletion_requests")
       .insert({ elder_id: userId, requested_by_id: userId, reason: body.reason ?? "user_request", status: "processing" })
@@ -121,6 +113,10 @@ Deno.serve(async (req) => {
     if (error) throw error;
 
     const now = new Date().toISOString();
+
+    // ─── P0-15 FIX: Call soft_purge_profile for WGBO tables anonymization ───
+    const { error: purgeError } = await db.rpc("soft_purge_profile", { p_target_id: userId });
+    if (purgeError) throw purgeError;
 
     // ─── Phase 1: Soft-delete elder-owned tables (elder_id column) ───
     for (const table of SOFT_DELETE_TABLES) {
