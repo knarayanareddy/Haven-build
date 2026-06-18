@@ -683,6 +683,8 @@ create trigger incidents_updated_at before update on incidents for each row exec
 create trigger push_tokens_updated_at before update on push_tokens for each row execute function public.set_updated_at();
 
 -- helper functions for RLS
+SET ROLE supabase_admin;
+
 create or replace function auth.app_role()
 returns text language sql stable as $$
   select coalesce(current_setting('request.jwt.claims', true)::jsonb->>'app_role', current_setting('request.jwt.claims', true)::jsonb->>'role', 'anonymous')
@@ -719,6 +721,8 @@ returns boolean language sql stable as $$
       and cr.deleted_at is null
   )
 $$;
+
+RESET ROLE;
 
 -- enable and force RLS
 alter table profiles enable row level security; alter table profiles force row level security;
