@@ -1,6 +1,7 @@
 import js from '@eslint/js';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
+import jsxA11y from 'eslint-plugin-jsx-a11y';
 
 export default [
   {
@@ -15,10 +16,18 @@ export default [
       'pnpm-lock.yaml',
     ],
   },
+  {
+    plugins: {
+      'jsx-a11y': jsxA11y,
+    },
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
     files: ['**/*.{js,mjs,cjs,ts,tsx}'],
+    plugins: {
+      'jsx-a11y': jsxA11y,
+    },
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
