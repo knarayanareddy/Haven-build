@@ -21,10 +21,10 @@ function requireEnv(name: string) {
   return value;
 }
 
-export async function transcribeDutchAudio(audioBase64: string) {
+export async function transcribeDutchAudio(audioBase64: string, locale: "en-GB" | "nl-NL" = "nl-NL") {
   if (mockEnabled()) {
-    const mocked = await mockJson('/transcribe', { audio_base64: audioBase64 });
-    return String(mocked?.text ?? 'Ik heb mijn pillen ingenomen.');
+    const mocked = await mockJson('/transcribe', { audio_base64 });
+    return String(mocked?.text ?? (locale === "nl-NL" ? 'Ik heb mijn pillen ingenomen.' : 'I took my pills.'));
   }
   const key = requireEnv('OPENAI_API_KEY');
   const bytes = Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0));
@@ -32,7 +32,7 @@ export async function transcribeDutchAudio(audioBase64: string) {
   const form = new FormData();
   form.append('file', file);
   form.append('model', 'whisper-1');
-  form.append('language', 'nl');
+  form.append('language', locale.startsWith('en') ? 'en' : 'nl');
   form.append('response_format', 'json');
   const response = await fetch(`${OPENAI_BASE}/audio/transcriptions`, {
     method: 'POST',
@@ -60,19 +60,28 @@ export async function generateEmbedding(input: string) {
   return json.data?.[0]?.embedding as number[];
 }
 
-export async function companionReply(params: { locale: 'en-GB' | 'nl-NL'; transcript: string; memories: string[]; screenId: string }) {
+export async function companionReply(
+  paramsOrTranscript: string | { locale: 'en-GB' | 'nl-NL'; transcript: string; memories?: string[]; screenId?: string },
+  elderId?: string,
+  localeOpt: 'en-GB' | 'nl-NL' = 'nl-NL'
+) {
+  const transcript = typeof paramsOrTranscript === 'string' ? paramsOrTranscript : paramsOrTranscript.transcript;
+  const locale = typeof paramsOrTranscript === 'string' ? localeOpt : paramsOrTranscript.locale;
+  const memories = typeof paramsOrTranscript === 'string' ? [] : (paramsOrTranscript.memories ?? []);
+  const screenId = typeof paramsOrTranscript === 'string' ? 'HOME' : (paramsOrTranscript.screenId ?? 'HOME');
+
   if (mockEnabled()) {
-    const mocked = await mockJson('/chat', params);
-    if (mocked?.text) return String(mocked.text);
-    return params.locale === 'nl-NL' ? 'Ik ben bij u. Ik help rustig verder.' : 'I am with you. I will help calmly.';
+    const mocked = await mockJson('/chat', { locale, transcript, memories, screenId });
+    const fallbackText = locale === 'nl-NL' ? 'Ik ben bij u. Ik help rustig verder.' : 'I am with you. I will help calmly.';
+    const textOut = String(mocked?.text ?? fallbackText);
+    return { replyNl: textOut, replyEn: textOut, text: textOut };
   }
   const key = Deno.env.get('OPENAI_API_KEY');
   if (!key) {
-    return params.locale === 'nl-NL'
-      ? 'Ik heb u gehoord. Ik help u rustig verder.'
-      : 'I heard you. I will help calmly.';
+    const fallbackText = locale === 'nl-NL' ? 'Ik heb u gehoord. Ik help u rustig verder.' : 'I heard you. I will help calmly.';
+    return { replyNl: fallbackText, replyEn: fallbackText, text: fallbackText };
   }
-  const system = params.locale === 'nl-NL'
+  const system = locale === 'nl-NL'
     ? 'Je bent HAVEN, een vriendelijke digitale hulp voor een oudere in Nederland. Spreek met u en uw. Maximaal twee korte zinnen. Je bent geen arts en geen mens; wees eerlijk.'
     : 'You are HAVEN, a warm digital helper for an older adult. Use respectful, calm language. Maximum two short sentences. You are not a doctor and not a human; be honest.';
   const response = await fetch(`${OPENAI_BASE}/chat/completions`, {
@@ -83,13 +92,14 @@ export async function companionReply(params: { locale: 'en-GB' | 'nl-NL'; transc
       temperature: 0.2,
       messages: [
         { role: 'system', content: system },
-        { role: 'user', content: `Screen: ${params.screenId}\nMemories:\n${params.memories.map((m) => `- ${m}`).join('\n')}\nTranscript: ${params.transcript}` },
+        { role: 'user', content: `Screen: ${screenId}\nMemories:\n${memories.map((m) => `- ${m}`).join('\n')}\nTranscript: ${transcript}` },
       ],
     }),
   });
   const json = await response.json();
   if (!response.ok) throw new Error(json.error?.message ?? 'Companion response failed');
-  return String(json.choices?.[0]?.message?.content ?? '').trim();
+  const content = String(json.choices?.[0]?.message?.content ?? '').trim();
+  return { replyNl: content, replyEn: content, text: content };
 }
 
 export async function synthesizeSpeechToStorage(params: { elderId: string; interactionId: string; text: string; locale: 'en-GB' | 'nl-NL' }) {

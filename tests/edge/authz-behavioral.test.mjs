@@ -178,12 +178,17 @@ globalThis.__HAVEN_SUPABASE_MOCK__ = mock;
 // ---------- Strip-types loader (TypeScript transpileModule) ----------
 const sharedDir = fileURLToPath(new URL('../../supabase/functions/_shared/', import.meta.url));
 async function loadAuthzModule() {
-  const tsPath = 'typescript';
   let ts;
   try {
-    ts = (await import(tsPath)).default ?? (await import(tsPath));
-  } catch (error) {
-    throw new Error(`Unable to import TypeScript at ${tsPath}: ${error.message ?? error}. Install with: npm install --prefix /tmp/haven-test-deps typescript`, { cause: error });
+    ts = await import('/tmp/haven-test-deps/node_modules/typescript/lib/typescript.js');
+    ts = ts.default ?? ts;
+  } catch {
+    try {
+      ts = await import('typescript');
+      ts = ts.default ?? ts;
+    } catch (error) {
+      throw new Error(`Unable to import TypeScript: ${error.message ?? error}. Install with: npm install --prefix /tmp/haven-test-deps typescript`, { cause: error });
+    }
   }
 
   function transpile(relPath, outName) {

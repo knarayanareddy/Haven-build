@@ -1,9 +1,77 @@
 {
-  "cli": { "version": ">= 10.0.0" },
-  "build": {
-    "development": { "developmentClient": true, "distribution": "internal" },
-    "preview": { "distribution": "internal", "ios": { "simulator": false }, "android": { "buildType": "apk" } },
-    "production": { "autoIncrement": true, "ios": { "simulator": false }, "android": { "buildType": "app-bundle" } }
+  "cli": {
+    "version": ">= 10.0.0",
+    "appVersionSource": "remote"
   },
-  "submit": { "production": {} }
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Debug",
+        "image": "latest"
+      },
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug",
+        "image": "latest"
+      },
+      "env": {
+        "EXPO_PUBLIC_HAVEN_ENV": "development",
+        "EXPO_PUBLIC_SUPABASE_URL": "http://127.0.0.1:54321"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release",
+        "image": "latest"
+      },
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease",
+        "image": "latest"
+      },
+      "env": {
+        "EXPO_PUBLIC_HAVEN_ENV": "staging",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://haven-staging.supabase.co"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "distribution": "store",
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release",
+        "image": "latest",
+        "credentialsSource": "remote"
+      },
+      "android": {
+        "buildType": "app-bundle",
+        "gradleCommand": ":app:bundleRelease",
+        "image": "latest",
+        "credentialsSource": "remote"
+      },
+      "env": {
+        "EXPO_PUBLIC_HAVEN_ENV": "production",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://haven-prod-99x1.supabase.co"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "ci@haven.nl",
+        "ascAppId": "6472026111",
+        "appleTeamId": "NLHAVEN99"
+      },
+      "android": {
+        "serviceAccountKeyPath": "./google-api-key.json",
+        "track": "production",
+        "releaseStatus": "completed"
+      }
+    }
+  }
 }

@@ -171,7 +171,17 @@ Deno.serve(async (req) => {
           const scored = scoreScamText(text);
           const level = alertLevelFromScore(scored.score);
           const isNl = /[a-z]+ij|niet|geen|wel|maar|ook/i.test(text);
-          const locale = isNl ? "nl-NL" : "en-GB";
+
+          // 1. Look up the RECIPIENT's profiles.locale from the database
+          const { admin } = await import("../_shared/core.ts");
+          const db = admin();
+          const { data: senderProfile } = await db.from("profiles")
+            .select("id, locale")
+            .or(`phone.eq.${senderPhone},phone.eq.+${senderPhone}`)
+            .maybeSingle();
+
+          const dbLocale = senderProfile?.locale ?? (isNl ? "nl-NL" : "en-GB");
+          const locale = dbLocale;
 
           // ─── Reply to elder ───
           const replyText = (locale === "nl-NL" ? SAFE_SCRIPT_NL : SAFE_SCRIPT_EN)
@@ -183,11 +193,17 @@ Deno.serve(async (req) => {
           // ─── If high risk, notify family via dispatchNotification ───
           if (scored.score >= 40) {
             try {
-              const { dispatchNotification, admin } = await import("../_shared/core.ts");
-              // We don't know which elder this belongs to from just the phone number.
-              // In production, a phone→elder mapping table would resolve this.
-              // For now, log the high-risk event to scam_coaching_sessions for audit.
-              const db = admin();
+              const { dispatchNotification } = await import("../_shared/core.ts");
+              if (senderProfile?.id) {
+                await dispatchNotification({
+                  recipient_id: senderProfile.id,
+                  notification_type: "scam_amber",
+                  title_nl: "HAVEN Melding: Mogelijke oplichting",
+                  title_en: "HAVEN Alert: Possible scam detected",
+                  body_nl: `Er is een verdacht WhatsApp-bericht gescreend. Risicoscore: ${scored.score}.`,
+                  body_en: `A suspicious WhatsApp message was screened. Risk score: ${scored.score}.`,
+                });
+              }
               const textHash = await sha256(text);
               await db.from("scam_coaching_sessions").insert({
                 channel: "whatsapp",

@@ -3,15 +3,18 @@ import React from 'react';
 import { Platform, StatusBar } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { I18nProvider } from '@haven/i18n';
 import { AuthProvider } from './src/auth/AuthProvider';
 import { AppNavigator } from './src/navigation/AppNavigator';
 
 export default function App() {
   const content = (
     <AuthProvider>
-      <NavigationContainer>
-        <AppNavigator />
-      </NavigationContainer>
+      <I18nProvider initialLocale="nl-NL">
+        <NavigationContainer>
+          <AppNavigator />
+        </NavigationContainer>
+      </I18nProvider>
     </AuthProvider>
   );
 

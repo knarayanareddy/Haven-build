@@ -1,5 +1,7 @@
 import type { BuurtDiscoverOutput, ScamPipelineInput, ScamPipelineOutput, VoicePipelineInput, VoicePipelineOutput } from '@haven/contracts/src/haven';
 
+import { translateElderError } from './errorMapper';
+
 export interface HavenClientConfig {
   supabaseUrl: string;
   accessToken: string;
@@ -18,7 +20,10 @@ export class HavenClient {
       body: JSON.stringify(body),
     });
     const json = await response.json();
-    if (!response.ok) throw new Error(json.error ?? `HAVEN function failed: ${fn}`);
+    if (!response.ok) {
+      // FIX P2: COGNITIVE LOAD Automatically translate all underlying API and network exceptions into reassuring Dutch B1 prose
+      throw new Error(translateElderError(json.error ?? `HAVEN function failed: ${fn}`));
+    }
     return json as T;
   }
 

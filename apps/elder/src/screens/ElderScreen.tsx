@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo } from 'react';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { productionScreens } from '@haven/schema/src/screenSchema';
+import { useTranslation } from '@haven/i18n';
+import type { Locale } from '@haven/contracts/src/haven';
 import { ScreenRenderer, ScreenContext, ElderProfile, FamilyMember, MedicationRow, TaskRow, MessageRow, ScamEventRow, BuurtRow, VisitLogRow } from '../renderer/ScreenRenderer';
 import { ElderStackParamList } from '../navigation/AppNavigator';
 import { useHavenActions } from '../hooks/useHavenActions';
@@ -11,7 +13,7 @@ type Props = NativeStackScreenProps<ElderStackParamList>;
 
 const DEMO_ELDER_ID = '00000000-0000-0000-0000-000000000001';
 
-function loadSeed(): {
+function loadSeed(locale: Locale, t: any): {
   profile: ElderProfile;
   family: FamilyMember[];
   medications: MedicationRow[];
@@ -25,9 +27,9 @@ function loadSeed(): {
     profile: {
       id: DEMO_ELDER_ID,
       preferredName: 'Margreet',
-      locale: 'nl-NL',
+      locale: locale,
       postCode4: '1072',
-      safeZoneLabel: 'Thuis — De Pijp',
+      safeZoneLabel: t('seed.safeZone'),
     },
     family: [
       { id: 'fm-sarah', name: 'Sarah Bakker', relation: 'kind', isPrimary: true },
@@ -40,33 +42,33 @@ function loadSeed(): {
       { id: 'med-3', name: 'Vitamine D', dose: '20 mcg', descriptionNl: 'Kleine gele tablet voor botten', descriptionEn: 'Tiny yellow tablet for bones', time: '18:00', status: 'planned', stock: 42 },
     ],
     tasks: [
-      { id: 'task-1', icon: '🏥', title: 'Huisartsafspraak met dr. van der Linden', subtitle: '14:00 · Sarah', done: false },
-      { id: 'task-2', icon: '🚶', title: 'Korte wandeling na de lunch', subtitle: '13:15 · HAVEN', done: false },
-      { id: 'task-3', icon: '📞', title: 'Apotheek bellen voor refill', subtitle: 'overmorgen 10:00', done: false },
+      { id: 'task-1', icon: '🏥', title: t('seed.task1.title'), subtitle: '14:00 · Sarah', done: false },
+      { id: 'task-2', icon: '🚶', title: t('seed.task2.title'), subtitle: '13:15 · HAVEN', done: false },
+      { id: 'task-3', icon: '📞', title: t('seed.task3.title'), subtitle: t('seed.task3.subtitle'), done: false },
     ],
     messages: [
-      { id: 'msg-1', from: 'Sarah', kind: 'text', body: 'Ik denk vanochtend aan u. Ik bel na mijn werk.', unread: true },
-      { id: 'msg-2', from: 'Lucas', kind: 'video', body: 'Videogroet van kleinkind opgeslagen voor vandaag.', unread: true },
-      { id: 'msg-3', from: 'Sarah', kind: 'voice', body: 'Spraakbericht over het weekoverzicht.', unread: false },
-      { id: 'msg-4', from: 'Margreet', kind: 'text', body: 'Hartelijke groet aan Sarah en Lucas.', unread: false },
+      { id: 'msg-1', from: 'Sarah', kind: 'text', body: t('seed.msg1.body'), unread: true },
+      { id: 'msg-2', from: 'Lucas', kind: 'video', body: t('seed.msg2.body'), unread: true },
+      { id: 'msg-3', from: 'Sarah', kind: 'voice', body: t('seed.msg3.body'), unread: false },
+      { id: 'msg-4', from: 'Margreet', kind: 'text', body: t('seed.msg4.body'), unread: false },
     ],
     scamEvents: [
-      { id: 'scam-1', level: 'amber', channel: 'phone', score: 52, explanation: 'lemand belde en vroeg naar uw bankpas. Geef nooit codes door.', notified: true },
-      { id: 'scam-2', level: 'rood', channel: 'whatsapp', score: 82, explanation: 'Een bekende lijkt in nood maar het account is mogelijk overgenomen. Bel uw familie eerst.', notified: true },
+      { id: 'scam-1', level: 'amber', channel: 'phone', score: 52, explanation: t('seed.scam1.explanation'), notified: true },
+      { id: 'scam-2', level: 'rood', channel: 'whatsapp', score: 82, explanation: t('seed.scam2.explanation'), notified: true },
     ],
     buurt: {
       active: true,
       nearbyCount: 3,
-      tags: ['Tuinieren', 'Wandelen', 'Lezen', 'Muziek', 'Koken'],
+      tags: [t('seed.buurt.tag1'), t('seed.buurt.tag2'), t('seed.buurt.tag3'), t('seed.buurt.tag4'), t('seed.buurt.tag5')],
       walkBuddyCount: 2,
       events: [
-        { id: 'evt-1', title: 'Gratis koffieochtend', distanceLabel: '600 m', date: 'Vrijdag 10:00' },
-        { id: 'evt-2', title: 'Wandelgroep ouderen', distanceLabel: '1.2 km', date: 'Zondag 14:00' },
+        { id: 'evt-1', title: t('seed.buurt.evt1.title'), distanceLabel: '600 m', date: t('seed.buurt.evt1.date') },
+        { id: 'evt-2', title: t('seed.buurt.evt2.title'), distanceLabel: '1.2 km', date: t('seed.buurt.evt2.date') },
       ],
     },
     visits: [
-      { date: 'gisteren', carer: 'Nurse Eva de Boer (Buurtzorg)', note: 'Medicatiecontrole afgerond. Stemming rustig.' },
-      { date: '8 dagen geleden', carer: 'Nurse Eva de Boer (Buurtzorg)', note: 'Refill Metformine aangevraagd.' },
+      { date: t('seed.visit1.date'), carer: 'Nurse Eva de Boer (Buurtzorg)', note: t('seed.visit1.note') },
+      { date: t('seed.visit2.date'), carer: 'Nurse Eva de Boer (Buurtzorg)', note: t('seed.visit2.note') },
     ],
   };
 }
@@ -78,7 +80,8 @@ export function ElderScreen({ route, navigation }: Props) {
   const schema = productionScreens.find((screen) => screen.screenId === route.name) ?? productionScreens[0];
   const actions = useHavenActions(schema.screenId);
   const { session } = useAuth();
-  const seed = useMemo(() => loadSeed(), []);
+  const { locale, t } = useTranslation();
+  const seed = useMemo(() => loadSeed(locale, t), [locale, t]);
   const ctx: ScreenContext = {
     locale: seed.profile.locale,
     now: new Date(),
@@ -99,6 +102,6 @@ export function ElderScreen({ route, navigation }: Props) {
       actions.handlePrimaryAction(actionId);
     },
   };
-  void session; // session is reserved for live API calls in actions.handlePrimaryAction
+  void session;
   return <ScreenRenderer schema={schema} context={ctx} />;
 }

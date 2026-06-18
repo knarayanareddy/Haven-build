@@ -1,12 +1,7 @@
-// ─── Phase 3.1: Carer Handover Form Screen ───
-// Quick 1-5 scales for appetite + mood, mobility dropdown, free-text concerns.
-// Photo attachment support (Phase 3.3).
-// Medication interaction warnings shown inline (Phase 3.4).
-// Offline-first: saves to localStorage queue if no connectivity.
-
 import React, { useCallback, useState } from 'react';
 import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { colors } from '@haven/ui/src/tokens';
+import { useTranslation } from '@haven/i18n';
 import { useAuth } from '../auth/AuthProvider';
 import { CarerClient } from '../services/havenClient';
 import { enqueueOffline } from '../services/offlineQueue';
@@ -16,31 +11,33 @@ interface HandoverFormProps {
   navigation: { goBack: () => void };
 }
 
-const MOBILITY_OPTIONS = [
-  { value: 'zelfstandig', label: 'Zelfstandig' },
-  { value: 'met_hulp', label: 'Met hulp' },
-  { value: 'niet_vandaag', label: 'Niet vandaag' },
-];
-
-const MEDICATION_OPTIONS = [
-  { id: '', label: 'Niet van toepassing' },
-  { id: '99999999-0000-0000-0000-000000000001', label: 'Metformine 500 mg' },
-  { id: '99999999-0000-0000-0000-000000000002', label: 'Lisinopril 10 mg' },
-  { id: '99999999-0000-0000-0000-000000000003', label: 'Vitamine D 20 mcg' },
-];
-
 export function HandoverForm({ route, navigation }: HandoverFormProps) {
   const { elder_id, elder_name } = route.params;
   const { session } = useAuth();
+  const { t } = useTranslation();
+  
   const [appetite, setAppetite] = useState(3);
   const [mood, setMood] = useState(3);
-  const [mobility, setMobility] = useState('zelfstandig');
+  const [mobility, setMobility] = useState('handover.mobility.self');
   const [concerns, setConcerns] = useState('');
   const [notes, setNotes] = useState('');
   const [administeredMed, setAdministeredMed] = useState('');
   const [photosCount, setPhotosCount] = useState(0);
   const [isSubmitting, setSubmitting] = useState(false);
   const [interactionWarning, setInteractionWarning] = useState<string | null>(null);
+
+  const MOBILITY_OPTIONS = [
+    { value: 'handover.mobility.self', label: t('handover.mobility.self') },
+    { value: 'handover.mobility.help', label: t('handover.mobility.help') },
+    { value: 'handover.mobility.not_today', label: t('handover.mobility.not_today') },
+  ];
+
+  const MEDICATION_OPTIONS = [
+    { id: '', label: t('handover.med.none') },
+    { id: '99999999-0000-0000-0000-000000000001', label: 'Metformine 500 mg' },
+    { id: '99999999-0000-0000-0000-000000000002', label: 'Lisinopril 10 mg' },
+    { id: '99999999-0000-0000-0000-000000000003', label: 'Vitamine D 20 mcg' },
+  ];
 
   const submitOnline = useCallback(async () => {
     setSubmitting(true);
@@ -57,42 +54,39 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
           elder_id,
           appetite,
           mood,
-          mobility: mobility !== 'zelfstandig' ? mobility : undefined,
+          mobility: mobility !== 'handover.mobility.self' ? mobility : undefined,
           concerns_nl: concerns || undefined,
           notes_nl: notes || undefined,
           administered_medication_id: administeredMed || undefined,
           administered_at: administeredMed ? new Date().toISOString() : undefined,
-          photo_paths: undefined, // Photos handled separately via storage
         });
         
         if (result.interaction_warning) {
           setInteractionWarning(result.interaction_warning);
         }
         
-        Alert.alert('HAVEN WACHT', 'Notitie opgeslagen en gesynchroniseerd.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+        Alert.alert(t('carerAppTitle'), t('carerHandoverSaved'), [{ text: 'OK', onPress: () => navigation.goBack() }]);
       } else {
         enqueueOffline('handover_note', { elder_id, appetite, mood, mobility, concerns, notes });
-        Alert.alert('HAVEN WACHT', 'Offline opgeslagen. Wordt gesynchroniseerd zodra u online bent.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+        Alert.alert(t('carerAppTitle'), t('carerHandoverOffline'), [{ text: 'OK', onPress: () => navigation.goBack() }]);
       }
     } catch (error) {
-      // Offline fallback
       enqueueOffline('handover_note', { elder_id, appetite, mood, mobility, concerns, notes });
-      Alert.alert('HAVEN WACHT', 'Offline opgeslagen vanwege netwerkfout.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+      Alert.alert(t('carerAppTitle'), t('handover.alert.network_err'), [{ text: 'OK', onPress: () => navigation.goBack() }]);
     } finally {
       setSubmitting(false);
     }
-  }, [session, elder_id, appetite, mood, mobility, concerns, notes, administeredMed, navigation]);
+  }, [session, elder_id, appetite, mood, mobility, concerns, notes, administeredMed, t, navigation]);
 
   const saveOffline = useCallback(() => {
     enqueueOffline('handover_note', { elder_id, appetite, mood, mobility, concerns, notes });
-    Alert.alert('HAVEN WACHT', 'Offline opgeslagen.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
-  }, [elder_id, appetite, mood, mobility, concerns, notes, navigation]);
+    Alert.alert(t('carerAppTitle'), t('handover.alert.offline_saved'), [{ text: 'OK', onPress: () => navigation.goBack() }]);
+  }, [elder_id, appetite, mood, mobility, concerns, notes, t, navigation]);
 
   const addPhoto = useCallback(() => {
-    // In production: opens device camera via expo-camera
     setPhotosCount((c) => c + 1);
-    Alert.alert('HAVEN', 'Foto toegevoegd (demo). In productie opent de camera.');
-  }, []);
+    Alert.alert('HAVEN', t('handover.photo.demo'));
+  }, [t]);
 
   const renderScale = (label: string, value: number, onChange: (v: number) => void) => (
     <View style={{ gap: 8 }}>
@@ -121,14 +115,14 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.linen }} contentContainerStyle={{ padding: 20, gap: 18 }}>
       <Text accessibilityRole="header" style={{ fontSize: 28, fontWeight: '900', color: colors.ink }}>
-        Handover — {elder_name}
+        {t('carerHandoverTitle')} — {elder_name}
       </Text>
 
-      {renderScale('Eetlust', appetite, setAppetite)}
-      {renderScale('Stemming', mood, setMood)}
+      {renderScale(t('handover.appetite'), appetite, setAppetite)}
+      {renderScale(t('handover.mood'), mood, setMood)}
 
       <View style={{ gap: 8 }}>
-        <Text style={{ fontSize: 16, fontWeight: '900', color: colors.ink }}>Mobiliteit</Text>
+        <Text style={{ fontSize: 16, fontWeight: '900', color: colors.ink }}>{t('handover.mobility')}</Text>
         <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
           {MOBILITY_OPTIONS.map((opt) => (
             <TouchableOpacity
@@ -150,7 +144,7 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
 
       <View style={{ gap: 8 }}>
         <Text style={{ fontSize: 16, fontWeight: '900', color: colors.ink }}>
-          Toegediend medicijn (MAR-light)
+          {t('handover.administered_med')}
         </Text>
         {MEDICATION_OPTIONS.map((opt) => (
           <TouchableOpacity
@@ -178,10 +172,10 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
       )}
 
       <View style={{ gap: 8 }}>
-        <Text style={{ fontSize: 16, fontWeight: '900', color: colors.ink }}>Zorgen of opmerkingen</Text>
+        <Text style={{ fontSize: 16, fontWeight: '900', color: colors.ink }}>{t('handover.concerns')}</Text>
         <TextInput
-          accessibilityLabel="Zorgen of opmerkingen"
-          placeholder="Geen BSN, geen adressen..."
+          accessibilityLabel={t('handover.concerns')}
+          placeholder={t('handover.concerns.placeholder')}
           placeholderTextColor={colors.pewter}
           value={concerns}
           onChangeText={setConcerns}
@@ -196,10 +190,10 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
       </View>
 
       <View style={{ gap: 8 }}>
-        <Text style={{ fontSize: 16, fontWeight: '900', color: colors.ink }}>Extra notities</Text>
+        <Text style={{ fontSize: 16, fontWeight: '900', color: colors.ink }}>{t('handover.notes')}</Text>
         <TextInput
-          accessibilityLabel="Extra notities"
-          placeholder="Aanvullende observaties..."
+          accessibilityLabel={t('handover.notes')}
+          placeholder={t('handover.notes.placeholder')}
           placeholderTextColor={colors.pewter}
           value={notes}
           onChangeText={setNotes}
@@ -215,7 +209,7 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
 
       <TouchableOpacity
         accessibilityRole="button"
-        accessibilityLabel="Foto toevoegen"
+        accessibilityLabel={t('handover.photo.add')}
         onPress={addPhoto}
         style={{
           flexDirection: 'row', alignItems: 'center', gap: 8,
@@ -225,14 +219,15 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
       >
         <Text style={{ fontSize: 20 }}>📷</Text>
         <Text style={{ fontSize: 16, fontWeight: '700', color: colors.ink }}>
-          {photosCount > 0 ? `${photosCount} foto('s) toegevoegd` : 'Foto toevoegen'}
+          {photosCount > 0 ? t('handover.photo.added', { count: photosCount }) : t('handover.photo.add')}
         </Text>
       </TouchableOpacity>
 
       <View style={{ flexDirection: 'row', gap: 10 }}>
         <TouchableOpacity
           accessibilityRole="button"
-          accessibilityLabel="Opslaan online"
+          accessibilityLabel={t('handover.save_note.label')}
+          accessibilityHint={t('handover.save_note.hint')}
           onPress={submitOnline}
           disabled={isSubmitting}
           style={{
@@ -241,19 +236,19 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
           }}
         >
           <Text style={{ color: 'white', fontSize: 18, fontWeight: '900' }}>
-            {isSubmitting ? 'Opslaan...' : 'Opslaan (online)'}
+            {isSubmitting ? t('handover.submitting') : t('handover.submit_online')}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
           accessibilityRole="button"
-          accessibilityLabel="Opslaan offline"
+          accessibilityLabel={t('handover.submit_offline')}
           onPress={saveOffline}
           style={{
             flex: 1, backgroundColor: colors.paper, borderWidth: 2, borderColor: colors.slate,
             borderRadius: 16, paddingVertical: 14, alignItems: 'center', minHeight: 56,
           }}
         >
-          <Text style={{ color: colors.slate, fontSize: 18, fontWeight: '900' }}>Offline</Text>
+          <Text style={{ color: colors.slate, fontSize: 18, fontWeight: '900' }}>{t('handover.submit_offline')}</Text>
         </TouchableOpacity>
       </View>
     </ScrollView>

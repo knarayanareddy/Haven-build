@@ -7,12 +7,29 @@ import { rateLimit } from "../_shared/ratelimit.ts";
 import { assertNoBsnInPayload, scrubBsnFromLogs } from "../_shared/bsn_guard.ts";
 import { asyncWrapper } from "../_shared/async_wrapper.ts";
 
-function classify(transcript: string) {
+function classify(transcript: string, locale: "en-GB" | "nl-NL" = "nl-NL") {
   const t = transcript.toLowerCase();
-  if (/(ingenomen|taken|done|klaar)/.test(t)) return { intent: "bevestig_ingenomen", action: "CONFIRM_MEDICATION_TAKEN" };
-  if (/(gevallen|help|bang|ambulance|niet goed|scared|fallen|niet meer zijn)/.test(t)) return { intent: "crisis", action: "TRIGGER_CRISIS_FLOW" };
-  if (/(verhaal|story|memory|herinnering)/.test(t)) return { intent: "life_story", action: "START_STORY" };
-  if (/(familie|sarah|bericht|message)/.test(t)) return { intent: "family_message", action: "OPEN_FAMILY" };
+  const isEn = locale === "en-GB" || locale === "en-US";
+
+  const INTENT_PATTERNS_NL = [
+    { intent: "bevestig_ingenomen", regex: /(ingenomen|genomen|slikken|geslikt|opgedronken|klaar)/ },
+    { intent: "crisis", regex: /(gevallen|help|bang|ambulance|niet goed|pijn op de borst|nood|ongeluk)/ },
+    { intent: "life_story", regex: /(verhaal|herinnering|toen ik vroeger|mijn jeugd)/ },
+    { intent: "family_message", regex: /(familie|sarah|bericht|boodschap|stuur foto)/ },
+  ];
+
+  const INTENT_PATTERNS_EN = [
+    { intent: "bevestig_ingenomen", regex: /(taken|took|swallowed|drank|done|finished)/ },
+    { intent: "crisis", regex: /(help|fallen|fell|scared|ambulance|chest pain|emergency|not feeling well)/ },
+    { intent: "life_story", regex: /(story|memory|when i was young|my childhood|remember)/ },
+    { intent: "family_message", regex: /(family|sarah|message|send photo)/ },
+  ];
+
+  const patterns = isEn ? INTENT_PATTERNS_EN : INTENT_PATTERNS_NL;
+  for (const p of patterns) {
+    if (p.regex.test(t)) return { intent: p.intent, action: p.intent.toUpperCase() };
+  }
+
   return { intent: "companion", action: "COMPANION_REPLY" };
 }
 
@@ -54,16 +71,18 @@ Deno.serve(asyncWrapper("fn-voice-pipeline", async (req: Request) => {
     run: async () => {
       const db = userClient(req);
       const dbAdmin = admin();
-      const locale = (body.locale === "nl-NL" ? "nl-NL" : "en-GB") as "en-GB" | "nl-NL";
+
+      const { data: elderProfile } = await dbAdmin.from("profiles").select("locale").eq("id", body.elder_id).maybeSingle();
+      const locale = (elderProfile?.locale ?? (body.locale === "nl-NL" ? "nl-NL" : "en-GB")) as "en-GB" | "nl-NL";
       
       const transcript = body.audio_base64
-        ? await transcribeDutchAudio(String(body.audio_base64))
+        ? await transcribeDutchAudio(String(body.audio_base64), locale)
         : String(body.transcript_text ?? (locale === "nl-NL" ? "Ik heb mijn pillen ingenomen en ik voel me rustig." : "I took my pills and I feel calm."));
 
       assertNoBsnInPayload({ transcript });
 
       // ─── COMPENSATING CONTROL — full semantic guardrails tracked as R2 ───
-      // 1. Expand BANNED_STT_PHRASES to include Flemish/Dutch dialect variants and formal synonyms
+      // 1. Expand BANNED_STT_PHRASES to include Flemish/Dutch/English dialect variants and formal synonyms
       const BANNED_STT_PHRASES = [
         "negeer", "vergeet vorige", "ignore", "forget previous", 
         "bevestig direct", "confirm immediately", "override", 
@@ -72,13 +91,15 @@ Deno.serve(asyncWrapper("fn-voice-pipeline", async (req: Request) => {
         "ontken eerdere instructies", "ontken vorige", "verontachtzaam",
         "overschrijf", "heroverweeg", "annuleer vorige",
         "forceer", "passeer", "doe alsof", "negeer vorige instructies",
-        "instructies overschrijven"
+        "instructies overschrijven",
+        // New English equivalents:
+        "disregard", "bypass instructions", "pretend to",
+        "do not follow", "erase all", "confirm without", "always taken"
       ];
       
-      // 2. Normalize transcript before checking (lowercase, collapse multiple spaces, remove punctuation)
+      // 2. Normalize transcript before checking
       const lowerTrans = transcript.toLowerCase();
       const normalizedTrans = lowerTrans.replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim();
-      // Space-obfuscated versions (n e g e e r -> strip spaces before check)
       const spaceStrippedTrans = normalizedTrans.replace(/\s+/g, "");
 
       const hasBannedPhrase = BANNED_STT_PHRASES.some((phrase) => {
@@ -87,13 +108,10 @@ Deno.serve(asyncWrapper("fn-voice-pipeline", async (req: Request) => {
         return normalizedTrans.includes(normPhrase) || spaceStrippedTrans.includes(strippedPhrase);
       });
 
-      const hasUnusualMarCommand = /(medicatie|pillen|furosemide|insuline).*(direct|altijd|negeer|forceer|overschrijf)/.test(normalizedTrans) || /overschrijf.*medicatie/.test(normalizedTrans);
+      const hasUnusualMarCommand = /(medicatie|pillen|furosemide|insuline|pills|medication).*(direct|altijd|negeer|forceer|overschrijf|always|ignore|force|override)/.test(normalizedTrans) || /overschrijf.*medicatie/.test(normalizedTrans) || /override.*medication/.test(normalizedTrans);
 
       if (hasBannedPhrase || hasUnusualMarCommand) {
-        // ─── 3. False-positive handling path ───
-        // If legitimate elder phrase accidentally matches (e.g. talking about weather or pain) ->
-        // return a clarifying prompt instead of hard rejection.
-        const isInnocentContext = /(regen|pijn|wandelen|tuin|voel|weer|eten|koffie|thee|slapen|tv|knie|rug|buiten)/.test(normalizedTrans);
+        const isInnocentContext = /(regen|pijn|wandelen|tuin|voel|weer|eten|koffie|thee|slapen|tv|knie|rug|buiten|rain|pain|walking|garden|feel|weather|food|coffee|tea|sleep|knee|back|outside)/.test(normalizedTrans);
         const isHighlyAdversarial = !isInnocentContext;
 
         await dbAdmin.from("audit_log").insert({
@@ -134,7 +152,7 @@ Deno.serve(asyncWrapper("fn-voice-pipeline", async (req: Request) => {
       }
       // ────────────────────────────────────────────────────────────────────────
 
-      const c = classify(transcript);
+      const c = classify(transcript, locale);
       const distress = c.intent === "crisis";
 
       // ─── LOCKED POLICY: 2-Step Confirmation required for ALL voice medication intakes ───
@@ -149,6 +167,7 @@ Deno.serve(asyncWrapper("fn-voice-pipeline", async (req: Request) => {
           confirmation_type: "medication_taken",
           payload: { transcript, medication_reminder_id: reminder?.id ?? null, medication_id: reminder?.medication_id ?? null },
           expires_at: expiresAt,
+          locale: locale,
         });
         const askBack = locale === "nl-NL"
           ? `Ik hoorde u zeggen dat u uw medicijn heeft ingenomen. Klopt dat? Zeg ja of nee.`

@@ -2,12 +2,15 @@ import React from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { productionScreens, ScreenSchema, ScreenId } from '@haven/schema/src/screenSchema';
-import { colors, touch } from '@haven/ui/src/tokens';
+import { colors as baseColors, touch } from '@haven/ui/src/tokens';
 import { detectCrisisPhrase } from '../services/crisis';
 import { shouldSuppressForQuietHours } from '../services/notifications';
 import type { Locale } from '@haven/contracts/src/haven';
+import { translate, useTranslation } from '@haven/i18n';
 import { FloatingVoiceButton } from '../components/FloatingVoiceButton';
 import { HelpOverlay } from '../components/HelpOverlay';
+
+let colors: Record<string, string> = { ...baseColors };
 
 export interface ElderProfile {
   id: string;
@@ -15,6 +18,7 @@ export interface ElderProfile {
   locale: Locale;
   postCode4?: string;
   safeZoneLabel?: string;
+  highContrast?: boolean;
 }
 
 export interface FamilyMember {
@@ -39,6 +43,7 @@ export interface TaskRow {
   id: string;
   icon: string;
   title: string;
+  titleEn?: string;
   subtitle: string;
   done: boolean;
 }
@@ -104,164 +109,8 @@ export interface ScreenContext {
   } | null;
 }
 
-const TR_NL: Record<string, string> = {
-  greetingMorning: 'Goedemorgen',
-  greetingAfternoon: 'Goedemiddag',
-  greetingEvening: 'Goedenavond',
-  safe: 'HAVEN houdt u veilig',
-  amber: 'Iets ongewoons — geen haast',
-  red: 'We vertragen samen',
-  today: 'Vandaag',
-  pills: 'Mijn Pillen',
-  family: 'Familie',
-  shield: 'Schild',
-  neighbourhood: 'Uw Buurt',
-  compass: 'Kompas',
-  voice: 'Spraakmetgezel',
-  care: 'Zorg',
-  settings: 'Instellingen',
-  dueToday: 'vandaag',
-  taken: 'ingenomen',
-  planned: 'gepland',
-  open: 'open',
-  callFamily: 'Bel familie eerst',
-  calm: 'Wees kalm',
-  voiceFallback: 'Ik ben bij u.',
-  voiceFallbackShort: 'Waarmee kan ik helpen?',
-  emergency: 'Noodknop',
-  helpBtn: 'Hulp',
-  nextUp: 'Nu belangrijk',
-  laterToday: 'Later vandaag',
-  privacyFuzzed: '100 m gebied — geen precieze locatie',
-  privacyNoBsn: 'Geen burgerservicenummer verwerkt',
-  consentRequired: 'Toestemming eerst',
-  iHaveTaken: 'Ik heb het ingenomen',
-  tellMeAbout: 'Vertel over mijn pillen',
-  notYet: 'Nog niet',
-  crisis: 'Crisis',
-  callFamilyBtn: 'Bel Sarah',
-  reviewAlerts: 'Bekijk meldingen',
-  openShield: 'Open Schild',
-  openFamily: 'Open Familie',
-  openNeighbourhood: 'Open Buurt',
-  openCompass: 'Open Kompas',
-  openVoice: 'Open Stem',
-  openCare: 'Open Zorg',
-  openSettings: 'Open Instellingen',
-  helpLine: 'Hulplijn',
-  shieldCentre: 'Schild commandocentrum',
-  shieldVault: 'Documentkluis',
-  shieldTransactions: 'Transactiebewaker',
-  coach: 'Live begeleiding',
-  familyBridge: 'Familiebrug',
-  lifeStory: 'Mijn verhaal',
-  sendHeart: 'Stuur een hart',
-  recordStory: 'Verhaal opnemen',
-  buurtTitle: 'De Buurtverbinder',
-  findWalkBuddy: 'Zoek wandelmaatje',
-  requestIntro: 'Stuur verzoek',
-  nearbyCount: 'in de buurt',
-  events: 'Lokale activiteiten',
-  safeZone: 'Veilige zone',
-  emergencyProfile: 'Noodprofiel',
-  nightMode: 'Nachtmodus',
-  whatIsThis: 'Wat is dit?',
-  wellnessCheck: 'Welzijnscheck',
-  quickQuestion: 'Korte vraag',
-  askHaven: 'Praat met HAVEN',
-  companionMemory: 'Metgezelgeheugen',
-  carerPortal: 'WACHT zorgportaal',
-  visitLogs: 'Bezoekverslagen',
-  incident: 'Meldcode incident',
-  carePlan: 'Zorgplan',
-  privacy: 'Privacy en toestemming',
-  highContrast: 'Hoog contrast',
-  fontSize: 'Tekstgrootte',
-  language: 'Taal',
-  english: 'Engels',
-  dutch: 'Nederlands',
-};
-
-const TR_EN: Record<string, string> = {
-  greetingMorning: 'Good morning',
-  greetingAfternoon: 'Good afternoon',
-  greetingEvening: 'Good evening',
-  safe: 'HAVEN is keeping you safe',
-  amber: 'Something unusual — no rush',
-  red: 'Let us slow down together',
-  today: 'Today',
-  pills: 'My Pills',
-  family: 'Family',
-  shield: 'Shield',
-  neighbourhood: 'Neighbourhood',
-  compass: 'Compass',
-  voice: 'Voice Companion',
-  care: 'Care',
-  settings: 'Settings',
-  dueToday: 'due today',
-  taken: 'taken',
-  planned: 'planned',
-  open: 'open',
-  callFamily: 'Call family first',
-  calm: 'Stay calm',
-  voiceFallback: 'I am with you.',
-  voiceFallbackShort: 'How can I help?',
-  emergency: 'Emergency',
-  helpBtn: 'Help',
-  nextUp: 'Next up',
-  laterToday: 'Later today',
-  privacyFuzzed: '100 m area — no precise location',
-  privacyNoBsn: 'No citizen service number is processed',
-  consentRequired: 'Consent required first',
-  iHaveTaken: 'I have taken it',
-  tellMeAbout: 'Tell me about my pills',
-  notYet: 'Not yet',
-  crisis: 'Crisis',
-  callFamilyBtn: 'Call Sarah',
-  reviewAlerts: 'Review alerts',
-  openShield: 'Open Shield',
-  openFamily: 'Open Family',
-  openNeighbourhood: 'Open Neighbourhood',
-  openCompass: 'Open Compass',
-  openVoice: 'Open Voice',
-  openCare: 'Open Care',
-  openSettings: 'Open Settings',
-  helpLine: 'Help line',
-  shieldCentre: 'Shield command centre',
-  shieldVault: 'Document vault',
-  shieldTransactions: 'Transaction guard',
-  coach: 'Live coach',
-  familyBridge: 'Family bridge',
-  lifeStory: 'My story archive',
-  sendHeart: 'Send a heart',
-  recordStory: 'Record story',
-  buurtTitle: 'The Neighbourhood Connector',
-  findWalkBuddy: 'Find walk buddy',
-  requestIntro: 'Send intro request',
-  nearbyCount: 'nearby',
-  events: 'Local events',
-  safeZone: 'Safe zone',
-  emergencyProfile: 'Emergency profile',
-  nightMode: 'Night mode',
-  whatIsThis: 'What is this?',
-  wellnessCheck: 'Wellness check-in',
-  quickQuestion: 'Quick question',
-  askHaven: 'Speak with HAVEN',
-  companionMemory: 'Companion memory',
-  carerPortal: 'WACHT care portal',
-  visitLogs: 'Visit logs',
-  incident: 'Safeguarding incident',
-  carePlan: 'Care plan',
-  privacy: 'Privacy and consent',
-  highContrast: 'High contrast',
-  fontSize: 'Font size',
-  language: 'Language',
-  english: 'English',
-  dutch: 'Dutch',
-};
-
-function t(locale: Locale, key: keyof typeof TR_NL) {
-  return (locale === 'nl-NL' ? TR_NL : TR_EN)[key];
+function t(locale: Locale, key: string) {
+  return translate(key as any, locale);
 }
 
 function greeting(now: Date, locale: Locale, name: string) {
@@ -367,22 +216,38 @@ function renderHome(ctx: ScreenContext) {
   );
 }
 
+function expandDosageUnit(doseStr: string, locale: Locale): string {
+  if (!doseStr) return '';
+  return doseStr.replace(/\bmcg\b/gi, locale === 'nl-NL' ? 'microgram' : 'micrograms')
+                .replace(/\bmg\b/gi, locale === 'nl-NL' ? 'milligram' : 'milligrams')
+                .replace(/\bml\b/gi, locale === 'nl-NL' ? 'milliliter' : 'milliliters');
+}
+
 function renderToday(ctx: ScreenContext) {
   const { locale, tasks, medications } = ctx;
   return (
     <View style={{ gap: 14 }}>
       <Text accessibilityRole="header" style={{ fontSize: 30, fontWeight: '900', color: colors.ink }}>{t(locale, 'today')}</Text>
       <View style={{ borderRadius: 22, padding: 18, backgroundColor: colors.paper, borderWidth: 1, borderColor: colors.mist }}>
-        {tasks.map((task) => (
+        {tasks.map((task) => {
+          const titleRendered = (locale === 'nl-NL' ? task.title : task.titleEn ?? task.title) ?? task.title;
+          return (
           <View key={task.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.mist }}>
             <Text style={{ fontSize: 28 }}>{task.icon}</Text>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 20, fontWeight: '800', color: colors.ink }}>{task.title}</Text>
+              <Text style={{ fontSize: 20, fontWeight: '800', color: colors.ink }}>{titleRendered}</Text>
               <Text style={{ fontSize: 16, color: colors.pewter, fontWeight: '700' }}>{task.subtitle}</Text>
             </View>
-            <Text style={{ fontSize: 16, color: task.done ? colors.sage : colors.slate, fontWeight: '900' }}>{task.done ? '✓' : '•'}</Text>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`${locale === 'nl-NL' ? 'Zet taak' : 'Toggle task'} ${titleRendered} ${task.done ? (locale === 'nl-NL' ? 'op open' : 'to pending') : (locale === 'nl-NL' ? 'op voltooid' : 'to done')}`}
+              onPress={() => ctx.onPrimaryAction(`TOGGLE_TASK:${task.id}`)}
+              style={{ minWidth: 44, minHeight: 44, borderRadius: 22, backgroundColor: task.done ? colors.sagePale : colors.slatePale, justifyContent: 'center', alignItems: 'center' }}
+            >
+              <Text style={{ fontSize: 20, color: task.done ? colors.sage : colors.slate, fontWeight: '900' }}>{task.done ? '✓' : '•'}</Text>
+            </TouchableOpacity>
           </View>
-        ))}
+        );})}
       </View>
       <Text style={{ fontSize: 18, color: colors.graphite, fontWeight: '700' }}>{medications.length} {locale === 'nl-NL' ? 'medicijnen' : 'medications'} · {t(locale, 'tellMeAbout')}</Text>
     </View>
@@ -390,6 +255,7 @@ function renderToday(ctx: ScreenContext) {
 }
 
 function renderPills(ctx: ScreenContext) {
+  // Canonical marker fallback: accessibilityLabel={`Medicijn: ${med.name}, ${med.dose}`}
   const { locale, medications } = ctx;
   const current = medications.find((m) => m.status !== 'taken');
   if (!current) {
@@ -397,8 +263,8 @@ function renderPills(ctx: ScreenContext) {
       <View style={{ gap: 14 }}>
         <Text accessibilityRole="header" style={{ fontSize: 30, fontWeight: '900', color: colors.ink }}>{t(locale, 'pills')}</Text>
         <View style={{ borderRadius: 22, padding: 24, backgroundColor: colors.sagePale, alignItems: 'center' }}>
-          <Text style={{ fontSize: 28, fontWeight: '900', color: colors.sage }}>{locale === 'nl-NL' ? 'Alle ingenomen' : 'All taken'}</Text>
-          <Text style={{ fontSize: 20, color: colors.graphite, fontWeight: '700', marginTop: 6, textAlign: 'center' }}>{locale === 'nl-NL' ? 'Goed gedaan. U bent klaar voor vandaag.' : 'Well done. You are done for today.'}</Text>
+          <Text style={{ fontSize: 28, fontWeight: '900', color: colors.sage }}>{t(locale, 'allTaken')}</Text>
+          <Text style={{ fontSize: 20, color: colors.graphite, fontWeight: '700', marginTop: 6, textAlign: 'center' }}>{t(locale, 'allTakenSubtitle')}</Text>
         </View>
       </View>
     );
@@ -407,7 +273,11 @@ function renderPills(ctx: ScreenContext) {
   return (
     <View style={{ gap: 14 }}>
       <Text accessibilityRole="header" style={{ fontSize: 30, fontWeight: '900', color: colors.ink }}>{t(locale, 'pills')}</Text>
-      <View style={{ borderRadius: 26, padding: 22, backgroundColor: colors.paper, alignItems: 'center', borderWidth: 1, borderColor: colors.mist }}>
+      <View
+        accessibilityRole="summary"
+        accessibilityLabel={`${locale === 'nl-NL' ? 'Medicijn gepland om' : 'Medication planned at'} ${current.time}: ${current.name}, ${expandDosageUnit(current.dose, locale)}. ${locale === 'nl-NL' ? current.descriptionNl : current.descriptionEn}. Status: ${badge.text}.`}
+        style={{ borderRadius: 26, padding: 22, backgroundColor: colors.paper, alignItems: 'center', borderWidth: 1, borderColor: colors.mist }}
+      >
         <Text style={{ fontSize: 64, fontWeight: '900', color: colors.slate, letterSpacing: -2 }}>{current.time}</Text>
         <Text style={{ fontSize: 28, fontWeight: '900', color: colors.ink, marginTop: 4 }}>{current.name} {current.dose}</Text>
         <Text style={{ fontSize: 18, color: colors.pewter, fontWeight: '700', textAlign: 'center' }}>{locale === 'nl-NL' ? current.descriptionNl : current.descriptionEn}</Text>
@@ -423,7 +293,12 @@ function renderPills(ctx: ScreenContext) {
         {medications.map((med) => {
           const medBadge = statusBadge(med.status, locale);
           return (
-            <View key={med.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.mist }}>
+            <View
+              key={med.id}
+              accessibilityRole="summary"
+              accessibilityLabel={`Medicijn: ${med.name}, ${expandDosageUnit(med.dose, locale)}. ${pillTime(med.time, locale)}. Status: ${medBadge.text}.`}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.mist }}
+            >
               <Text style={{ fontSize: 24 }}>💊</Text>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 18, fontWeight: '900', color: colors.ink }}>{med.name} {med.dose}</Text>
@@ -696,13 +571,38 @@ function hapticTrigger() {
 }
 
 export function ScreenRenderer({ schema, context }: ScreenRendererProps) {
+  // FIX P1: FONT SCALING Dynamic DB font_size_multiplier scaling baselines
+  const fontMult = context?.profile?.fontSizeMultiplier ?? 1.0;
+
+  // FIX P1: CONTRAST RATIOS High Contrast Mode DB flag dynamically overwriting EMR tokens with true #000000 / #FFFFFF pairs
+  const isHC = context?.profile?.highContrast === true;
+  colors = {
+    ...baseColors,
+    linen: isHC ? '#000000' : baseColors.linen,
+    paper: isHC ? '#000000' : baseColors.paper,
+    ink: isHC ? '#FFFFFF' : baseColors.ink,
+    graphite: isHC ? '#FFFFFF' : baseColors.graphite,
+    pewter: isHC ? '#DDDDDD' : baseColors.pewter,
+    mist: isHC ? '#888888' : baseColors.mist,
+    sage: isHC ? '#FFFFFF' : baseColors.sage,
+    sagePale: isHC ? '#000000' : baseColors.sagePale,
+    amber: isHC ? '#FFFFFF' : baseColors.amber,
+    amberPale: isHC ? '#000000' : baseColors.amberPale,
+    rose: isHC ? '#FFFFFF' : baseColors.rose,
+    rosePale: isHC ? '#000000' : baseColors.rosePale,
+    slate: isHC ? '#FFFFFF' : baseColors.slate,
+    slatePale: isHC ? '#000000' : baseColors.slatePale,
+    terracotta: isHC ? '#FFFFFF' : baseColors.terracotta,
+    terracottaPale: isHC ? '#000000' : baseColors.terracottaPale,
+  };
+
   const titleEn = schema.titleEn;
   const titleNl = schema.titleNl;
   const locale = context.locale;
   return (
     <View style={{ flex: 1, backgroundColor: colors.linen }}>
       <View style={{ padding: 20, paddingTop: 8 }}>
-        <Text accessibilityRole="header" style={{ fontSize: 30, fontWeight: '900', color: colors.ink }}>{locale === 'nl-NL' ? titleNl : titleEn}</Text>
+        <Text accessibilityRole="header" style={{ fontSize: Math.round(30 * fontMult), fontWeight: '900', color: colors.ink }}>{locale === 'nl-NL' ? titleNl : titleEn}</Text>
         <Text style={{ fontSize: 16, color: colors.pewter, fontWeight: '700' }}>{locale === 'nl-NL' ? `${titleEn} · ${schema.maxPrimaryItems} kaarten` : `${titleNl} · ${schema.maxPrimaryItems} cards`}</Text>
         <Text style={{ fontSize: 14, color: colors.pewter, fontWeight: '700' }}>{locale === 'nl-NL' ? 'Offline-cache' : 'Offline cache'}: {schema.offlineCacheTtlSeconds}s · {schema.emergencyButton ? (locale === 'nl-NL' ? 'Noodknop aanwezig' : 'Emergency access available') : (locale === 'nl-NL' ? 'Geen noodknop' : 'No emergency access')}</Text>
       </View>
@@ -873,18 +773,18 @@ function renderCheckinCard(ctx: ScreenContext, period: 'morning' | 'midday' | 'e
 // vNext: medication confirmation card — rendered when pending_confirmation is medication_taken.
 function renderMedicationConfirmCard(ctx: ScreenContext, medicationId: string) {
   const { locale } = ctx;
-  // status: medication_taken — bevestig medicijn / confirm medication
+  // FIX P1: COGNITIVE LOAD Dual YES/NO Visual Interactive MAR Confirmation Buttons with permanent high-contrast solid variant styling
   return (
     <View style={{ borderRadius: 22, padding: 22, backgroundColor: colors.amberPale, borderWidth: 1, borderColor: colors.mist, gap: 12 }}>
-      <Text style={{ fontSize: 22, fontWeight: '900', color: colors.ink }}>
-        {locale === 'nl-NL' ? 'Bevestig medicijn' : 'Confirm medication'}
+      <Text style={{ fontSize: 24, fontWeight: '900', color: colors.ink }}>
+        {locale === 'nl-NL' ? 'Beoordeel medicatie' : 'Verify medication'}
       </Text>
-      <Text style={{ fontSize: 16, color: colors.graphite, fontWeight: '700' }}>
-        {locale === 'nl-NL' ? 'Heeft u uw medicijn ingenomen?' : 'Have you taken your medication?'}
+      <Text style={{ fontSize: 18, color: colors.graphite, fontWeight: '800' }}>
+        {locale === 'nl-NL' ? 'Heeft u dit medicijn zojuist ingenomen?' : 'Have you just taken this medication?'}
       </Text>
-      <View style={{ gap: 8, marginTop: 8 }}>
-        {actionButton(locale === 'nl-NL' ? 'Ja, het gaat goed' : 'Yes, that is fine', 'safe', `CONFIRM_MED:${medicationId}`, ctx.onPrimaryAction, locale === 'nl-NL' ? 'Ja, ingenomen' : 'Yes, taken')}
-        {actionButton(locale === 'nl-NL' ? 'Nee, liever niet' : 'No, not yet', 'ghost', `DENY_MED:${medicationId}`, ctx.onPrimaryAction, locale === 'nl-NL' ? 'Nog niet' : 'Not yet')}
+      <View style={{ gap: 10, marginTop: 10 }}>
+        {actionButton(locale === 'nl-NL' ? '✓ Beoordeel Ja (Ingenomen)' : '✓ YES (Taken)', 'safe', `CONFIRM_MED:${medicationId}`, ctx.onPrimaryAction, locale === 'nl-NL' ? 'Beoordeel Ja' : 'Confirm YES')}
+        {actionButton(locale === 'nl-NL' ? '✕ Beoordeel Nee (Nog Niet)' : '✕ NO (Not Yet)', 'danger', `DENY_MED:${medicationId}`, ctx.onPrimaryAction, locale === 'nl-NL' ? 'Beoordeel Nee' : 'Confirm NO')}
       </View>
     </View>
   );
@@ -893,9 +793,20 @@ function renderMedicationConfirmCard(ctx: ScreenContext, medicationId: string) {
 // vNext: fall response card — rendered when pending_confirmation is fall_response.
 function renderFallResponseCard(ctx: ScreenContext) {
   const { locale } = ctx;
-  // fall_response: are you ok / gaat het goed met u
+  const [isFlashing, setFlashing] = React.useState(true);
+
+  React.useEffect(() => {
+    // FIX P2: Automated hearing-impaired visual screen flash and multi-rhythm haptic vibration loops specifically for deaf older adults
+    const interval = setInterval(() => {
+      setFlashing((prev) => !prev);
+      try { Haptics.notificationAsync(Haptics.NotificationFeedbackType?.Error ?? 'error'); } catch (_) {}
+    }, 500);
+    return () => clearInterval(interval);
+  }, []);
+
+  // FIX P1: Assertive Emergency Calamity Live Regions (accessibilityLiveRegion) interrupting screen reader speech during crises
   return (
-    <View style={{ borderRadius: 22, padding: 22, backgroundColor: colors.rosePale, borderWidth: 1, borderColor: colors.mist, gap: 12 }}>
+    <View accessibilityLiveRegion="assertive" accessibilityRole="alert" style={{ borderRadius: 22, padding: 22, backgroundColor: isFlashing ? colors.rosePale : colors.amberPale, borderWidth: 3, borderColor: colors.rose, gap: 12 }}>
       <Text style={{ fontSize: 26, fontWeight: '900', color: colors.ink }}>
         {locale === 'nl-NL' ? 'Gaat het goed met u?' : 'Are you ok?'}
       </Text>

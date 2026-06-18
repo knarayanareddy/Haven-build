@@ -2,6 +2,6 @@
   "name": "@haven/i18n",
   "version": "1.0.0",
   "type": "module",
-  "main": "src/copy.ts",
+  "main": "src/index.ts",
   "private": true
 }

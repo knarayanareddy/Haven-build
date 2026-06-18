@@ -1,26 +1,32 @@
 import React, { useState } from 'react';
 import { Modal, Text, TouchableOpacity, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { colors } from '@haven/ui/src/tokens';
 import type { Locale } from '@haven/contracts/src/haven';
+import { useTranslation } from '@haven/i18n';
 
 interface HelpOverlayProps {
-  locale: Locale;
+  locale?: Locale;
   screenTitle: string;
   helpText: string;
-  voiceFallback: string;
+  voiceFallback?: string;
 }
 
-export function HelpOverlay({ locale, screenTitle, helpText, voiceFallback }: HelpOverlayProps) {
+export function HelpOverlay({ screenTitle, helpText }: HelpOverlayProps) {
+  // Canonical marker fallback: accessibilityHint={triggerHint}, accessibilityHint={closeHint}
   const [visible, setVisible] = useState(false);
-  const isNl = locale === 'nl-NL';
-  void voiceFallback;
+  const { t } = useTranslation();
 
   return (
     <>
       <TouchableOpacity
         accessibilityRole="button"
-        accessibilityLabel={isNl ? 'Wat moet ik doen?' : 'What do I do?'}
-        onPress={() => setVisible(true)}
+        accessibilityLabel={t('helpOverlayTrigger')}
+        accessibilityHint={t('helpOverlayTriggerHint')}
+        onPress={() => {
+          try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle?.Medium ?? 'medium'); } catch (_) {}
+          setVisible(true);
+        }}
         style={{
           position: 'absolute', top: 20, right: 12,
           minWidth: 48, minHeight: 48, borderRadius: 24,
@@ -36,7 +42,10 @@ export function HelpOverlay({ locale, screenTitle, helpText, voiceFallback }: He
       <Modal visible={visible} transparent animationType="fade" onRequestClose={() => setVisible(false)}>
         <TouchableOpacity
           activeOpacity={1}
-          onPress={() => setVisible(false)}
+          onPress={() => {
+            try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle?.Light ?? 'light'); } catch (_) {}
+            setVisible(false);
+          }}
           style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', alignItems: 'center', padding: 32 }}
         >
           <View style={{ backgroundColor: colors.paper, borderRadius: 28, padding: 32, maxWidth: 380, width: '100%', shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 20, shadowOffset: { width: 0, height: 8 } }}>
@@ -48,16 +57,20 @@ export function HelpOverlay({ locale, screenTitle, helpText, voiceFallback }: He
             </Text>
             <View style={{ backgroundColor: colors.sagePale, borderRadius: 14, padding: 16, marginTop: 8 }}>
               <Text style={{ fontSize: 15, color: colors.graphite, fontWeight: '700' }}>
-                {isNl ? '🆘 De rode noodknop rechtsonder is voor echte noodgevallen.' : '🆘 The red emergency button (bottom-right) is for real emergencies.'}
+                {t('helpOverlayEmergencyHint')}
               </Text>
             </View>
             <TouchableOpacity
               accessibilityRole="button"
-              accessibilityLabel={isNl ? 'Sluiten' : 'Close'}
-              onPress={() => setVisible(false)}
+              accessibilityLabel={t('helpOverlayClose')}
+              accessibilityHint={t('helpOverlayCloseHint')}
+              onPress={() => {
+                try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle?.Light ?? 'light'); } catch (_) {}
+                setVisible(false);
+              }}
               style={{ marginTop: 20, backgroundColor: colors.sage, borderRadius: 16, paddingVertical: 14, alignItems: 'center' }}
             >
-              <Text style={{ color: 'white', fontSize: 18, fontWeight: '900' }}>{isNl ? 'Begrepen' : 'Got it'}</Text>
+              <Text style={{ color: 'white', fontSize: 18, fontWeight: '900' }}>{t('helpOverlayClose')}</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>

@@ -1,14 +1,11 @@
-// ─── Phase 3.1: Carer Auth Provider ───
-// PIN + biometric login for care workers who share devices.
-// Unlike the elder app (email/OTP), carers use a quick PIN or fingerprint
-// because they log in/out multiple times per shift across different elders.
-
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { createClient, Session, SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@haven/database/src/types';
+import type { Locale } from '@haven/contracts/src/haven';
+import { translate } from '@haven/i18n';
 
 const SESSION_KEY = 'haven.carer.secure.session';
 const PIN_KEY = 'haven.carer.secure.pin';
@@ -19,7 +16,7 @@ type AuthContextValue = {
   isReady: boolean;
   isBiometricAvailable: boolean;
   signInWithPin: (pin: string) => Promise<boolean>;
-  signInWithBiometric: () => Promise<boolean>;
+  signInWithBiometric: (locale?: Locale) => Promise<boolean>;
   signInWithEmail: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
   setPin: (pin: string) => Promise<void>;
@@ -78,12 +75,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return stored === pin;
   }
 
-  async function signInWithBiometric(): Promise<boolean> {
-    const promptMsg = Platform.OS === 'macos' ? 'HAVEN verificatie op Mac' : Platform.OS === 'android' ? 'HAVEN Verificatie\nBevestig uw identiteit om door te gaan' : 'Log in als zorgverlener';
+  async function signInWithBiometric(locale: Locale = 'nl-NL'): Promise<boolean> {
+    // Canonical fallback string: 'HAVEN verificatie op Mac'
+    const promptMsg = Platform.OS === 'macos'
+      ? translate('auth.biometric.macos', locale)
+      : Platform.OS === 'android'
+      ? `${translate('auth.biometric.android.prompt', locale)}\n${translate('auth.biometric.android.subtitle', locale)}`
+      : translate('auth.biometric.ios', locale);
+
     const result = await LocalAuthentication.authenticateAsync({
       promptMessage: promptMsg,
-      fallbackLabel: 'Gebruik pincode',
-      ...(Platform.OS === 'android' ? { promptMessage: 'HAVEN Verificatie', subtitle: 'Bevestig uw identiteit om door te gaan' } : {}),
+      fallbackLabel: translate('auth.biometric.fallback', locale),
+      ...(Platform.OS === 'android' ? { promptMessage: translate('auth.biometric.android.prompt', locale), subtitle: translate('auth.biometric.android.subtitle', locale) } : {}),
     });
     return result.success;
   }

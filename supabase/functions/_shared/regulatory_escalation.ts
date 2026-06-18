@@ -4,6 +4,10 @@ import { captureException } from "./sentry.ts";
 export interface RegulatoryEscalationPayload {
   incident_id: string;
   severity: string;
+  severity_nl: string;
+  severity_en: string;
+  description_nl: string;
+  description_en: string;
   timestamp: string;
   care_org_id: string;
   elder_id?: string;
@@ -15,14 +19,21 @@ export async function executeRegulatoryEscalation(
   elderId: string,
   careOrgId = "haven_thuiszorg_default"
 ): Promise<void> {
-  // Closure Test 3: severity='laag' -> no escalation webhook called
-  if (severity !== "kritiek") return;
+  const normSeverity = severity.toLowerCase();
+  if (normSeverity !== "kritiek" && normSeverity !== "critical") return;
 
   const db = admin();
 
+  const descriptionNl = "Ernstig zorgincident geregistreerd. Direct toezicht of escalatie per Meldcode vereist.";
+  const descriptionEn = "Severe care incident logged. Immediate regulatory supervision or safeguarding escalation required.";
+
   const payload: RegulatoryEscalationPayload = {
     incident_id: incidentId,
-    severity,
+    severity: "critical",
+    severity_nl: "kritiek",
+    severity_en: "critical",
+    description_nl: descriptionNl,
+    description_en: descriptionEn,
     timestamp: new Date().toISOString(),
     care_org_id: careOrgId,
     elder_id: elderId,

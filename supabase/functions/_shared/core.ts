@@ -182,12 +182,53 @@ export function scoreScam(raw: string) {
   };
 }
 
-export async function recordMetric(fn_name: string, started: number, status: "success" | "error" | "fallback") {
+export async function recordMetric(fn_name: string, started: number, status: "success" | "error" | "fallback" | "slo_breach") {
   try {
     await admin().from("perf_metrics").insert({ fn_name, duration_ms: Date.now() - started, status, env: Deno.env.get("HAVEN_ENV") ?? "production" });
   } catch (_) {
     console.log(JSON.stringify({ fn_name, status, duration_ms: Date.now() - started, metric: "local-log" }));
   }
+}
+
+// ─── FINDING 1 & FINDING 2: BCP47 Strict Equality Guard & Pre-Dispatch Content Validation ───
+const SUPPORTED_LOCALES = ['nl-NL', 'en-GB', 'en-US'];
+
+export async function assertSafeLocale(attemptedLocale: unknown, actorId = '00000000-0000-0000-0000-000000000001'): Promise<'nl-NL' | 'en-GB' | 'en-US'> {
+  const localeStr = String(attemptedLocale ?? 'nl-NL');
+  if (SUPPORTED_LOCALES.includes(localeStr)) {
+    return localeStr as 'nl-NL' | 'en-GB' | 'en-US';
+  }
+
+  try {
+    await admin().from('audit_log').insert({
+      actor_id: actorId,
+      actor_role: 'system',
+      action: 'UNSUPPORTED_LOCALE_WARNING',
+      table_name: 'profiles',
+      extra: { attempted_locale: localeStr, reason: 'BCP47_STRICT_EQUALITY_FAILED', timestamp: new Date().toISOString() },
+    });
+  } catch {
+    // best-effort
+  }
+
+  return 'nl-NL';
+}
+
+export function sanitizeTemplateContent(title: string, body: string): { title: string; body: string } {
+  let cleanTitle = title.replace(/\{\{.*?\}\}|%\{.*?\}|<.*?>/g, '').trim();
+  let cleanBody = body.replace(/\{\{.*?\}\}|%\{.*?\}|<.*?>/g, '').trim();
+
+  const titleInvalid = cleanTitle.length > 65 || cleanTitle !== title;
+  const bodyInvalid = cleanBody.length > 240 || cleanBody !== body;
+
+  if (titleInvalid || bodyInvalid || !cleanTitle || !cleanBody) {
+    return {
+      title: 'HAVEN Veiligheidsmelding',
+      body: 'Wij hebben een belangrijke melding geregistreerd. Open de app voor meer details.',
+    };
+  }
+
+  return { title: cleanTitle, body: cleanBody };
 }
 
 // P1-4 FIX: Expo push token required for production push notifications
@@ -202,7 +243,54 @@ export async function dispatchNotification(params: {
   data?: Record<string, unknown>;
 }) {
   const db = admin();
-  const { data: note, error } = await db.from("notifications").insert(params).select().single();
+
+  // 1. Look up the RECIPIENT's profiles.locale from the database
+  const { data: recipientProfile } = await db.from("profiles")
+    .select("locale")
+    .eq("id", params.recipient_id)
+    .maybeSingle();
+
+  const recipientLocale = await assertSafeLocale(recipientProfile?.locale, params.recipient_id);
+  const isEnglish = recipientLocale === "en-GB" || recipientLocale === "en-US";
+
+  // 2. Compile the notification title and body in the recipient's language
+  let compiledTitle = params.title_nl;
+  let compiledBody = params.body_nl;
+
+  if (params.notification_type) {
+    try {
+      const { data: tmpl } = await db.from("notification_templates")
+        .select("title, body")
+        .eq("template_key", params.notification_type)
+        .eq("locale", recipientLocale)
+        .maybeSingle();
+
+      if (tmpl?.title && tmpl?.body) {
+        compiledTitle = tmpl.title;
+        compiledBody = tmpl.body;
+      }
+    } catch {
+      // fallback to props
+    }
+  }
+
+  if (compiledTitle === params.title_nl && isEnglish) {
+    compiledTitle = params.title_en ?? (params.title_nl.includes("Calamiteit") ? "HAVEN Calamity" : params.title_nl);
+    compiledBody = params.body_en ?? (params.body_nl.includes("val gedetecteerd") ? "We detected a possible fall." : params.body_nl);
+  } else if (!recipientProfile?.locale) {
+    compiledTitle = `${params.title_nl} | ${params.title_en ?? "HAVEN Calamity"}`;
+    compiledBody = `${params.body_nl} | ${params.body_en ?? "Fall detected"}`;
+  }
+
+  const validatedCopy = sanitizeTemplateContent(compiledTitle, compiledBody);
+  compiledTitle = validatedCopy.title;
+  compiledBody = validatedCopy.body;
+
+  const { data: note, error } = await db.from("notifications").insert({
+    ...params,
+    title_nl: compiledTitle,
+    body_nl: compiledBody,
+  }).select().single();
   if (error) throw error;
   const { data: tokens } = await db.from("push_tokens").select("token").eq("profile_id", params.recipient_id).eq("is_active", true);
   if (!tokens?.length) {
@@ -210,7 +298,7 @@ export async function dispatchNotification(params: {
     return note;
   }
   const expoToken = Deno.env.get("EXPO_ACCESS_TOKEN");
-  const pushPayload = tokens.map((t: { token: string }) => ({ to: t.token, title: params.title_nl, body: params.body_nl, data: params.data ?? {}, sound: "default" }));
+  const pushPayload = tokens.map((t: { token: string }) => ({ to: t.token, title: compiledTitle, body: compiledBody, data: params.data ?? {}, sound: "default" }));
   try {
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (expoToken) headers["authorization"] = `Bearer ${expoToken}`;
@@ -253,7 +341,7 @@ export async function dispatchNotification(params: {
             recipient_id: params.recipient_id,
             elder_id: params.elder_id,
             notification_type: params.notification_type,
-            body_nl: params.body_nl,
+            body_nl: compiledBody,
           }),
         });
         if (res.ok) fallbackOutcome = "success";
@@ -295,7 +383,7 @@ export async function dispatchNotification(params: {
           : undefined;
         const result = await sendWhatsAppMessage(
           prefs.whatsapp_phone,
-          params.body_nl,
+          compiledBody,
           elderName,
         );
         if (result.success) {
