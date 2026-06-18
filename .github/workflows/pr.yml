@@ -29,7 +29,8 @@ jobs:
         run: corepack pnpm test
 
       - name: 2) Run accessibility lint (eslint-plugin-jsx-a11y)
-        run: corepack pnpm exec eslint . --rule 'jsx-a11y/alt-text: error' --rule 'jsx-a11y/aria-props: error' --rule 'jsx-a11y/aria-role: error' --rule 'jsx-a11y/role-supports-aria-props: error' --max-warnings=0
+        run: |
+          corepack pnpm exec eslint . --rule 'jsx-a11y/alt-text: error' --rule 'jsx-a11y/aria-props: error' --rule 'jsx-a11y/aria-role: error' --rule 'jsx-a11y/role-supports-aria-props: error' --max-warnings=0
 
       - name: 3) Run security scan (npm audit / Snyk)
         run: corepack pnpm audit --audit-level=high
@@ -107,9 +108,9 @@ jobs:
             ### 🏥 HAVEN Pull Request Quality & Security Receipt
             | Stage / Evaluation Gate | Status | Execution Metrics |
             | :--- | :---: | :--- |
-            | **31 Domain Test Suites** | ${{ needs.quality-security-gate.result === 'success' && '🟢 PASSED' || '🔴 FAILED' }} | Flawless `node:test` Assertions |
-            | **Accessibility & Security** | ${{ needs.quality-security-gate.result === 'success' && '🟢 PASSED' || '🔴 FAILED' }} | `jsx-a11y` + `pnpm audit` |
-            | **Deno Version Pinning** | ${{ needs.quality-security-gate.result === 'success' && '🟢 PASSED' || '🔴 FAILED' }} | 100% Pinned Imports |
-            | **Secret Scan (TruffleHog)** | ${{ needs.quality-security-gate.result === 'success' && '🟢 PASSED' || '🔴 FAILED' }} | Zero Cleantext Leaks |
-            | **Supabase DB Migrations** | ${{ needs.supabase-db-test.result === 'success' && '🟢 PASSED' || '🔴 FAILED' }} | Canonical DDL Schemas |
-            | **Expo EAS Preview Build** | ${{ needs.expo-eas-preview.result === 'success' && '🟢 INITIATED' || '🟡 DEFERRED' }} | Dual iOS & Android Shims |
+            | **31 Domain Test Suites** | ${{ needs.quality-security-gate.result == 'success' && '🟢 PASSED' || '🔴 FAILED' }} | Flawless `node:test` Assertions |
+            | **Accessibility & Security** | ${{ needs.quality-security-gate.result == 'success' && '🟢 PASSED' || '🔴 FAILED' }} | `jsx-a11y` + `pnpm audit` |
+            | **Deno Version Pinning** | ${{ needs.quality-security-gate.result == 'success' && '🟢 PASSED' || '🔴 FAILED' }} | 100% Pinned Imports |
+            | **Secret Scan (TruffleHog)** | ${{ needs.quality-security-gate.result == 'success' && '🟢 PASSED' || '🔴 FAILED' }} | Zero Cleantext Leaks |
+            | **Supabase DB Migrations** | ${{ needs.supabase-db-test.result == 'success' && '🟢 PASSED' || '🔴 FAILED' }} | Canonical DDL Schemas |
+            | **Expo EAS Preview Build** | ${{ needs.expo-eas-preview.result == 'success' && '🟢 INITIATED' || '🟡 DEFERRED' }} | Dual iOS & Android Shims |

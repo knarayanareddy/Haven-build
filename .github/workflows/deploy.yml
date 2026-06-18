@@ -30,7 +30,8 @@ jobs:
         run: corepack pnpm test
 
       - name: 2) Run accessibility lint
-        run: corepack pnpm exec eslint . --rule 'jsx-a11y/alt-text: error' --max-warnings=0
+        run: |
+          corepack pnpm exec eslint . --rule 'jsx-a11y/alt-text: error' --max-warnings=0
 
       - name: 3) Run security scan
         run: corepack pnpm audit --audit-level=high
