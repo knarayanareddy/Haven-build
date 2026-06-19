@@ -158,3 +158,71 @@ verify_jwt = false # COMPENSATING CONTROL: GET handler for Tink OAuth redirect; 
 
 [functions.fn-slo-measure]
 verify_jwt = false # COMPENSATING CONTROL: internal logging measuring
+
+# ── Functions added to complete the full 81-function coverage ──────────────────
+
+[functions.fn-banking-ingress-buffer]
+verify_jwt = false # COMPENSATING CONTROL: PSD2 webhook ingress; verified via HMAC + rate limiting, no user JWT available
+
+[functions.fn-banking-stream-consumer]
+verify_jwt = false # COMPENSATING CONTROL: internal stream consumer with requireInternalAccess check
+
+[functions.fn-carer-handover-note]
+verify_jwt = true
+
+[functions.fn-consent-pack-decide]
+verify_jwt = true
+
+[functions.fn-consent-pack-list]
+verify_jwt = true
+
+[functions.fn-daily-checkin-scheduler]
+verify_jwt = false # COMPENSATING CONTROL: cron-scheduled background task with requireInternalAccess check
+
+[functions.fn-daily-status-digest]
+verify_jwt = false # COMPENSATING CONTROL: cron-scheduled digest with requireInternalAccess check
+
+[functions.fn-device-health-monitor]
+verify_jwt = false # COMPENSATING CONTROL: device attestation webhook; verified via HMAC-SHA256 signature
+
+[functions.fn-fall-escalation]
+verify_jwt = false # COMPENSATING CONTROL: internal escalation trigger with requireInternalAccess check
+
+[functions.fn-fall-event]
+verify_jwt = true
+
+[functions.fn-medication-interactions-check]
+verify_jwt = true
+
+[functions.fn-medication-ocr-review]
+verify_jwt = true
+
+[functions.fn-pending-confirmation-respond]
+verify_jwt = true
+
+[functions.fn-quiet-day-detector]
+verify_jwt = false # COMPENSATING CONTROL: background monitoring job with requireInternalAccess check
+
+[functions.fn-scam-coaching]
+verify_jwt = true
+
+[functions.fn-video-call-create]
+verify_jwt = true
+
+[functions.fn-video-call-end]
+verify_jwt = true
+
+[functions.fn-video-call-join-token]
+verify_jwt = true
+
+[functions.fn-voice-profile-create]
+verify_jwt = true
+
+[functions.fn-voice-profile-revoke]
+verify_jwt = true
+
+[functions.fn-voice-profile-test]
+verify_jwt = true
+
+[functions.fn-wellness-checkin]
+verify_jwt = true
