@@ -75,7 +75,7 @@ jobs:
   staging-deployment:
     runs-on: ubuntu-latest
     needs: [pr-checks-parity]
-    if: needs.pr-checks-parity.outputs.has_staging == 'true'
+    if: ${{ needs.pr-checks-parity.outputs.has_staging == 'true' }}
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.STAGING_PROJECT_ID }}
@@ -126,7 +126,7 @@ jobs:
   production-deployment:
     runs-on: ubuntu-latest
     needs: [pr-checks-parity, staging-deployment]
-    if: always() && needs.pr-checks-parity.result == 'success' && needs.pr-checks-parity.outputs.has_production == 'true' && (needs.staging-deployment.result == 'success' || needs.staging-deployment.result == 'skipped' || needs.staging-deployment.result == 'cancelled')
+    if: ${{ always() && needs.pr-checks-parity.result == 'success' && needs.pr-checks-parity.outputs.has_production == 'true' && (needs.staging-deployment.result == 'success' || needs.staging-deployment.result == 'skipped' || needs.staging-deployment.result == 'cancelled') }}
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.PRODUCTION_PROJECT_ID }}
@@ -157,7 +157,7 @@ jobs:
       - name: Setup Expo & EAS CLI
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        if: env.EXPO_TOKEN != ''
+        if: ${{ env.EXPO_TOKEN != '' }}
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
@@ -166,7 +166,7 @@ jobs:
       - name: 5) Build & Submit Production Mobile Clients (EAS Build)
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        if: env.EXPO_TOKEN != ''
+        if: ${{ env.EXPO_TOKEN != '' }}
         run: |
           cd apps/elder && eas build --platform all --profile production --non-interactive --no-wait
 
@@ -182,7 +182,7 @@ jobs:
       - name: Setup Sentry CLI
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-        if: env.SENTRY_AUTH_TOKEN != ''
+        if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
         uses: getsentry/action-release@v1
         with:
           environment: production
@@ -191,7 +191,7 @@ jobs:
       - name: 3) Notify Team in Slack / Teams (Successful General Availability)
         env:
           SLACK_PROD_WEBHOOK_URL: ${{ secrets.SLACK_PROD_WEBHOOK_URL }}
-        if: env.SLACK_PROD_WEBHOOK_URL != ''
+        if: ${{ env.SLACK_PROD_WEBHOOK_URL != '' }}
         uses: slackapi/slack-github-action@v1.24.0
         with:
           payload: |
@@ -230,12 +230,12 @@ jobs:
   deployment-failure-alert:
     runs-on: ubuntu-latest
     needs: [production-deployment]
-    if: failure()
+    if: ${{ failure() }}
     steps:
       - name: 6) Block Deployment + Notify Team
         env:
           SLACK_PROD_WEBHOOK_URL: ${{ secrets.SLACK_PROD_WEBHOOK_URL }}
-        if: env.SLACK_PROD_WEBHOOK_URL != ''
+        if: ${{ env.SLACK_PROD_WEBHOOK_URL != '' }}
         uses: slackapi/slack-github-action@v1.24.0
         with:
           payload: |
