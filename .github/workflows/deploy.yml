@@ -13,6 +13,9 @@ jobs:
   # ══════════════════════════════════════════════════════════════════════════════
   pr-checks-parity:
     runs-on: ubuntu-latest
+    outputs:
+      has_staging: ${{ steps.check_secrets.outputs.has_staging }}
+      has_production: ${{ steps.check_secrets.outputs.has_production }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,13 +55,27 @@ jobs:
           supabase db start
           supabase db reset
 
+      - name: Check Secrets Configured
+        id: check_secrets
+        run: |
+          if [ -n "${{ secrets.STAGING_PROJECT_ID }}" ]; then
+            echo "has_staging=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_staging=false" >> $GITHUB_OUTPUT
+          fi
+          if [ -n "${{ secrets.PRODUCTION_PROJECT_ID }}" ]; then
+            echo "has_production=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_production=false" >> $GITHUB_OUTPUT
+          fi
+
   # ══════════════════════════════════════════════════════════════════════════════
   # PHASE 2: STAGING DEPLOYMENT & ACTIVE VERIFICATION
   # ══════════════════════════════════════════════════════════════════════════════
   staging-deployment:
     runs-on: ubuntu-latest
     needs: [pr-checks-parity]
-    if: secrets.STAGING_PROJECT_ID != ''
+    if: needs.pr-checks-parity.outputs.has_staging == 'true'
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.STAGING_PROJECT_ID }}
@@ -109,7 +126,7 @@ jobs:
   production-deployment:
     runs-on: ubuntu-latest
     needs: [pr-checks-parity, staging-deployment]
-    if: always() && needs.pr-checks-parity.result == 'success' && (needs.staging-deployment.result == 'success' || needs.staging-deployment.result == 'skipped' || needs.staging-deployment.result == 'cancelled')
+    if: always() && needs.pr-checks-parity.result == 'success' && needs.pr-checks-parity.outputs.has_production == 'true' && (needs.staging-deployment.result == 'success' || needs.staging-deployment.result == 'skipped' || needs.staging-deployment.result == 'cancelled')
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.PRODUCTION_PROJECT_ID }}
@@ -138,14 +155,18 @@ jobs:
         run: supabase functions deploy --project-ref $SUPABASE_PROJECT_ID
 
       - name: Setup Expo & EAS CLI
-        if: secrets.EXPO_TOKEN != ''
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        if: env.EXPO_TOKEN != ''
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: 5) Build & Submit Production Mobile Clients (EAS Build)
-        if: secrets.EXPO_TOKEN != ''
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        if: env.EXPO_TOKEN != ''
         run: |
           cd apps/elder && eas build --platform all --profile production --non-interactive --no-wait
 
@@ -159,14 +180,18 @@ jobs:
           echo "RELEASE_TAG=$NEW_TAG" >> "$GITHUB_ENV"
 
       - name: Setup Sentry CLI
-        if: secrets.SENTRY_AUTH_TOKEN != ''
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        if: env.SENTRY_AUTH_TOKEN != ''
         uses: getsentry/action-release@v1
         with:
           environment: production
           version: ${{ env.RELEASE_TAG }}
 
       - name: 3) Notify Team in Slack / Teams (Successful General Availability)
-        if: secrets.SLACK_PROD_WEBHOOK_URL != ''
+        env:
+          SLACK_PROD_WEBHOOK_URL: ${{ secrets.SLACK_PROD_WEBHOOK_URL }}
+        if: env.SLACK_PROD_WEBHOOK_URL != ''
         uses: slackapi/slack-github-action@v1.24.0
         with:
           payload: |
@@ -205,9 +230,12 @@ jobs:
   deployment-failure-alert:
     runs-on: ubuntu-latest
     needs: [production-deployment]
-    if: failure() && secrets.SLACK_PROD_WEBHOOK_URL != ''
+    if: failure()
     steps:
       - name: 6) Block Deployment + Notify Team
+        env:
+          SLACK_PROD_WEBHOOK_URL: ${{ secrets.SLACK_PROD_WEBHOOK_URL }}
+        if: env.SLACK_PROD_WEBHOOK_URL != ''
         uses: slackapi/slack-github-action@v1.24.0
         with:
           payload: |
