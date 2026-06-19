@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HAVEN — Vision Presentation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&amp;family=Playfair+Display:wght@700&amp;display=swap');
+        
+        :root {
+            --primary: #0F172A;
+        }
+        
+        body {
+            font-family: 'Inter', system_ui, sans-serif;
+        }
+        
+        .heading-serif {
+            font-family: 'Playfair Display', Georgia, serif;
+        }
+
+        .slide {
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            min-height: 100vh;
+        }
+
+        .nav-dot {
+            transition: all 0.3s ease;
+        }
+
+        .nav-dot.active {
+            background-color: #64748b;
+            transform: scale(1.2);
+        }
+
+        .stat-number {
+            font-variant-numeric: tabular-nums;
+        }
+
+        .pillar-card {
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .pillar-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+        }
+
+        .accent-crimson { color: #e11d48; }
+        .accent-teal { color: #14b8a6; }
+        .accent-amber { color: #f59e0b; }
+        .accent-violet { color: #8b5cf6; }
+        .accent-emerald { color: #10b981; }
+        .accent-sky { color: #0ea5e9; }
+
+        .section-header {
+            font-size: 3.5rem;
+            line-height: 1.05;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+        }
+
+        .modern-shadow {
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1),
+                        0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+
+        .glass {
+            background: rgba(255,255,255, 0.08);
+            backdrop-filter: blur(20px);
+        }
+
+        .presentation-bg {
+            background: linear-gradient(145deg, #0F172A 0%, #1e2937 100%);
+        }
+        
+        .slide-number {
+            font-size: 0.75rem;
+            opacity: 0.6;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-white overflow-hidden">
+    <!-- Navigation -->
+    <div class="fixed top-0 left-0 right-0 z-50 bg-slate-950/80 backdrop-blur-lg border-b border-slate-800">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-x-3">
+                <div class="w-9 h-9 bg-gradient-to-br from-sky-400 to-teal-400 rounded-2xl flex items-center justify-center">
+                    <span class="font-bold text-slate-950 text-xl">H</span>
+                </div>
+                <div>
+                    <span class="font-semibold text-2xl tracking-tighter">HAVEN</span>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-x-2">
+                <div class="hidden md:flex items-center gap-x-1.5 px-3 py-1.5 bg-slate-900 rounded-3xl border border-slate-700">
+                    <div class="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
+                    <span class="text-xs font-medium text-emerald-300">Vision 2026</span>
+                </div>
+                
+                <button onclick="prevSlide()" 
+                        class="px-4 py-2 text-sm font-medium flex items-center gap-x-2 hover:bg-slate-800 transition-colors rounded-3xl border border-slate-700">
+                    <i class="fas fa-chevron-left text-xs"></i>
+                    <span class="hidden md:inline">Back</span>
+                </button>
+                <button onclick="nextSlide()" 
+                        class="px-5 py-2 text-sm font-medium flex items-center gap-x-2 bg-white text-slate-900 hover:bg-slate-100 transition-colors rounded-3xl">
+                    <span>Next</span>
+                    <i class="fas fa-chevron-right text-xs"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Slides Container -->
+    <div id="slides-container" class="pt-16">
+        
+        <!-- SLIDE 1: Title -->
+        <div class="slide min-h-screen flex items-center justify-center presentation-bg px-6" id="slide-1">
+            <div class="max-w-5xl text-center">
+                <div class="mb-6">
+                    <div class="inline-flex items-center gap-x-2 px-4 py-1.5 rounded-3xl border border-slate-700 bg-slate-900/50">
+                        <span class="text-emerald-400 text-sm font-medium">Netherlands • 2026</span>
+                    </div>
+                </div>
+                
+                <h1 class="text-7xl md:text-8xl font-bold tracking-tighter leading-none mb-4">
+                    <span class="bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent">HAVEN</span>
+                </h1>
+                
+                <p class="text-3xl md:text-4xl font-light tracking-tight text-slate-300 mb-8">
+                    Your parent's guardian.<br>
+                    <span class="text-sky-400">Your peace of mind.</span>
+                </p>
+                
+                <div class="flex justify-center gap-x-3">
+                    <div class="px-6 py-3 bg-white text-slate-950 font-medium rounded-3xl flex items-center gap-x-2 text-sm">
+                        <i class="fas fa-play mr-1"></i>
+                        <span>Presentation Mode</span>
+                    </div>
+                </div>
+                
+                <div class="mt-16 text-xs text-slate-500 flex justify-center items-center gap-x-2">
+                    <div class="w-px h-3 bg-slate-700"></div>
+                    <span>SCROLL OR USE ARROW KEYS</span>
+                    <div class="w-px h-3 bg-slate-700"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SLIDE 2: The Silent Crisis -->
+        <div class="slide min-h-screen flex items-center presentation-bg px-6 py-12" id="slide-2">
+            <div class="max-w-5xl mx-auto">
+                <div class="text-center mb-10">
+                    <div class="text-rose-400 text-sm font-semibold tracking-[3px] mb-3">THE INVISIBLE CRISIS</div>
+                    <h2 class="text-6xl font-bold tracking-tighter">Our elders are in danger.<br>And no one is watching.</h2>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl mx-auto">
+                    <div class="glass p-6 rounded-3xl border border-slate-700">
+                        <div class="text-rose-400 text-3xl mb-1"><i class="fas fa-shield-alt"></i></div>
+                        <div class="text-4xl font-bold">€23M</div>
+                        <div class="text-sm text-slate-400">lost to bank helpdesk fraud in 2024</div>
+                    </div>
+                    <div class="glass p-6 rounded-3xl border border-slate-700">
+                        <div class="text-amber-400 text-3xl mb-1"><i class="fas fa-user-friends"></i></div>
+                        <div class="text-4xl font-bold">51%</div>
+                        <div class="text-sm text-slate-400">of Dutch seniors (75+) feel lonely</div>
+                    </div>
+                    <div class="glass p-6 rounded-3xl border border-slate-700">
+                        <div class="text-sky-400 text-3xl mb-1"><i class="fas fa-user-injured"></i></div>
+                        <div class="text-4xl font-bold">26%</div>
+                        <div class="text-sm text-slate-400">of seniors fell last year — many in silence</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SLIDE 3: Scams -->
+        <div class="slide min-h-screen flex items-center presentation-bg px-6 py-12" id="slide-3">
+            <div class="max-w-5xl mx-auto w-full">
+                <div class="flex items-center gap-x-4 mb-8">
+                    <div class="text-rose-500"><i class="fas fa-shield-alt fa-3x"></i></div>
+                    <div>
+                        <div class="uppercase tracking-[3px] text-sm font-semibold text-rose-400">SCHILD • FRAUD PROTECTION</div>
+                        <h3 class="text-5xl font-bold tracking-tighter">Elders are the #1 target</h3>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-4">
+                        <div class="bg-slate-900/60 border border-rose-900/30 p-6 rounded-3xl">
+                            <div class="flex justify-between items-baseline">
+                                <div>
+                                    <div class="text-5xl font-bold text-white">€23M</div>
+                                    <div class="text-rose-400">Bank helpdesk fraud losses (2024)</div>
+                                </div>
+                                <div class="text-right">
+                                    <div class="text-xs bg-rose-950 text-rose-300 px-3 py-1 rounded-2xl">↓ 30%</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-slate-900/60 border border-rose-900/30 p-6 rounded-3xl">
+                            <div class="text-4xl font-bold">13,000</div>
+                            <div class="text-sm text-slate-400">Fake police scam incidents in 2025</div>
+                            <div class="text-xs mt-1 text-rose-400">Elders are primary targets</div>
+                        </div>
+                    </div>
+                    
+                    <div class="text-sm leading-relaxed space-y-3 pt-2">
+                        <div class="flex gap-x-3"><span class="font-bold text-rose-400 w-5">•</span> <span>9.4% of Dutch population fell victim to online fraud</span></div>
+                        <div class="flex gap-x-3"><span class="font-bold text-rose-400 w-5">•</span> <span>1 in 3 seniors who lose money lose ≥ €1,000</span></div>
+                        <div class="flex gap-x-3"><span class="font-bold text-rose-400 w-5">•</span> <span>27% of senior victims still suffer anxiety months later</span></div>
+                        <div class="pt-4 text-xs text-slate-500">Sources: NVB, CBS 2024, Dutch Police, NL Times (2025–2026)</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SLIDE 4: Loneliness -->
+        <div class="slide min-h-screen flex items-center presentation-bg px-6 py-12" id="slide-4">
+            <div class="max-w-5xl mx-auto w-full">
+                <div class="flex items-center gap-x-4 mb-8">
+                    <div class="text-teal-400"><i class="fas fa-heart fa-3x"></i></div>
+                    <div>
+                        <div class="uppercase tracking-[3px] text-sm font-semibold text-teal-400">KRING • CONNECTION</div>
+                        <h3 class="text-5xl font-bold tracking-tighter">Loneliness is a public health crisis</h3>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="glass p-5 rounded-3xl text-center border border-teal-900/30">
+                        <div class="text-5xl font-bold">10%</div>
+                        <div class="text-xs mt-1 text-teal-300">Strongly lonely (15+)</div>
+                    </div>
+                    <div class="glass p-5 rounded-3xl text-center border border-teal-900/30">
+                        <div class="text-5xl font-bold">51%</div>
+                        <div class="text-xs mt-1 text-teal-300">75+ feel lonely</div>
+                    </div>
+                    <div class="glass p-5 rounded-3xl text-center border border-teal-900/30">
+                        <div class="text-5xl font-bold">613k</div>
+                        <div class="text-xs mt-1 text-teal-300">Elderly women living alone</div>
+                    </div>
+                    <div class="glass p-5 rounded-3xl text-center border border-teal-900/30">
+                        <div class="text-5xl font-bold">3.3M</div>
+                        <div class="text-xs mt-1 text-teal-300">Dutch adults live alone</div>
+                    </div>
+                </div>
+                <div class="text-xs text-center text-slate-500 mt-8">CBS &amp; RIVM 2024–2025</div>
+            </div>
+        </div>
+
+        <!-- SLIDE 5: Medication &amp; Falls -->
+        <div class="slide min-h-screen flex items-center presentation-bg px-6 py-12" id="slide-5">
+            <div class="max-w-5xl mx-auto w-full">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    
+                    <!-- Medication -->
+                    <div>
+                        <div class="flex items-center gap-x-3 mb-5">
+                            <i class="fas fa-pills text-amber-400 text-3xl"></i>
+                            <div>
+                                <div class="text-xs text-amber-400 font-bold">ANKER • HEALTH</div>
+                                <div class="font-bold text-2xl">Medication Non-Adherence</div>
+                            </div>
+                        </div>
+                        <div class="text-sm text-slate-300 space-y-2 pl-1">
+                            <div>• 35.7% non-adherence rate in polypharmacy patients</div>
+                            <div>• Complex schedules + cognitive load = missed doses</div>
+                            <div>• No real-time visibility for families or carers</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Falls -->
+                    <div>
+                        <div class="flex items-center gap-x-3 mb-5">
+                            <i class="fas fa-user-injured text-orange-400 text-3xl"></i>
+                            <div>
+                                <div class="text-xs text-orange-400 font-bold">KOMPAS • SAFETY</div>
+                                <div class="font-bold text-2xl">Falls — The Silent Epidemic</div>
+                            </div>
+                        </div>
+                        <div class="text-sm text-slate-300 space-y-2 pl-1">
+                            <div>• <span class="font-semibold">26%</span> of seniors fell last year</div>
+                            <div>• <span class="font-semibold">10%</span> never tell anyone</div>
+                            <div>• <span class="font-semibold">62%</span> take no preventive action</div>
+                            <div class="pt-1 text-xs">Cost: €1B → projected €2.4B by 2030</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SLIDE 6: Fragmented Care -->
+        <div class="slide min-h-screen flex items-center presentation-bg px-6 py-12" id="slide-6">
+            <div class="max-w-4xl mx-auto text-center">
+                <div class="text-violet-400 mb-3"><i class="fas fa-users fa-2x"></i></div>
+                <h3 class="text-4xl font-bold tracking-tight mb-6">No single source of truth<br>for care workers</h3>
+                
+                <div class="max-w-md mx-auto text-sm text-slate-300">
+                    Multiple carers (thuiszorg, wijkverpleegkundige, huisarts) work with the same elder — but use disconnected systems, paper notes, and WhatsApp.
+                    <div class="text-xs text-violet-400 mt-6">Result: missed incidents, medication errors, and poor continuity of care.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SLIDE 7: Emotional Summary -->
+        <div class="slide min-h-screen flex items-center justify-center presentation-bg px-6" id="slide-7">
+            <div class="max-w-3xl text-center">
+                <div class="text-6xl font-bold tracking-tighter leading-none mb-8">
+                    “Our elders are being targeted,<br>
+                    forgotten, left alone,<br>
+                    and cared for in fragments.”
+                </div>
+                <div class="text-xl text-slate-400">This is not sustainable.</div>
+            </div>
+        </div>
+
+        <!-- SLIDE 8: Introducing HAVEN -->
+        <div class="slide min-h-screen flex items-center presentation-bg px-6" id="slide-8">
+            <div class="max-w-5xl mx-auto text-center">
+                <div class="mb-4">
+                    <div class="inline-block px-4 py-1 text-xs tracking-[4px] bg-white/10 rounded-3xl border border-white/20">PRIVACY-FIRST • VOICE-FIRST • DUTCH</div>
+                </div>
+                
+                <h2 class="text-7xl font-bold tracking-tighter mb-4">HAVEN</h2>
+                <p class="text-3xl text-slate-300 max-w-md mx-auto">A voice-first elder care companion built for the Netherlands.</p>
+                
+                <div class="mt-10 inline-flex items-center gap-x-2 text-sm px-6 py-3 rounded-3xl border border-white/20">
+                    <span>6 integrated pillars</span>
+                    <span class="text-slate-500">•</span>
+                    <span>72 Edge Functions</span>
+                    <span class="text-slate-500">•</span>
+                    <span>Forced RLS</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- SLIDE 9: Six Pillars -->
+        <div class="slide min-h-screen flex items-center presentation-bg px-6 py-12" id="slide-9">
+            <div class="max-w-6xl mx-auto w-full">
+                <div class="text-center mb-8">
+                    <div class="text-xs tracking-widest text-slate-400">THE SOLUTION</div>
+                    <div class="text-4xl font-bold">Six Pillars. One Platform.</div>
+                </div>
+                
+                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                    <div class="pillar-card bg-rose-950/30 border border-rose-800 p-4 rounded-3xl text-center">
+                        <div class="text-rose-400 text-xl mb-1"><i class="fas fa-shield-alt"></i></div>
+                        <div class="font-bold">SCHILD</div>
+                        <div class="text-[10px] text-rose-400">Fraud Protection</div>
+                    </div>
+                    <div class="pillar-card bg-amber-950/30 border border-amber-800 p-4 rounded-3xl text-center">
+                        <div class="text-amber-400 text-xl mb-1"><i class="fas fa-pills"></i></div>
+                        <div class="font-bold">ANKER</div>
+                        <div class="text-[10px] text-amber-400">Health &amp; Rhythm</div>
+                    </div>
+                    <div class="pillar-card bg-teal-950/30 border border-teal-800 p-4 rounded-3xl text-center">
+                        <div class="text-teal-400 text-xl mb-1"><i class="fas fa-heart"></i></div>
+                        <div class="font-bold">KRING</div>
+                        <div class="text-[10px] text-teal-400">Connection</div>
+                    </div>
+                    <div class="pillar-card bg-sky-950/30 border border-sky-800 p-4 rounded-3xl text-center">
+                        <div class="text-sky-400 text-xl mb-1"><i class="fas fa-compass"></i></div>
+                        <div class="font-bold">KOMPAS</div>
+                        <div class="text-[10px] text-sky-400">Safety</div>
+                    </div>
+                    <div class="pillar-card bg-violet-950/30 border border-violet-800 p-4 rounded-3xl text-center">
+                        <div class="text-violet-400 text-xl mb-1"><i class="fas fa-microphone"></i></div>
+                        <div class="font-bold">STEM</div>
+                        <div class="text-[10px] text-violet-400">Voice Companion</div>
+                    </div>
+                    <div class="pillar-card bg-emerald-950/30 border border-emerald-800 p-4 rounded-3xl text-center">
+                        <div class="text-emerald-400 text-xl mb-1"><i class="fas fa-user-md"></i></div>
+                        <div class="font-bold">WACHT</div>
+                        <div class="text-[10px] text-emerald-400">Professional Care</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SLIDE 10: Problem → Solution -->
+        <div class="slide min-h-screen flex items-center presentation-bg px-6 py-12" id="slide-10">
+            <div class="max-w-5xl mx-auto w-full">
+                <div class="text-center mb-8">
+                    <div class="font-semibold text-lg">How HAVEN directly addresses each crisis</div>
+                </div>
+                
+                <div class="space-y-3 text-sm">
+                    <div class="flex items-center gap-x-4 p-4 bg-slate-900/60 rounded-3xl border border-rose-800/40">
+                        <div class="w-7 text-rose-400"><i class="fas fa-shield-alt"></i></div>
+                        <div class="flex-1"><span class="font-semibold">Scams</span> → Real-time scam coaching + call reputation + document vault</div>
+                    </div>
+                    <div class="flex items-center gap-x-4 p-4 bg-slate-900/60 rounded-3xl border border-teal-800/40">
+                        <div class="w-7 text-teal-400"><i class="fas fa-heart"></i></div>
+                        <div class="flex-1"><span class="font-semibold">Loneliness</span> → Familiar Voice + BUURT neighbourhood connector + companion memory</div>
+                    </div>
+                    <div class="flex items-center gap-x-4 p-4 bg-slate-900/60 rounded-3xl border border-amber-800/40">
+                        <div class="w-7 text-amber-400"><i class="fas fa-pills"></i></div>
+                        <div class="flex-1"><span class="font-semibold">Medication</span> → Voice reminders + repeat-back confirmation + family visibility</div>
+                    </div>
+                    <div class="flex items-center gap-x-4 p-4 bg-slate-900/60 rounded-3xl border border-sky-800/40">
+                        <div class="w-7 text-sky-400"><i class="fas fa-user-injured"></i></div>
+                        <div class="flex-1"><span class="font-semibold">Falls</span> → Heuristic detection + “Are you OK?” voice flow + trust signal dashboard</div>
+                    </div>
+                    <div class="flex items-center gap-x-4 p-4 bg-slate-900/60 rounded-3xl border border-emerald-800/40">
+                        <div class="w-7 text-emerald-400"><i class="fas fa-user-md"></i></div>
+                        <div class="flex-1"><span class="font-semibold">Fragmented Care</span> → Unified carer portal with handover notes + offline queue</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SLIDE 11: Differentiation -->
+        <div class="slide min-h-screen flex items-center presentation-bg px-6 py-12" id="slide-11">
+            <div class="max-w-5xl mx-auto">
+                <div class="text-center mb-8">
+                    <div class="font-semibold text-xl">Why HAVEN is different</div>
+                </div>
+                
+                <div class="overflow-hidden rounded-3xl border border-slate-700 bg-slate-900/70">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="border-b border-slate-700 text-xs text-slate-400">
+                                <th class="py-4 px-6 text-left">Feature</th>
+                                <th class="py-4 px-6 text-center">Traditional Apps</th>
+                                <th class="py-4 px-6 text-center bg-sky-900/30 text-sky-300">HAVEN</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-700 text-xs">
+                            <tr><td class="px-6 py-4 font-medium">Voice-first experience</td><td class="text-center text-red-400">Text-heavy</td><td class="text-center text-emerald-400">Natural Dutch conversation</td></tr>
+                            <tr><td class="px-6 py-4 font-medium">Privacy model</td><td class="text-center text-red-400">Surveillance-style</td><td class="text-center text-emerald-400">Elder owns data + granular consent</td></tr>
+                            <tr><td class="px-6 py-4 font-medium">Professional carer portal</td><td class="text-center text-red-400">Almost none</td><td class="text-center text-emerald-400">Full WACHT with handover notes</td></tr>
+                            <tr><td class="px-6 py-4 font-medium">Neighbourhood connection</td><td class="text-center text-red-400">None</td><td class="text-center text-emerald-400">BUURT (double opt-in)</td></tr>
+                            <tr><td class="px-6 py-4 font-medium">Scam coaching</td><td class="text-center text-red-400">Basic blocking</td><td class="text-center text-emerald-400">Conversational real-time guidance</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- SLIDE 12: Technology -->
+        <div class="slide min-h-screen flex items-center presentation-bg px-6 py-12" id="slide-12">
+            <div class="max-w-4xl mx-auto">
+                <div class="text-center mb-8">
+                    <div class="font-bold text-xl">Built on trust and modern infrastructure</div>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4 text-sm">
+                    <div class="glass p-5 rounded-3xl">
+                        <div class="font-bold mb-2">Supabase (EU)</div>
+                        <div class="text-xs text-slate-400">Postgres + RLS • pgvector • PostGIS • Edge Functions • Realtime</div>
+                    </div>
+                    <div class="glass p-5 rounded-3xl">
+                        <div class="font-bold mb-2">Voice Pipeline</div>
+                        <div class="text-xs text-slate-400">Whisper (nl) → LLM → ElevenLabs (custom “Hanna” voice)</div>
+                    </div>
+                    <div class="glass p-5 rounded-3xl">
+                        <div class="font-bold mb-2">Security</div>
+                        <div class="text-xs text-slate-400">Forced RLS • 24h location TTL • GDPR export • Idempotency</div>
+                    </div>
+                    <div class="glass p-5 rounded-3xl">
+                        <div class="font-bold mb-2">Validation</div>
+                        <div class="text-xs text-slate-400">72 Edge Functions • Screen Constitution tests • Full RLS audit</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SLIDE 13: Vision Close -->
+        <div class="slide min-h-screen flex items-center presentation-bg px-6" id="slide-13">
+            <div class="max-w-4xl mx-auto text-center">
+                <div class="text-4xl md:text-5xl leading-tight font-bold tracking-tighter mb-8">
+                    Imagine a world where your parent<br>
+                    is protected, connected,<br>
+                    and truly heard.
+                </div>
+                
+                <div class="text-sky-400 text-lg">This is HAVEN.</div>
+            </div>
+        </div>
+
+        <!-- SLIDE 14: Final CTA -->
+        <div class="slide min-h-screen flex items-center justify-center presentation-bg px-6" id="slide-14">
+            <div class="max-w-md text-center">
+                <div class="mb-8">
+                    <div class="text-6xl font-bold tracking-tighter">HAVEN</div>
+                    <div class="text-sm mt-1 text-slate-400">Ready for production</div>
+                </div>
+                
+                <div class="space-y-3 text-sm">
+                    <div class="px-6 py-3 bg-white text-slate-950 font-medium rounded-3xl">Production infrastructure ready</div>
+                    <div class="px-6 py-3 border border-white/30 text-sm rounded-3xl">DPIA • Penetration test • Usability testing</div>
+                </div>
+                
+                <div class="text-xs text-slate-500 mt-12">The elderly in the Netherlands deserve better.<br>This is how we deliver it.</div>
+            </div>
+        </div>
+        
+    </div>
+
+    <!-- Slide Navigation -->
+    <div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-x-2 bg-slate-900/90 backdrop-blur-md border border-slate-700 px-3 py-1.5 rounded-3xl shadow-xl">
+        <div class="flex gap-x-1.5" id="nav-dots">
+            <!-- Populated by JS -->
+        </div>
+        <div class="text-xs text-slate-400 px-3 font-mono" id="slide-counter">01 / 14</div>
+    </div>
+
+    <script>
+        // Tailwind script
+        function initializeTailwind() {
+            document.documentElement.style.setProperty('--accent', '#64748b');
+        }
+        
+        let currentSlide = 1;
+        const totalSlides = 14;
+        
+        function updateNavDots() {
+            const container = document.getElementById('nav-dots');
+            container.innerHTML = '';
+            
+            for (let i = 1; i <= totalSlides; i++) {
+                const dot = document.createElement('div');
+                dot.className = `w-2 h-2 rounded-full cursor-pointer transition-all ${i === currentSlide ? 'bg-white w-3' : 'bg-slate-600'}`;
+                dot.onclick = () => goToSlide(i);
+                container.appendChild(dot);
+            }
+        }
+        
+        function updateCounter() {
+            const counter = document.getElementById('slide-counter');
+            counter.textContent = `${String(currentSlide).padStart(2, '0')} / ${totalSlides}`;
+        }
+        
+        function showSlide(slideNumber) {
+            // Hide all slides
+            document.querySelectorAll('.slide').forEach(slide => {
+                slide.style.display = 'none';
+                slide.style.opacity = '0';
+            });
+            
+            // Show current slide
+            const slide = document.getElementById(`slide-${slideNumber}`);
+            if (slide) {
+                slide.style.display = 'flex';
+                setTimeout(() => {
+                    slide.style.opacity = '1';
+                }, 10);
+            }
+            
+            currentSlide = slideNumber;
+            updateNavDots();
+            updateCounter();
+        }
+        
+        function nextSlide() {
+            if (currentSlide < totalSlides) {
+                showSlide(currentSlide + 1);
+            }
+        }
+        
+        function prevSlide() {
+            if (currentSlide > 1) {
+                showSlide(currentSlide - 1);
+            }
+        }
+        
+        function goToSlide(slideNumber) {
+            showSlide(slideNumber);
+        }
+        
+        function initKeyboardNavigation() {
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'ArrowRight' || e.key === ' ') {
+                    e.preventDefault();
+                    nextSlide();
+                } else if (e.key === 'ArrowLeft') {
+                    prevSlide();
+                } else if (e.key.toLowerCase() === 'f') {
+                    toggleFullScreen();
+                }
+            });
+            
+            // Touch swipe support
+            let touchStartX = 0;
+            document.addEventListener('touchstart', e => {
+                touchStartX = e.changedTouches[0].screenX;
+            });
+            
+            document.addEventListener('touchend', e => {
+                const touchEndX = e.changedTouches[0].screenX;
+                if (touchStartX - touchEndX > 60) nextSlide();
+                if (touchEndX - touchStartX > 60) prevSlide();
+            });
+        }
+        
+        function toggleFullScreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(() => {});
+            } else {
+                document.exitFullscreen();
+            }
+        }
+        
+        function initPresentation() {
+            initializeTailwind();
+            
+            // Show first slide
+            showSlide(1);
+            
+            // Setup navigation dots
+            updateNavDots();
+            
+            // Keyboard + touch
+            initKeyboardNavigation();
+            
+            // Optional: Auto-advance hint (disabled by default)
+            console.log('%c[HAVEN] Presentation ready. Use arrow keys or click nav.', 'color:#64748b');
+            
+            // Easter egg: Press "h" to go to first slide
+            document.addEventListener('keypress', function(e) {
+                if (e.key.toLowerCase() === 'h') showSlide(1);
+            });
+        }
+        
+        // Boot
+        window.onload = function() {
+            initPresentation();
+        }
+        
+        // Expose controls globally
+        window.HAVEN = {
+            next: () => nextSlide(),
+            prev: () => prevSlide(),
+            goTo: (n) => showSlide(n)
+        };
+    </script>
+</body>
+</html>

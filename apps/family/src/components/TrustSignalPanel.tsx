@@ -77,6 +77,25 @@ export function TrustSignalPanel({ devices, recentEvents }: TrustSignalPanelProp
           </li>
         ))}
       </ul>
+      {/* Quiet Day Detection Alert - Stakeholder Refinement */}
+      {recentEvents.some(e => e.event_key === 'quiet_day_detected') && (
+        <div style={{ 
+          marginTop: 20, 
+          padding: 16, 
+          background: '#F0F7F4', 
+          borderRadius: 16, 
+          border: '1px solid #A8D5C4' 
+        }}>
+          <div style={{ fontWeight: 700, color: '#2E6B4E', marginBottom: 4 }}>
+            Rustige dag gedetecteerd
+          </div>
+          <div style={{ fontSize: 14, color: '#3F5A4E' }}>
+            Uw naaste heeft vandaag minder interactie gehad dan gebruikelijk. 
+            Overweeg een vriendelijk bericht of telefoontje.
+          </div>
+        </div>
+      )}
+
       <h3 style={{ marginTop: 24 }}>Recente meldingen</h3>
       <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 8 }}>
         {recentEvents.length === 0 ? <li style={{ color: '#6B7490', fontWeight: 700 }}>Geen recente meldingen.</li> : null}

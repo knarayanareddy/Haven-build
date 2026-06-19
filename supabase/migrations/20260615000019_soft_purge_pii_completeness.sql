@@ -37,7 +37,7 @@ BEGIN
     status = 'erased',
     full_name = '[ERASED]',
     preferred_name = NULL,
-    phone = NULL,
+    phone_nl = NULL,
     email = 'erased_' || p_target_id || '@haven.internal'
   WHERE id = p_target_id;
 
@@ -89,7 +89,7 @@ BEGIN
   IF (v_already_erased IS TRUE) THEN RETURN; END IF;
 
   UPDATE profiles 
-  SET status = 'erased', full_name = '[ERASED]', preferred_name = NULL, phone = NULL, email = 'erased_' || p_target_id || '@haven.internal'
+  SET status = 'erased', full_name = '[ERASED]', preferred_name = NULL, phone_nl = NULL, email = 'erased_' || p_target_id || '@haven.internal'
   WHERE id = p_target_id;
 
   UPDATE carer_handover_notes SET notes_nl = '[ERASED]' WHERE elder_id = p_target_id;

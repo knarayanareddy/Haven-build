@@ -223,21 +223,21 @@ alter table medication_catalog_entries enable row level security; alter table me
 alter table log_drain_configs enable row level security; alter table log_drain_configs force row level security;
 
 create policy call_rep_elder on call_reputation_lookups for select using (elder_id = auth.uid());
-create policy call_rep_family on call_reputation_lookups for select using (auth.family_can(elder_id,'alerts'));
+create policy call_rep_family on call_reputation_lookups for select using (public.family_can(elder_id,'alerts'));
 create policy wearables_elder on wearable_devices for all using (elder_id = auth.uid() and deleted_at is null) with check (elder_id = auth.uid());
-create policy wearables_family on wearable_devices for select using (auth.family_can(elder_id,'location') and deleted_at is null);
+create policy wearables_family on wearable_devices for select using (public.family_can(elder_id,'location') and deleted_at is null);
 create policy wandering_elder on wandering_events for select using (elder_id = auth.uid() and deleted_at is null);
-create policy wandering_family on wandering_events for select using (auth.family_can(elder_id,'location') and deleted_at is null);
+create policy wandering_family on wandering_events for select using (public.family_can(elder_id,'location') and deleted_at is null);
 create policy driving_elder on driving_events for all using (elder_id = auth.uid() and deleted_at is null) with check (elder_id = auth.uid());
-create policy driving_family on driving_events for select using (auth.family_can(elder_id,'alerts') and elder_shared_with_family = true and deleted_at is null);
+create policy driving_family on driving_events for select using (public.family_can(elder_id,'alerts') and elder_shared_with_family = true and deleted_at is null);
 create policy community_sources_admin on community_event_sources for all using ((select role from profiles where id = auth.uid()) = 'admin') with check ((select role from profiles where id = auth.uid()) = 'admin');
 create policy skill_elder on skill_offerings for all using (elder_id = auth.uid() and deleted_at is null) with check (elder_id = auth.uid());
-create policy skill_family on skill_offerings for select using (auth.family_can(elder_id,'stories') and deleted_at is null);
+create policy skill_family on skill_offerings for select using (public.family_can(elder_id,'stories') and deleted_at is null);
 create policy skill_matches_elder on skill_exchange_matches for select using (elder_id = auth.uid() and deleted_at is null);
-create policy skill_matches_family on skill_exchange_matches for select using (auth.family_can(elder_id,'stories') and deleted_at is null);
+create policy skill_matches_family on skill_exchange_matches for select using (public.family_can(elder_id,'stories') and deleted_at is null);
 create policy legacy_elder_only on legacy_accounts for all using (elder_id = auth.uid() and deleted_at is null) with check (elder_id = auth.uid());
 create policy bereavement_elder on bereavement_events for select using (elder_id = auth.uid() and deleted_at is null);
-create policy bereavement_family on bereavement_events for select using (auth.family_can(elder_id,'alerts') and deleted_at is null);
+create policy bereavement_family on bereavement_events for select using (public.family_can(elder_id,'alerts') and deleted_at is null);
 create policy bereavement_resources_read on bereavement_resources for select using (is_active = true);
 create policy catalog_entries_read on medication_catalog_entries for select using (true);
 create policy catalog_jobs_admin on medication_catalog_sync_jobs for all using ((select role from profiles where id = auth.uid()) = 'admin') with check ((select role from profiles where id = auth.uid()) = 'admin');

@@ -254,35 +254,35 @@ alter table notification_preferences enable row level security; alter table noti
 alter table screen_schemas enable row level security; alter table screen_schemas force row level security;
 
 create policy med_ocr_elder on medication_ocr_jobs for select using (elder_id = auth.uid() and deleted_at is null);
-create policy med_ocr_family on medication_ocr_jobs for select using (auth.family_can(elder_id,'medications') and deleted_at is null);
-create policy med_ocr_insert_family_or_elder on medication_ocr_jobs for insert with check (uploaded_by_id = auth.uid() and (elder_id = auth.uid() or auth.family_can(elder_id,'medications')));
+create policy med_ocr_family on medication_ocr_jobs for select using (public.family_can(elder_id,'medications') and deleted_at is null);
+create policy med_ocr_insert_family_or_elder on medication_ocr_jobs for insert with check (uploaded_by_id = auth.uid() and (elder_id = auth.uid() or public.family_can(elder_id,'medications')));
 
 create policy doc_analysis_elder on document_analysis_jobs for select using (elder_id = auth.uid() and deleted_at is null);
 create policy doc_analysis_insert_elder on document_analysis_jobs for insert with check (elder_id = auth.uid());
 
 create policy appointments_elder on appointments for all using (elder_id = auth.uid() and deleted_at is null) with check (elder_id = auth.uid());
-create policy appointments_family on appointments for select using (auth.family_can(elder_id,'medications') and deleted_at is null);
-create policy appointments_carer on appointments for select using (auth.carer_can(elder_id) and deleted_at is null);
+create policy appointments_family on appointments for select using (public.family_can(elder_id,'medications') and deleted_at is null);
+create policy appointments_carer on appointments for select using (public.carer_can(elder_id) and deleted_at is null);
 
 create policy transport_elder on transport_requests for select using (elder_id = auth.uid() and deleted_at is null);
-create policy transport_family on transport_requests for all using (auth.family_can(elder_id,'medications') and deleted_at is null) with check (auth.family_can(elder_id,'medications'));
+create policy transport_family on transport_requests for all using (public.family_can(elder_id,'medications') and deleted_at is null) with check (public.family_can(elder_id,'medications'));
 
 create policy telehealth_elder on telehealth_sessions for all using (elder_id = auth.uid() and deleted_at is null) with check (elder_id = auth.uid());
-create policy telehealth_family on telehealth_sessions for select using (auth.family_can(elder_id,'medications') and deleted_at is null);
-create policy telehealth_carer on telehealth_sessions for select using (auth.carer_can(elder_id) and deleted_at is null);
+create policy telehealth_family on telehealth_sessions for select using (public.family_can(elder_id,'medications') and deleted_at is null);
+create policy telehealth_carer on telehealth_sessions for select using (public.carer_can(elder_id) and deleted_at is null);
 
 create policy hydration_elder on hydration_logs for all using (elder_id = auth.uid()) with check (elder_id = auth.uid());
-create policy hydration_family on hydration_logs for select using (auth.family_can(elder_id,'alerts'));
+create policy hydration_family on hydration_logs for select using (public.family_can(elder_id,'alerts'));
 
 create policy nutrition_elder on nutrition_logs for all using (elder_id = auth.uid() and deleted_at is null) with check (elder_id = auth.uid());
-create policy nutrition_family on nutrition_logs for select using (auth.family_can(elder_id,'alerts') and deleted_at is null);
+create policy nutrition_family on nutrition_logs for select using (public.family_can(elder_id,'alerts') and deleted_at is null);
 
 create policy vitals_elder on vital_signs for all using (elder_id = auth.uid()) with check (elder_id = auth.uid());
-create policy vitals_family on vital_signs for select using (auth.family_can(elder_id,'medications'));
-create policy vitals_carer on vital_signs for select using (auth.carer_can(elder_id));
+create policy vitals_family on vital_signs for select using (public.family_can(elder_id,'medications'));
+create policy vitals_carer on vital_signs for select using (public.carer_can(elder_id));
 
 create policy fin_accounts_elder on financial_accounts for select using (elder_id = auth.uid() and deleted_at is null);
-create policy fin_accounts_family on financial_accounts for select using (auth.family_can(elder_id,'financials') and deleted_at is null);
+create policy fin_accounts_family on financial_accounts for select using (public.family_can(elder_id,'financials') and deleted_at is null);
 
 create policy emergency_tokens_elder on emergency_access_tokens for all using (elder_id = auth.uid()) with check (elder_id = auth.uid());
 create policy emergency_access_log_elder on emergency_profile_access_log for select using (elder_id = auth.uid());

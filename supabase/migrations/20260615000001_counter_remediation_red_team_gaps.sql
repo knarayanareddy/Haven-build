@@ -33,6 +33,16 @@ CREATE INDEX IF NOT EXISTS idx_clinical_corrections_rec ON clinical_record_corre
 
 -- ─── 1. PART 1: Fix GDPR Teardown Ransom DoS ───
 -- 1b. Schema and insertion for Anonymous Sentinel Profile
+INSERT INTO auth.users (id, email, email_confirmed_at, raw_user_meta_data, created_at, updated_at)
+VALUES (
+  '00000000-0000-0000-0000-000000000001',
+  'system@haven.internal',
+  now(),
+  '{"role": "system"}'::jsonb,
+  now(),
+  now()
+) ON CONFLICT (id) DO NOTHING;
+
 INSERT INTO profiles (id, role, full_name, locale, timezone, high_contrast, font_size_multiplier)
 VALUES (
   '00000000-0000-0000-0000-000000000001',
@@ -69,7 +79,7 @@ BEGIN
   SET 
     full_name = 'Geanonimiseerd',
     preferred_name = NULL,
-    phone = NULL
+    phone_nl = NULL
   WHERE id = p_target_id;
 
   -- Soft-delete device sessions

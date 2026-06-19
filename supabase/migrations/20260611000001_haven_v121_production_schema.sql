@@ -8,7 +8,7 @@ create extension if not exists "postgis";
 create extension if not exists "pg_cron";
 create extension if not exists "pg_trgm";
 
-create type user_role as enum ('elder','family','carer','admin');
+create type user_role as enum ('elder','family','carer','admin','system');
 create type alert_level as enum ('none','amber','rood','zwart');
 create type scam_channel as enum ('phone','sms','whatsapp','email','web','in_person','post');
 create type scam_threat_type as enum ('bankhelpdeskfraude','vriend_in_nood','overheid_impersonatie','romantische_fraude','investeringsfraude','pakketfraude','phishing','andere');
@@ -683,14 +683,14 @@ create trigger incidents_updated_at before update on incidents for each row exec
 create trigger push_tokens_updated_at before update on push_tokens for each row execute function public.set_updated_at();
 
 -- helper functions for RLS
-SET ROLE supabase_admin;
+-- SET ROLE supabase_admin; (Bypassed due to CLI permissions)
 
-create or replace function auth.app_role()
+create or replace function public.app_role()
 returns text language sql stable as $$
   select coalesce(current_setting('request.jwt.claims', true)::jsonb->>'app_role', current_setting('request.jwt.claims', true)::jsonb->>'role', 'anonymous')
 $$;
 
-create or replace function auth.family_can(p_elder_id uuid, p_permission text)
+create or replace function public.family_can(p_elder_id uuid, p_permission text)
 returns boolean language sql stable as $$
   select exists (
     select 1 from family_relationships fr
@@ -710,7 +710,7 @@ returns boolean language sql stable as $$
   )
 $$;
 
-create or replace function auth.carer_can(p_elder_id uuid)
+create or replace function public.carer_can(p_elder_id uuid)
 returns boolean language sql stable as $$
   select exists (
     select 1 from carer_relationships cr
@@ -722,7 +722,7 @@ returns boolean language sql stable as $$
   )
 $$;
 
-RESET ROLE;
+-- RESET ROLE; (Bypassed due to CLI permissions)
 
 -- enable and force RLS
 alter table profiles enable row level security; alter table profiles force row level security;
@@ -767,8 +767,8 @@ create policy profiles_update_own on profiles for update using (id = auth.uid())
 create policy profiles_insert_own on profiles for insert with check (id = auth.uid());
 
 create policy elder_profiles_self on elder_profiles for all using (elder_id = auth.uid()) with check (elder_id = auth.uid());
-create policy elder_profiles_family on elder_profiles for select using (auth.family_can(elder_id,'alerts'));
-create policy elder_profiles_carer on elder_profiles for select using (auth.carer_can(elder_id));
+create policy elder_profiles_family on elder_profiles for select using (public.family_can(elder_id,'alerts'));
+create policy elder_profiles_carer on elder_profiles for select using (public.carer_can(elder_id));
 
 create policy family_relationships_elder on family_relationships for all using (elder_id = auth.uid()) with check (elder_id = auth.uid());
 create policy family_relationships_family_select on family_relationships for select using (family_member_id = auth.uid());
@@ -781,61 +781,61 @@ create policy consent_records_elder on consent_records for all using (elder_id =
 create policy feature_flags_authenticated_read on feature_flags for select using (auth.role() = 'authenticated');
 
 create policy contacts_elder on contacts for all using (elder_id = auth.uid()) with check (elder_id = auth.uid());
-create policy contacts_family on contacts for select using (auth.family_can(elder_id,'messages'));
+create policy contacts_family on contacts for select using (public.family_can(elder_id,'messages'));
 
 create policy scam_events_elder on scam_events for select using (elder_id = auth.uid() and deleted_at is null);
-create policy scam_events_family on scam_events for select using (auth.family_can(elder_id,'alerts') and deleted_at is null);
+create policy scam_events_family on scam_events for select using (public.family_can(elder_id,'alerts') and deleted_at is null);
 
 create policy documents_elder on documents for all using (elder_id = auth.uid() and deleted_at is null) with check (elder_id = auth.uid());
 
 create policy financial_elder on financial_transactions for select using (elder_id = auth.uid() and deleted_at is null);
-create policy financial_family on financial_transactions for select using (auth.family_can(elder_id,'financials') and deleted_at is null);
+create policy financial_family on financial_transactions for select using (public.family_can(elder_id,'financials') and deleted_at is null);
 
 create policy safety_digests_elder on safety_digests for select using (elder_id = auth.uid());
-create policy safety_digests_family on safety_digests for select using (auth.family_can(elder_id,'alerts'));
+create policy safety_digests_family on safety_digests for select using (public.family_can(elder_id,'alerts'));
 
 create policy medications_elder on medications for all using (elder_id = auth.uid() and deleted_at is null) with check (elder_id = auth.uid());
-create policy medications_family on medications for select using (auth.family_can(elder_id,'medications') and deleted_at is null);
+create policy medications_family on medications for select using (public.family_can(elder_id,'medications') and deleted_at is null);
 create policy medication_reminders_elder on medication_reminders for all using (elder_id = auth.uid()) with check (elder_id = auth.uid());
-create policy medication_reminders_family on medication_reminders for select using (auth.family_can(elder_id,'medications'));
+create policy medication_reminders_family on medication_reminders for select using (public.family_can(elder_id,'medications'));
 
 create policy tasks_elder on tasks for all using (elder_id = auth.uid() and deleted_at is null) with check (elder_id = auth.uid());
-create policy tasks_family on tasks for select using (auth.family_can(elder_id,'messages') and deleted_at is null);
+create policy tasks_family on tasks for select using (public.family_can(elder_id,'messages') and deleted_at is null);
 create policy wellness_elder on wellness_checkins for all using (elder_id = auth.uid()) with check (elder_id = auth.uid());
-create policy wellness_family on wellness_checkins for select using (auth.family_can(elder_id,'alerts'));
+create policy wellness_family on wellness_checkins for select using (public.family_can(elder_id,'alerts'));
 
 create policy family_messages_elder on family_messages for select using (elder_id = auth.uid() and deleted_at is null);
 create policy family_messages_sender on family_messages for select using (sender_id = auth.uid() and deleted_at is null);
 create policy family_messages_insert_elder on family_messages for insert with check (elder_id = auth.uid() and sender_id = auth.uid());
-create policy family_messages_insert_family on family_messages for insert with check (sender_id = auth.uid() and auth.family_can(elder_id,'messages'));
-create policy family_messages_family on family_messages for select using (auth.family_can(elder_id,'messages') and deleted_at is null);
+create policy family_messages_insert_family on family_messages for insert with check (sender_id = auth.uid() and public.family_can(elder_id,'messages'));
+create policy family_messages_family on family_messages for select using (public.family_can(elder_id,'messages') and deleted_at is null);
 
 create policy prompts_read_all on life_story_prompts for select using (active = true);
 create policy stories_elder on life_stories for all using (elder_id = auth.uid() and deleted_at is null) with check (elder_id = auth.uid());
-create policy stories_family on life_stories for select using (auth.family_can(elder_id,'stories') and deleted_at is null);
+create policy stories_family on life_stories for select using (public.family_can(elder_id,'stories') and deleted_at is null);
 create policy photos_elder on memory_lane_photos for all using (elder_id = auth.uid() and deleted_at is null) with check (elder_id = auth.uid());
-create policy photos_family on memory_lane_photos for select using (auth.family_can(elder_id,'stories') and deleted_at is null);
+create policy photos_family on memory_lane_photos for select using (public.family_can(elder_id,'stories') and deleted_at is null);
 
 create policy interest_tags_read on interest_tags for select using (is_active = true);
 create policy nbhd_profile_self on neighbourhood_profiles for all using (elder_id = auth.uid() and deleted_at is null) with check (elder_id = auth.uid());
-create policy nbhd_profile_family on neighbourhood_profiles for select using (auth.family_can(elder_id,'stories') and family_can_see_connections = true and deleted_at is null);
+create policy nbhd_profile_family on neighbourhood_profiles for select using (public.family_can(elder_id,'stories') and family_can_see_connections = true and deleted_at is null);
 create policy elder_tags_self on elder_interest_tags for all using (elder_id = auth.uid()) with check (elder_id = auth.uid());
 create policy nbhd_conn_participant on neighbourhood_connections for select using (initiator_elder_id = auth.uid() or recipient_elder_id = auth.uid());
 create policy nbhd_events_read on neighbourhood_events for select using (is_active = true);
 create policy event_interests_self on event_interests for all using (elder_id = auth.uid()) with check (elder_id = auth.uid());
 
 create policy location_elder on location_events for select using (elder_id = auth.uid() and deleted_at is null);
-create policy location_family on location_events for select using (auth.family_can(elder_id,'location') and deleted_at is null);
+create policy location_family on location_events for select using (public.family_can(elder_id,'location') and deleted_at is null);
 create policy cognitive_elder on cognitive_checkins for select using (elder_id = auth.uid());
-create policy cognitive_family on cognitive_checkins for select using (auth.family_can(elder_id,'alerts'));
+create policy cognitive_family on cognitive_checkins for select using (public.family_can(elder_id,'alerts'));
 
 create policy voice_elder on voice_interactions for select using (elder_id = auth.uid() and deleted_at is null);
 create policy memory_elder_only on companion_memory for select using (elder_id = auth.uid() and deleted_at is null);
 
 create policy visits_elder on carer_visit_logs for select using (elder_id = auth.uid() and deleted_at is null);
-create policy visits_carer on carer_visit_logs for all using (auth.carer_can(elder_id) and deleted_at is null) with check (auth.carer_can(elder_id));
+create policy visits_carer on carer_visit_logs for all using (public.carer_can(elder_id) and deleted_at is null) with check (public.carer_can(elder_id));
 create policy incidents_elder on incidents for select using (elder_id = auth.uid());
-create policy incidents_carer on incidents for all using (auth.carer_can(elder_id)) with check (auth.carer_can(elder_id));
+create policy incidents_carer on incidents for all using (public.carer_can(elder_id)) with check (public.carer_can(elder_id));
 
 create policy notifications_self on notifications for select using (recipient_id = auth.uid());
 create policy notifications_update_self on notifications for update using (recipient_id = auth.uid()) with check (recipient_id = auth.uid());

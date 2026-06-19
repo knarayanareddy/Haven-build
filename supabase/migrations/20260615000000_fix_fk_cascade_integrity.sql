@@ -99,6 +99,7 @@ ALTER TABLE medication_interaction_alerts VALIDATE CONSTRAINT medication_interac
 -- ─── 7. Fix video_call_sessions -> carer_visit_logs (visit_id) ───
 -- Justification: Telehealth WebRTC records tied to formal wijkverpleging visits
 -- must not be unlinked.
+ALTER TABLE video_call_sessions ADD COLUMN IF NOT EXISTS visit_id uuid;
 ALTER TABLE video_call_sessions DROP CONSTRAINT IF EXISTS video_call_sessions_visit_id_fkey;
 ALTER TABLE video_call_sessions ADD CONSTRAINT video_call_sessions_visit_id_fkey 
   FOREIGN KEY (visit_id) REFERENCES carer_visit_logs(id) ON DELETE RESTRICT NOT VALID;
@@ -113,6 +114,9 @@ ALTER TABLE elder_voice_preferences VALIDATE CONSTRAINT elder_voice_preferences_
 
 -- ─── 9. Fix webhook_receipts -> profiles (elder_id, profile_id) ───
 -- Justification: Webhook and API transaction audit receipts must maintain exact actor proof.
+ALTER TABLE webhook_receipts ADD COLUMN IF NOT EXISTS profile_id uuid;
+ALTER TABLE webhook_receipts ADD COLUMN IF NOT EXISTS elder_id uuid;
+
 ALTER TABLE webhook_receipts DROP CONSTRAINT IF EXISTS webhook_receipts_profile_id_fkey;
 ALTER TABLE webhook_receipts ADD CONSTRAINT webhook_receipts_profile_id_fkey 
   FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE RESTRICT NOT VALID;

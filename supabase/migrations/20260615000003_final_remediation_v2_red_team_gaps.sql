@@ -97,6 +97,8 @@ END;
 $$;
 
 -- 1c. DB PII Columns Registry Table (v2)
+DROP TABLE IF EXISTS gdpr_pii_fields CASCADE;
+
 CREATE TABLE IF NOT EXISTS gdpr_pii_fields (
   table_name TEXT NOT NULL,
   column_name TEXT NOT NULL,
@@ -110,7 +112,7 @@ INSERT INTO gdpr_pii_fields (table_name, column_name, identity_column, redact_st
 VALUES 
   ('profiles', 'full_name', 'id', 'anonymize', true),
   ('profiles', 'preferred_name', 'id', 'overwrite', true),
-  ('profiles', 'phone', 'id', 'overwrite', true),
+  ('profiles', 'phone_nl', 'id', 'overwrite', true),
   ('carer_handover_notes', 'notes_nl', 'elder_id', 'deep_redact', true),
   ('medication_ocr_jobs', 'extracted_name_nl', 'elder_id', 'deep_redact', true),
   ('medication_interaction_alerts', 'summary_nl', 'elder_id', 'deep_redact', true),
@@ -150,7 +152,7 @@ BEGIN
   PERFORM pg_advisory_xact_lock(hashtext('gdpr_soft_purge_' || p_target_id::TEXT));
 
   -- 1. Retrieve profile details to verify idempotency and extract known identifiers
-  SELECT id, full_name, preferred_name, phone, email, status INTO v_profile 
+  SELECT id, full_name, preferred_name, phone_nl, email, status INTO v_profile 
   FROM profiles WHERE id = p_target_id;
 
   IF (v_profile IS NULL OR v_profile.status = 'erased') THEN RETURN; END IF;
@@ -166,13 +168,13 @@ BEGIN
   FOR v_rec IN (SELECT table_name, column_name, identity_column, redact_strategy FROM gdpr_pii_fields WHERE enabled = true) LOOP
     IF (v_rec.table_name = 'profiles') THEN
       UPDATE profiles 
-      SET full_name = '[REDACTED_NAME]', preferred_name = NULL, phone = NULL, status = 'erased' 
+      SET full_name = '[REDACTED_NAME]', preferred_name = NULL, phone_nl = NULL, status = 'erased' 
       WHERE id = p_target_id;
     ELSIF (v_rec.redact_strategy = 'deep_redact') THEN
       EXECUTE format(
         'UPDATE %I SET %I = redact_sensitive_text_v2(%I, $1, $2, $3, $4) WHERE %I = $5',
         v_rec.table_name, v_rec.column_name, v_rec.column_name, v_rec.identity_column
-      ) USING v_profile.full_name, v_profile.email, v_profile.phone, v_bsn, p_target_id;
+      ) USING v_profile.full_name, v_profile.email, v_profile.phone_nl, v_bsn, p_target_id;
     END IF;
   END LOOP;
 

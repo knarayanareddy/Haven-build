@@ -182,17 +182,17 @@ create policy breach_admin_read on data_breach_incidents for select using ((sele
 create policy breach_admin_write on data_breach_incidents for all using ((select role from profiles where id = auth.uid()) = 'admin') with check ((select role from profiles where id = auth.uid()) = 'admin');
 
 create policy care_plans_elder on care_plans for select using (elder_id = auth.uid() and deleted_at is null);
-create policy care_plans_carer on care_plans for all using (auth.carer_can(elder_id) and deleted_at is null) with check (auth.carer_can(elder_id));
-create policy care_plans_family on care_plans for select using (auth.family_can(elder_id,'medications') and deleted_at is null);
+create policy care_plans_carer on care_plans for all using (public.carer_can(elder_id) and deleted_at is null) with check (public.carer_can(elder_id));
+create policy care_plans_family on care_plans for select using (public.family_can(elder_id,'medications') and deleted_at is null);
 create policy care_plan_items_elder on care_plan_items for select using (elder_id = auth.uid() and deleted_at is null);
-create policy care_plan_items_carer on care_plan_items for all using (auth.carer_can(elder_id) and deleted_at is null) with check (auth.carer_can(elder_id));
-create policy care_plan_items_family on care_plan_items for select using (auth.family_can(elder_id,'medications') and deleted_at is null);
+create policy care_plan_items_carer on care_plan_items for all using (public.carer_can(elder_id) and deleted_at is null) with check (public.carer_can(elder_id));
+create policy care_plan_items_family on care_plan_items for select using (public.family_can(elder_id,'medications') and deleted_at is null);
 
-create policy safeguarding_carer on safeguarding_reports for all using (auth.carer_can(elder_id)) with check (auth.carer_can(elder_id));
+create policy safeguarding_carer on safeguarding_reports for all using (public.carer_can(elder_id)) with check (public.carer_can(elder_id));
 create policy safeguarding_elder on safeguarding_reports for select using (elder_id = auth.uid());
 
 create policy refill_elder on medication_refill_events for select using (elder_id = auth.uid() and deleted_at is null);
-create policy refill_family on medication_refill_events for select using (auth.family_can(elder_id,'medications') and deleted_at is null);
+create policy refill_family on medication_refill_events for select using (public.family_can(elder_id,'medications') and deleted_at is null);
 
 create policy release_checks_admin on app_release_checks for all using ((select role from profiles where id = auth.uid()) = 'admin') with check ((select role from profiles where id = auth.uid()) = 'admin');
 create policy device_sessions_self on device_sessions for all using (profile_id = auth.uid()) with check (profile_id = auth.uid());

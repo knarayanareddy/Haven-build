@@ -8,6 +8,9 @@ export function validateScreenSchema(schema: ScreenSchema) {
   if (schema.maxPrimaryItems > 4) errors.push(`${schema.screenId}: too many primary items`);
   if (schema.bottomActions.length > 2) errors.push(`${schema.screenId}: too many bottom actions`);
   if (!schema.emergencyButton) errors.push(`${schema.screenId}: emergency button required`);
+  if (schema.emergencyButton && schema.emergencyButtonPosition && schema.emergencyButtonPosition !== 'bottom-right') {
+    errors.push(`${schema.screenId}: emergency button must be positioned bottom-right`);
+  }
   if (!schema.voiceFallbackEn || schema.voiceFallbackEn.split(/\s+/).length > 15) errors.push(`${schema.screenId}: English fallback invalid`);
   if (!schema.voiceFallbackNl || schema.voiceFallbackNl.split(/\s+/).length > 15) errors.push(`${schema.screenId}: Dutch fallback invalid`);
   if (schema.offlineCacheTtlSeconds < 0) errors.push(`${schema.screenId}: offline TTL invalid`);

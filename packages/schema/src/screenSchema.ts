@@ -11,6 +11,7 @@ export interface ScreenSchema {
   showFloatingVoice: boolean;    // Phase 1: persistent floating mic button
   bottomActions: Array<{ id: string; labelEn: string; labelNl: string; accessibilityLabel: string }>;
   emergencyButton: boolean;
+  emergencyButtonPosition?: 'bottom-right' | 'bottom-left' | 'top-right'; // Default: bottom-right
   voiceFallbackEn: string;
   voiceFallbackNl: string;
   helpTextNl: string;           // Phase 1: one-sentence "what do I do?" help

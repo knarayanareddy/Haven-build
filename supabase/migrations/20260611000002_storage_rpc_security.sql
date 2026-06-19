@@ -23,7 +23,7 @@ with check (bucket_id = 'voice-notes' and (storage.foldername(name))[1] = auth.u
 
 create policy "voice_notes_family_read"
 on storage.objects for select
-using (bucket_id = 'voice-notes' and auth.family_can(((storage.foldername(name))[1])::uuid, 'messages'));
+using (bucket_id = 'voice-notes' and public.family_can(((storage.foldername(name))[1])::uuid, 'messages'));
 
 create policy "story_audio_elder_all"
 on storage.objects for all
@@ -32,7 +32,7 @@ with check (bucket_id = 'life-story-audio' and (storage.foldername(name))[1] = a
 
 create policy "story_audio_family_read"
 on storage.objects for select
-using (bucket_id = 'life-story-audio' and auth.family_can(((storage.foldername(name))[1])::uuid, 'stories'));
+using (bucket_id = 'life-story-audio' and public.family_can(((storage.foldername(name))[1])::uuid, 'stories'));
 
 create policy "story_photos_elder_all"
 on storage.objects for all
@@ -41,7 +41,7 @@ with check (bucket_id = 'life-story-photos' and (storage.foldername(name))[1] = 
 
 create policy "story_photos_family_read"
 on storage.objects for select
-using (bucket_id = 'life-story-photos' and auth.family_can(((storage.foldername(name))[1])::uuid, 'stories'));
+using (bucket_id = 'life-story-photos' and public.family_can(((storage.foldername(name))[1])::uuid, 'stories'));
 
 create policy "document_vault_elder_only"
 on storage.objects for all
@@ -164,9 +164,9 @@ declare
   result jsonb;
 begin
   if not (
-    auth.family_can(p_elder_id, 'alerts')
-    or auth.family_can(p_elder_id, 'medications')
-    or auth.family_can(p_elder_id, 'messages')
+    public.family_can(p_elder_id, 'alerts')
+    or public.family_can(p_elder_id, 'medications')
+    or public.family_can(p_elder_id, 'messages')
   ) then
     raise exception 'No active consent for dashboard summary';
   end if;

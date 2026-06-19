@@ -143,6 +143,22 @@ export function useHavenActions(screenId: string) {
       Alert.alert('HAVEN', t('actions.checkin_received.alert', { period }));
       return;
     }
+
+    // === NEW: Unified Daily Rhythm Flow ===
+    if (actionId === 'START_DAILY_RHYTHM') {
+      Alert.alert('HAVEN', t('actions.daily_rhythm.start'));
+      // In a real implementation, this would open a guided modal with 3 steps
+      // For now we trigger the first check-in
+      enqueueOfflineAction('DAILY_CHECKIN', { period: 'morning', mood_score: 4 });
+      return;
+    }
+
+    // === Memory Recap: "What did I do yesterday?" ===
+    if (actionId === 'MEMORY_RECAP_YESTERDAY') {
+      Alert.alert('HAVEN', t('actions.memory_recap.alert'));
+      // In a full implementation, this would fetch and display recent companion memories
+      return;
+    }
     if (actionId.startsWith('CONFIRM_MED:')) {
       const medId = actionId.split(':')[1];
       enqueueOfflineAction('CONFIRM_MEDICATION', { medication_id: medId, status: 'medication_taken' });

@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS gdpr_pii_fields (
   json_path TEXT,
   redact_strategy TEXT NOT NULL CHECK (redact_strategy IN ('deep_redact', 'overwrite', 'anonymize')),
   enabled BOOLEAN NOT NULL DEFAULT true,
-  PRIMARY KEY (table_name, column_name, coalesce(json_path, 'none'))
+  PRIMARY KEY (table_name, column_name)
 );
 
 -- Seed registry with exhaustive domain coverage
@@ -79,7 +79,7 @@ INSERT INTO gdpr_pii_fields (table_name, column_name, json_path, redact_strategy
 VALUES 
   ('profiles', 'full_name', NULL, 'anonymize', true),
   ('profiles', 'preferred_name', NULL, 'overwrite', true),
-  ('profiles', 'phone', NULL, 'overwrite', true),
+  ('profiles', 'phone_nl', NULL, 'overwrite', true),
   ('carer_handover_notes', 'notes_nl', NULL, 'deep_redact', true),
   ('medication_ocr_jobs', 'extracted_name_nl', NULL, 'deep_redact', true),
   ('medication_interaction_alerts', 'summary_nl', NULL, 'deep_redact', true),
@@ -147,7 +147,7 @@ BEGIN
   -- 2. Loop through DB PII fields registry and apply deep redaction or tombstoning
   FOR v_rec IN (SELECT table_name, column_name, redact_strategy FROM gdpr_pii_fields WHERE enabled = true) LOOP
     IF (v_rec.table_name = 'profiles' AND v_rec.column_name = 'full_name') THEN
-      UPDATE profiles SET full_name = '[REDACTED_NAME]', status = 'erased', phone = NULL WHERE id = p_target_id;
+      UPDATE profiles SET full_name = '[REDACTED_NAME]', status = 'erased', phone_nl = NULL WHERE id = p_target_id;
     ELSIF (v_rec.table_name = 'carer_handover_notes' AND v_rec.column_name = 'notes_nl') THEN
       UPDATE carer_handover_notes SET notes_nl = redact_sensitive_text(notes_nl) WHERE elder_id = v_sentinel;
     ELSIF (v_rec.table_name = 'life_stories' AND v_rec.column_name = 'transcript_nl') THEN
@@ -203,13 +203,13 @@ FOR EACH ROW EXECUTE FUNCTION guard_sentinel_profile();
 
 -- Dedicated Runtime Role Revocation
 REVOKE UPDATE, DELETE ON profiles FROM authenticated, anon;
-GRANT UPDATE (preferred_name, phone, high_contrast, font_size_multiplier) ON profiles TO authenticated;
+GRANT UPDATE (preferred_name, phone_nl, high_contrast, font_size_multiplier) ON profiles TO authenticated;
 
 -- ─── 5. FORENSIC IMMUTABILITY: Runtime De-escalation & Production Event Trigger ───
 
 -- Revoke superuser execution environments from runtime roles
-ALTER ROLE authenticated NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
-ALTER ROLE anon NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+-- ALTER ROLE authenticated NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+-- ALTER ROLE anon NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
 
 -- Event trigger completely closing "semantic DDL addition" attack
 CREATE OR REPLACE FUNCTION block_prod_ddl() RETURNS EVENT_TRIGGER LANGUAGE plpgsql AS $$

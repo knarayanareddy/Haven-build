@@ -14,7 +14,9 @@ insert into auth.users (id, email, email_confirmed_at, raw_user_meta_data, creat
   ('00000000-0000-0000-0000-000000000004', 'eva@haven.test', now(), '{"role":"carer","full_name":"Nurse Eva de Boer"}'::jsonb, now(), now()),
   ('00000000-0000-0000-0000-000000000005', 'admin@haven.test', now(), '{"role":"admin","full_name":"HAVEN Admin"}'::jsonb, now(), now()),
   ('00000000-0000-0000-0000-000000000006', 'onbekend@haven.test', now(), '{"role":"family","full_name":"Other Family"}'::jsonb, now(), now())
-on conflict (id) do nothing;
+on conflict (id) do update set
+  email = excluded.email,
+  raw_user_meta_data = excluded.raw_user_meta_data;
 
 -- =====================================================================
 -- profiles (role-bearing)
@@ -27,7 +29,16 @@ insert into profiles (id, role, full_name, preferred_name, locale, timezone, cou
   ('00000000-0000-0000-0000-000000000004', 'carer',  'Eva de Boer',              'Eva',      'nl-NL', 'Europe/Amsterdam', 'NL', false, 1.00, true,  now(), now()),
   ('00000000-0000-0000-0000-000000000005', 'admin',  'HAVEN Admin',              'Admin',    'nl-NL', 'Europe/Amsterdam', 'NL', false, 1.00, true,  now(), now()),
   ('00000000-0000-0000-0000-000000000006', 'family', 'Petra van Dijk',           'Petra',    'nl-NL', 'Europe/Amsterdam', 'NL', false, 1.00, false, now(), now())
-on conflict (id) do nothing;
+on conflict (id) do update set
+  role = excluded.role,
+  full_name = excluded.full_name,
+  preferred_name = excluded.preferred_name,
+  locale = excluded.locale,
+  timezone = excluded.timezone,
+  country_code = excluded.country_code,
+  high_contrast = excluded.high_contrast,
+  font_size_multiplier = excluded.font_size_multiplier,
+  onboarding_complete = excluded.onboarding_complete;
 
 -- =====================================================================
 -- elder_profiles (safe zone is PostGIS POINT; use SRID 4326 = WGS84 lng/lat)
@@ -248,7 +259,7 @@ on conflict do nothing;
 insert into voice_interactions (id, elder_id, screen_id, transcript_nl, transcript_en, intent, entities, response_text_nl, response_text_en, distress_detected, action_taken, duration_ms, created_at) values
   ('99999999-1111-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'STEM',  'Ik heb mijn pillen ingenomen en voel me rustig.', 'I took my pills and feel calm.', 'bevestig_ingenomen', '{"medication":"metformine"}'::jsonb, 'Goed gedaan. Ik heb het genoteerd.', 'Well done. I recorded it.', false, 'CONFIRM_MEDICATION_TAKEN', 820, now() - interval '6 hours'),
   ('99999999-1111-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'FAMILY', 'Stuur een hart naar Sarah.',                          'Send a heart to Sarah.',                'family_message',   '{"recipient":"sarah"}'::jsonb,    'Hart verstuurd.',                  'Heart sent.',                false, 'SEND_HEART',                540, now() - interval '3 hours'),
-  ('99999999-1111-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', 'PILLS', 'Vertel over mijn pillen.',                            'Tell me about my pills.',               'companion',        '{}'::jsonb,                            'U heeft Metformine om 8 en 18 uur, Lisinopril om 8 uur, en Vitamine D om 18 uur.', 'You have Metformin at 8 and 18, Lisinopril at 8, and Vitamin D at 18.', false, 'COMPANION_REPLY', 1100, now() - interval '1 hour')
+  ('99999999-1111-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', 'PILLS', 'Vertel over mijn pillen.',                            'Tell me about my pills.',               'companion',        '{}'::jsonb,                            'U heeft Metformine om 8 en 18 uur, Lisinopril om 8 uur, en Vitamine D om 18 uur.', 'You have Metformin at 8 and 18, Lisinopril at 8, and Vitamin D at 18.', false, 'COMPANION_REPLY', 1100, now() - interval '1 hour')
 on conflict do nothing;
 
 -- =====================================================================
@@ -330,7 +341,7 @@ on conflict do nothing;
 
 insert into notifications (id, recipient_id, elder_id, notification_type, title_nl, title_en, body_nl, body_en, data, read, sent_at, created_at) values
   ('99999999-7777-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'medicijn_herinnering', 'Pilletijd 💊', 'Medicine time 💊', 'Margreet moet nu haar pillen innemen.', 'Margreet should take her medicine now.', '{"reminder_id":"aaaaaaaa-0000-0000-0000-000000000001"}'::jsonb, false, null, now() - interval '6 hours'),
-  ('99999999-7777-0000-0000-000000000002', '00000000-0000-0000-0000-000000000002', '00000000-0000-0000-000000000001', 'scam_amber',          'Mogelijk verdacht telefoontje',  'Possibly suspicious call', 'Een onbekend nummer belde Margreet. Geef nooit codes door.', 'An unknown number called Margreet. Never share codes.', '{"scam_event_id":"66666666-0000-0000-0000-000000000001"}'::jsonb, false, null, now() - interval '2 days'),
+  ('99999999-7777-0000-0000-000000000002', '00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'scam_amber',          'Mogelijk verdacht telefoontje',  'Possibly suspicious call', 'Een onbekend nummer belde Margreet. Geef nooit codes door.', 'An unknown number called Margreet. Never share codes.', '{"scam_event_id":"66666666-0000-0000-0000-000000000001"}'::jsonb, false, null, now() - interval '2 days'),
   ('99999999-7777-0000-0000-000000000003', '00000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', 'veilige_zone_verlaten','Margreet was buiten de veilige zone', 'Margreet was outside the safe zone', 'Ze is inmiddels teruggekeerd.', 'She has returned since.', '{"location_event_id":"99999999-4444-0000-0000-000000000002"}'::jsonb, true, null, now() - interval '1 day')
 on conflict do nothing;
 
@@ -388,15 +399,10 @@ insert into idempotency_keys (id, key_hash, function_name, elder_id, profile_id,
   ('bbbbbbbb-1111-0000-0000-000000000001', 'h:placeholder-idempotency-1', 'fn-voice-pipeline', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'h:placeholder-req-1', now() + interval '2 minutes', now() + interval '24 hours')
 on conflict do nothing;
 
--- =====================================================================
--- Audit log entries — minimal but illustrative
--- =====================================================================
-
-insert into audit_log (id, actor_id, actor_role, action, table_name, record_id, elder_id, ip_address_hash, user_agent, extra, created_at) values
-  ('cccccccc-1111-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'elder', 'READ',  'companion_memory',  '99999999-2222-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'h:placeholder-ip-1', 'Haven-iOS/1.0', '{}'::jsonb, now() - interval '2 hours'),
-  ('cccccccc-1111-0000-0000-000000000002', '00000000-0000-0000-0000-000000000002', 'family', 'READ',  'medications',       '99999999-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'h:placeholder-ip-2', 'Haven-Web/1.0', '{"permission":"can_view_medications"}'::jsonb, now() - interval '1 day'),
-  ('cccccccc-1111-0000-0000-000000000003', '00000000-0000-0000-0000-000000000004', 'carer',  'CREATE','carer_visit_logs',  '99999999-6666-0000-0000-000000000020', '00000000-0000-0000-0000-000000000001', 'h:placeholder-ip-3', 'Haven-Carer/1.0', '{}'::jsonb, now() - interval '1 day')
-on conflict do nothing;
+insert into audit_log (actor_id, actor_role, action, table_name, record_id, elder_id, ip_address_hash, user_agent, extra, created_at) values
+  ('00000000-0000-0000-0000-000000000001', 'elder', 'READ',  'companion_memory',  '99999999-2222-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'h:placeholder-ip-1', 'Haven-iOS/1.0', '{}'::jsonb, now() - interval '2 hours'),
+  ('00000000-0000-0000-0000-000000000002', 'family', 'READ',  'medications',       '99999999-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'h:placeholder-ip-2', 'Haven-Web/1.0', '{"permission":"can_view_medications"}'::jsonb, now() - interval '1 day'),
+  ('00000000-0000-0000-0000-000000000004', 'carer',  'CREATE','carer_visit_logs',  '99999999-6666-0000-0000-000000000020', '00000000-0000-0000-0000-000000000001', 'h:placeholder-ip-3', 'Haven-Carer/1.0', '{}'::jsonb, now() - interval '1 day');
 
 -- =====================================================================
 -- Perf metrics (observability seed)
@@ -441,7 +447,7 @@ begin
   select count(*) into v_pending_count           from family_relationships where elder_id = '00000000-0000-0000-0000-000000000001' and elder_consented = false and is_active = true;
   select count(*) into v_medication_count         from medications where elder_id = '00000000-0000-0000-0000-000000000001' and deleted_at is null;
   select count(*) into v_medication_reminder_count from medication_reminders where elder_id = '00000000-0000-0000-0000-000000000001' and scheduled_time::date = current_date;
-  select count(*) into v_scam_count               from scam_events where elder_id = '00000000-0000-0000-000000000001' and deleted_at is null;
+  select count(*) into v_scam_count               from scam_events where elder_id = '00000000-0000-0000-0000-000000000001' and deleted_at is null;
   select count(*) into v_family_msg_count         from family_messages where elder_id = '00000000-0000-0000-0000-000000000001' and deleted_at is null;
   select count(*) into v_companion_count          from companion_memory where elder_id = '00000000-0000-0000-0000-000000000001' and deleted_at is null;
   select count(*) into v_audit_count              from audit_log where elder_id = '00000000-0000-0000-0000-000000000001';

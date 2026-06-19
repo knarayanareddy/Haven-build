@@ -51,12 +51,11 @@ BEGIN
 END $$;
 
 -- Phase 1 feature flags
-INSERT INTO feature_flags (flag_key, enabled, rollout_pct, description_nl, description_en) VALUES
-  ('whatsapp_fallback_enabled', false, 0, 'WhatsApp backup bij mislukte push-meldingen', 'WhatsApp fallback when push notifications fail'),
-  ('photo_checkin_enabled', false, 0, 'Familie kan om een foto vragen ter bevestiging', 'Family can request a photo for visual confirmation'),
-  ('floating_voice_enabled', true, 100, 'Altijd-zichtbare microfoonknop', 'Always-visible floating microphone button'),
-  ('simplified_home_enabled', true, 100, 'Vereenvoudigd startscherm met 5 hoofdkaarten', 'Simplified home screen with 5 primary cards'),
-  ('help_button_enabled', true, 100, 'Wat moet ik doen?-knop op elk scherm', 'What do I do? help button on every screen')
+INSERT INTO feature_flags (flag_key, enabled, rollout_pct, description) VALUES
+  ('whatsapp_fallback_enabled', false, 0, 'WhatsApp backup bij mislukte push-meldingen (WhatsApp fallback when push notifications fail)'),
+  ('photo_checkin_enabled', false, 0, 'Familie kan om een foto vragen ter bevestiging (Family can request a photo for visual confirmation)'),
+  ('floating_voice_enabled', true, 100, 'Altijd-zichtbare microfoonknop (Always-visible floating microphone button)'),
+  ('simplified_home_enabled', true, 100, 'Vereenvoudigd startscherm met 5 hoofdkaarten (Simplified home screen with 5 primary cards)'),
+  ('help_button_enabled', true, 100, 'Wat moet ik doen?-knop op elk scherm (What do I do? help button on every screen)')
 ON CONFLICT (flag_key) DO UPDATE SET
-  description_nl = EXCLUDED.description_nl,
-  description_en = EXCLUDED.description_en;
+  description = EXCLUDED.description;

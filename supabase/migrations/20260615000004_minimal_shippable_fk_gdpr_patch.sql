@@ -52,7 +52,7 @@ BEGIN
     status = 'erased',
     full_name = '[ERASED]',
     preferred_name = NULL,
-    phone = NULL,
+    phone_nl = NULL,
     email = 'erased_' || p_target_id || '@haven.internal'
   WHERE id = p_target_id;
 

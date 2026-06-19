@@ -145,14 +145,14 @@ alter table app_events enable row level security; alter table app_events force r
 alter table slo_alerts enable row level security; alter table slo_alerts force row level security;
 
 create policy browser_events_elder on browser_shield_events for select using (elder_id = auth.uid() and deleted_at is null);
-create policy browser_events_family on browser_shield_events for select using (auth.family_can(elder_id,'alerts') and deleted_at is null);
+create policy browser_events_family on browser_shield_events for select using (public.family_can(elder_id,'alerts') and deleted_at is null);
 
 create policy fhir_jobs_elder on fhir_import_jobs for select using (elder_id = auth.uid() and deleted_at is null);
-create policy fhir_jobs_family on fhir_import_jobs for select using (auth.family_can(elder_id,'medications') and deleted_at is null);
+create policy fhir_jobs_family on fhir_import_jobs for select using (public.family_can(elder_id,'medications') and deleted_at is null);
 create policy health_imports_elder on health_record_imports for select using (elder_id = auth.uid());
-create policy health_imports_family on health_record_imports for select using (auth.family_can(elder_id,'medications'));
+create policy health_imports_family on health_record_imports for select using (public.family_can(elder_id,'medications'));
 
-create policy care_sync_carer on external_care_sync_jobs for select using (auth.carer_can(elder_id) and deleted_at is null);
+create policy care_sync_carer on external_care_sync_jobs for select using (public.carer_can(elder_id) and deleted_at is null);
 create policy care_sync_elder on external_care_sync_jobs for select using (elder_id = auth.uid() and deleted_at is null);
 
 create policy grandchild_family on grandchild_profiles for all using (family_member_id = auth.uid() and deleted_at is null) with check (family_member_id = auth.uid());

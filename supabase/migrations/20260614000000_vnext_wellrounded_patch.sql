@@ -51,7 +51,7 @@ create policy device_health_self on device_health_events for all
   using (profile_id = auth.uid()) with check (profile_id = auth.uid());
 
 create policy device_health_family_read on device_health_events for select
-  using (auth.family_can(profile_id, 'alerts'));
+  using (public.family_can(profile_id, 'alerts'));
 
 -- ============================================================
 -- 3. wellness_checkins — extended daily rhythm surface
@@ -116,10 +116,10 @@ create policy fall_events_self on fall_events for all
   using (elder_id = auth.uid()) with check (elder_id = auth.uid());
 
 create policy fall_events_family_read on fall_events for select
-  using (auth.family_can(elder_id, 'alerts'));
+  using (public.family_can(elder_id, 'alerts'));
 
 create policy fall_events_carer_write on fall_events for insert with check (
-  detection_source = 'carer' and auth.carer_can(elder_id)
+  detection_source = 'carer' and public.carer_can(elder_id)
 );
 
 -- ============================================================
@@ -149,11 +149,11 @@ create policy ocr_reviews_self on medication_ocr_reviews for all
   using (elder_id = auth.uid()) with check (elder_id = auth.uid());
 
 create policy ocr_reviews_family on medication_ocr_reviews for select
-  using (auth.family_can(elder_id, 'medications'));
+  using (public.family_can(elder_id, 'medications'));
 
 create policy ocr_reviews_carer on medication_ocr_reviews for all
-  using (auth.carer_can(elder_id) and deleted_at is null)
-  with check (auth.carer_can(elder_id));
+  using (public.carer_can(elder_id))
+  with check (public.carer_can(elder_id));
 
 create trigger medication_ocr_reviews_updated_at before update on medication_ocr_reviews for each row execute function public.set_updated_at();
 
@@ -185,10 +185,10 @@ create policy interaction_alerts_self on medication_interaction_alerts for selec
   using (elder_id = auth.uid() and (dismissed_at is null or dismissed_by_id = auth.uid()));
 
 create policy interaction_alerts_family on medication_interaction_alerts for select
-  using (auth.family_can(elder_id, 'medications'));
+  using (public.family_can(elder_id, 'medications'));
 
 create policy interaction_alerts_carer on medication_interaction_alerts for select
-  using (auth.carer_can(elder_id));
+  using (public.carer_can(elder_id));
 
 create policy interaction_alerts_self_dismiss on medication_interaction_alerts for update
   using (elder_id = auth.uid()) with check (elder_id = auth.uid());
@@ -218,7 +218,7 @@ create policy scam_coaching_self on scam_coaching_sessions for all
   using (elder_id = auth.uid()) with check (elder_id = auth.uid());
 
 create policy scam_coaching_family_read on scam_coaching_sessions for select
-  using (auth.family_can(elder_id, 'alerts'));
+  using (public.family_can(elder_id, 'alerts'));
 
 -- ============================================================
 -- 9. consent_packs + consent_pack_status — staged consent
@@ -253,7 +253,7 @@ create policy consent_pack_status_self on consent_pack_status for all
   using (elder_id = auth.uid()) with check (elder_id = auth.uid());
 
 create policy consent_pack_status_family on consent_pack_status for select
-  using (auth.family_can(elder_id, 'messages'));
+  using (public.family_can(elder_id, 'messages'));
 
 insert into consent_packs (pack_key, title_nl, title_en, description_nl, description_en, recommended_day) values
   ('core_meds',         'Medicijnen en herinneringen',  'Medications and reminders',  'Wij helpen u herinneren wanneer u uw medicijnen inneemt. Familie ziet alleen of u ze hebt ingenomen, niet welke.', 'We help you remember your medications. Family only sees whether they were taken.', 0),
@@ -290,16 +290,6 @@ alter table voice_profiles force row level security;
 create policy voice_profiles_owner_all on voice_profiles for all
   using (owner_profile_id = auth.uid()) with check (owner_profile_id = auth.uid());
 
-create policy voice_profiles_elder_read on voice_profiles for select
-  using (
-    status = 'ready'
-    and exists (
-      select 1 from elder_voice_preferences evp
-      where evp.voice_profile_id = voice_profiles.id
-        and evp.elder_id = auth.uid()
-    )
-  );
-
 create trigger voice_profiles_updated_at before update on voice_profiles for each row execute function public.set_updated_at();
 
 create table elder_voice_preferences (
@@ -317,6 +307,16 @@ create policy elder_voice_preferences_self on elder_voice_preferences for all
   using (elder_id = auth.uid()) with check (elder_id = auth.uid());
 
 create trigger elder_voice_preferences_updated_at before update on elder_voice_preferences for each row execute function public.set_updated_at();
+
+create policy voice_profiles_elder_read on voice_profiles for select
+  using (
+    status = 'ready'
+    and exists (
+      select 1 from elder_voice_preferences evp
+      where evp.voice_profile_id = voice_profiles.id
+        and evp.elder_id = auth.uid()
+    )
+  );
 
 -- ============================================================
 -- 11. video_call_sessions — Live video calling
@@ -346,7 +346,7 @@ create policy video_call_self on video_call_sessions for all
   using (elder_id = auth.uid() or initiator_id = auth.uid()) with check (elder_id = auth.uid() or initiator_id = auth.uid());
 
 create policy video_call_family_read on video_call_sessions for select
-  using (auth.family_can(elder_id, 'messages'));
+  using (public.family_can(elder_id, 'messages'));
 
 -- ============================================================
 -- 12. carer_handover_notes + carer_handover_recipients
@@ -362,6 +362,8 @@ create table carer_handover_notes (
   mobility text,
   concerns_nl text,
   concerns_en text,
+  notes_nl text,
+  notes_en text,
   photo_path text,
   administered_medication_id uuid references medications(id) on delete set null,
   administered_at timestamptz,
@@ -376,20 +378,10 @@ alter table carer_handover_notes enable row level security;
 alter table carer_handover_notes force row level security;
 
 create policy handover_notes_carer on carer_handover_notes for all
-  using (auth.carer_can(elder_id) and deleted_at is null) with check (auth.carer_can(elder_id));
+  using (public.carer_can(elder_id) and deleted_at is null) with check (public.carer_can(elder_id));
 
 create policy handover_notes_elder_read on carer_handover_notes for select
   using (elder_id = auth.uid() and deleted_at is null);
-
-create policy handover_notes_family_read on carer_handover_notes for select
-  using (
-    auth.family_can(elder_id, 'messages')
-    and exists (
-      select 1 from carer_handover_recipients r
-      where r.handover_id = carer_handover_notes.id
-        and r.family_member_id = auth.uid()
-    )
-  );
 
 create table carer_handover_recipients (
   id uuid primary key default gen_random_uuid(),
@@ -406,11 +398,21 @@ alter table carer_handover_recipients enable row level security;
 alter table carer_handover_recipients force row level security;
 
 create policy handover_recipients_carer on carer_handover_recipients for all
-  using (exists (select 1 from carer_handover_notes h where h.id = handover_id and auth.carer_can(h.elder_id)))
-  with check (exists (select 1 from carer_handover_notes h where h.id = handover_id and auth.carer_can(h.elder_id)));
+  using (exists (select 1 from carer_handover_notes h where h.id = handover_id and public.carer_can(h.elder_id)))
+  with check (exists (select 1 from carer_handover_notes h where h.id = handover_id and public.carer_can(h.elder_id)));
 
 create policy handover_recipients_family_read on carer_handover_recipients for select
   using (family_member_id = auth.uid());
+
+create policy handover_notes_family_read on carer_handover_notes for select
+  using (
+    public.family_can(elder_id, 'messages')
+    and exists (
+      select 1 from carer_handover_recipients r
+      where r.handover_id = carer_handover_notes.id
+        and r.family_member_id = auth.uid()
+    )
+  );
 
 -- ============================================================
 -- 13. pending_confirmations — short-lived repeat-back state
@@ -437,12 +439,11 @@ alter table pending_confirmations force row level security;
 create policy pending_confirmations_self on pending_confirmations for all
   using (elder_id = auth.uid()) with check (elder_id = auth.uid());
 
--- Retention: purge after 1 day
 select cron.schedule('purge-pending-confirmations', '0 4 * * *',
   $job$
     delete from pending_confirmations where resolved_at is not null and resolved_at < now() - interval '1 day';
     delete from pending_confirmations where expires_at < now() - interval '7 days';
-  $job$) on conflict do nothing;
+  $job$);
 
 -- ============================================================
 -- 14. Feature flag additions (Phase 1 + Phase 2 flags)
