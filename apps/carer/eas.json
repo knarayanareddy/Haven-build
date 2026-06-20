@@ -41,9 +41,7 @@
         "withoutCredentials": true
       },
       "env": {
-        "EXPO_PUBLIC_HAVEN_ENV": "staging",
-        "EXPO_PUBLIC_SUPABASE_URL": "https://giubmqavutyzzuroxklq.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdpdWJtcWF2dXR5enp1cm94a2xxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE5MDU5MTksImV4cCI6MjA5NzQ4MTkxOX0.SlY8V4ke8BN5EXRHMs7vbhW_ZFFZjRkNKnn4FkbBEu0"
+        "EXPO_PUBLIC_HAVEN_ENV": "staging"
       }
     },
     "production": {
@@ -64,9 +62,7 @@
         "credentialsSource": "remote"
       },
       "env": {
-        "EXPO_PUBLIC_HAVEN_ENV": "production",
-        "EXPO_PUBLIC_SUPABASE_URL": "https://haven-prod-99x1.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "REPLACE_WITH_PRODUCTION_SUPABASE_ANON_KEY"
+        "EXPO_PUBLIC_HAVEN_ENV": "production"
       }
     }
   },

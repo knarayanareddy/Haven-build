@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const root = new URL('../../', import.meta.url).pathname;
 
@@ -22,6 +23,13 @@ for (const file of edgeFunctionFiles(join(root, 'supabase/functions'))) {
   const src = readFileSync(file, 'utf8');
   assert.equal(/import \{[^}]*\bcors\b/.test(src), false, `${file} must not import deprecated wildcard cors headers`);
   assert.equal(/Access-Control-Allow-Origin['"]?\s*:\s*['"]\*/.test(src), false, `${file} must not define wildcard CORS headers`);
+}
+
+const trackedFiles = spawnSync('git', ['ls-files'], { cwd: root, encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
+for (const file of trackedFiles.filter((name) => /(^|\/)(eas\.json|\.env[^/]*|.*\.env)$/.test(name))) {
+  const src = readFileSync(join(root, file), 'utf8');
+  assert.equal(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/.test(src), false, `${file} must not commit JWT-shaped Supabase keys`);
+  assert.equal(/NEXT_PUBLIC_[A-Z0-9_]*=\s*[^#\n]*service_role/i.test(src), false, `${file} must not expose service_role in a public variable`);
 }
 
 const scam = readFileSync(new URL('../../supabase/functions/fn-scam-pipeline/index.ts', import.meta.url), 'utf8');
