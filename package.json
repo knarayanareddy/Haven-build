@@ -29,6 +29,7 @@
     "verify:core": "./scripts/ci/verify-core.sh",
     "verify:browser": "./scripts/ci/verify-browser.sh",
     "verify:supabase:local": "./scripts/ci/verify-local-supabase.sh",
+    "staging:mint-jwts": "node scripts/ci/mint-staging-auth-jwts.mjs --write",
     "smoke:hosted": "./scripts/ci/smoke-hosted-integrations.sh",
     "build": "corepack pnpm run build:family"
   },
