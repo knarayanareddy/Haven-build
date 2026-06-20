@@ -1,6 +1,6 @@
 import { admin, dispatchNotification, json, readJsonBody, userClient } from "../_shared/core.ts";
 import { companionReply, synthesizeSpeechToStorage, transcribeDutchAudio } from "../_shared/ai.ts";
-import { assertElderOrFamilyCan, assertCarerCan, getJwtUserId } from "../_shared/authz.ts";
+import { assertElderOrFamilyCan, assertCarerCan, AuthzError, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody, assertMaxLength, MAX_AUDIO_BASE64 } from "../_shared/validation.ts";
 import { withIdempotency } from "../_shared/idempotency.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
@@ -40,6 +40,18 @@ function localizedResponse(locale: "en-GB" | "nl-NL", text: string) {
   };
 }
 
+async function returnsFalseForExpectedDeny(check: Promise<unknown>): Promise<boolean> {
+  try {
+    await check;
+    return true;
+  } catch (error) {
+    if (error instanceof AuthzError && error.reasonCode !== "SYSTEM_UNCERTAINTY" && error.reasonCode !== "INVALID_TOKEN") {
+      return false;
+    }
+    throw error;
+  }
+}
+
 async function selectVoiceConfig(adminClient: ReturnType<typeof admin>, elderId: string, locale: "en-GB" | "nl-NL"): Promise<{ voiceId?: string; useFamiliar: boolean; crisisOverride: boolean; disclosure: "always" | "first_of_day" | "none" }> {
   const { data: pref } = await adminClient.from("elder_voice_preferences").select("voice_profile_id, use_familiar_voice, disclosure_mode").eq("elder_id", elderId).maybeSingle();
   if (!pref?.use_familiar_voice || !pref.voice_profile_id) return { useFamiliar: false, crisisOverride: false, disclosure: "none" };
@@ -62,8 +74,8 @@ Deno.serve(asyncWrapper("fn-voice-pipeline", async (req: Request) => {
   // Uses assertSelf or assertElderOrFamilyCan authorization check
   let authorized = userId === String(body.elder_id);
   if (!authorized) {
-    const isFamily = await assertElderOrFamilyCan(userId, String(body.elder_id), "messages").then(() => true).catch(() => false);
-    const isCarer = await assertCarerCan(userId, String(body.elder_id)).then(() => true).catch(() => false);
+    const isFamily = await returnsFalseForExpectedDeny(assertElderOrFamilyCan(userId, String(body.elder_id), "messages"));
+    const isCarer = await returnsFalseForExpectedDeny(assertCarerCan(userId, String(body.elder_id)));
     authorized = isFamily || isCarer;
   }
   if (!authorized) throw new Error("403: Caller is not authorized to interact on behalf of this elder");
@@ -121,14 +133,18 @@ Deno.serve(asyncWrapper("fn-voice-pipeline", async (req: Request) => {
         const isInnocentContext = /(regen|pijn|wandelen|tuin|voel|weer|eten|koffie|thee|slapen|tv|knie|rug|buiten|rain|pain|walking|garden|feel|weather|food|coffee|tea|sleep|knee|back|outside)/.test(normalizedTrans);
         const isHighlyAdversarial = !isInnocentContext;
 
-        await dbAdmin.from("audit_log").insert({
+        const { error: hijackAuditError } = await dbAdmin.from("audit_log").insert({
           actor_id: userId,
           actor_role: "elder",
           action: isHighlyAdversarial ? "VOICE_STT_HIJACKING_REJECTION" : "VOICE_STT_CLARIFICATION_LOG",
           table_name: "medication_reminders",
           elder_id: String(body.elder_id),
           extra: { transcript, rejection_reason: isHighlyAdversarial ? "Adversarial STT prompt injection or override pattern intercepted" : "Accidental STT keyword match triggering clarifying prompt" },
-        }).catch(() => undefined);
+        });
+        if (hijackAuditError) {
+          console.warn(`Voice STT security audit log failed: ${hijackAuditError.message}`);
+          throw hijackAuditError;
+        }
 
         if (isHighlyAdversarial) {
           return { 
@@ -216,7 +232,10 @@ Deno.serve(asyncWrapper("fn-voice-pipeline", async (req: Request) => {
       const vConfig = await selectVoiceConfig(dbAdmin, elderId, locale);
       let audioUrl: string | null = null;
       if (vConfig.useFamiliar && vConfig.voiceId) {
-        audioUrl = await synthesizeSpeechToStorage({ elderId, interactionId: crypto.randomUUID(), text: responseText, locale, voiceId: vConfig.voiceId }).catch(() => null);
+        audioUrl = await synthesizeSpeechToStorage({ elderId, interactionId: crypto.randomUUID(), text: responseText, locale, voiceId: vConfig.voiceId }).catch((error) => {
+          console.warn(`TTS synthesis failed: ${String((error as Error).message ?? error).slice(0, 240)}`);
+          return null;
+        });
       }
 
       await db.from("voice_interactions").insert({

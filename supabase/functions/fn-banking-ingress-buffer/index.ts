@@ -1,6 +1,8 @@
 import { admin, corsHeaders, json, readRequestBody, recordMetric, safeErrorMessage } from "../_shared/core.ts";
 import { captureException } from "../_shared/sentry.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
+import { requireInternalAccess } from "../_shared/internal.ts";
+import { verifyHmacSha256 } from "../_shared/webhook.ts";
 
 const REDIS_URL = Deno.env.get("UPSTASH_REDIS_URL");
 const REDIS_TOKEN = Deno.env.get("UPSTASH_REDIS_TOKEN");
@@ -12,6 +14,19 @@ Deno.serve(async (req: Request) => {
   try {
     await rateLimit(req, "fn-banking-ingress-buffer", 100, 60);
     const rawPayload = await readRequestBody(req);
+    const isInternalCall = !!(req.headers.get("x-haven-internal-key") || req.headers.get("x-internal-key"));
+    if (isInternalCall) {
+      requireInternalAccess(req);
+    } else {
+      const secret = Deno.env.get("PSD2_WEBHOOK_SECRET");
+      if (!secret) throw new Error("PSD2_WEBHOOK_SECRET is not configured");
+      const signature = req.headers.get("x-haven-signature") ?? req.headers.get("x-tink-signature");
+      const valid = await verifyHmacSha256(rawPayload, signature, secret);
+      if (!valid) {
+        return json({ ok: false, error: "Invalid PSD2 webhook signature" }, 403, req);
+      }
+    }
+
     const integrationKey = req.headers.get("x-haven-integration-key") ?? "psd2_default";
 
     let redisSuccess = false;

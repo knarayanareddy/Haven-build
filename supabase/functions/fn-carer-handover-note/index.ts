@@ -158,16 +158,22 @@ Deno.serve(async (req: Request) => {
         const recipients: string[] = Array.isArray(body.family_recipient_ids)
           ? body.family_recipient_ids
           : [];
+        let recipientsAdded = 0;
         for (const rid of recipients) {
-          await db.from("carer_handover_recipients")
-            .insert({ handover_id: note.id, family_member_id: rid })
-            .catch(() => undefined);
+          const { error: recipientError } = await db.from("carer_handover_recipients")
+            .insert({ handover_id: note.id, family_member_id: rid });
+          if (recipientError) {
+            console.warn(`Failed to add handover recipient ${String(rid)}: ${recipientError.message}`);
+          } else {
+            recipientsAdded += 1;
+          }
         }
 
         return {
           body: {
             handover_id: note.id,
-            recipients_added: recipients.length,
+            recipients_added: recipientsAdded,
+            recipients_requested: recipients.length,
             appetite: note.appetite,
             mood: note.mood,
             photos_attached: photoPaths.length,

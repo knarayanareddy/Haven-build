@@ -140,6 +140,7 @@ export async function executeRegulatoryEscalation(
       }
     } catch (webhookErr) {
       webhookOutcome = "failure";
+      console.warn(`Regulatory escalation failed for incident ${incidentId}: ${String((webhookErr as Error).message ?? webhookErr).slice(0, 240)}`);
       await captureException(webhookErr, { fn: "executeRegulatoryEscalation", incident_id: incidentId });
       
       const { data: admins } = await db.from("profiles").select("id").eq("role", "admin");
@@ -158,7 +159,7 @@ export async function executeRegulatoryEscalation(
     }
 
     // Log outcome to audit_log
-    await db.from("audit_log").insert({
+    const { error: auditError } = await db.from("audit_log").insert({
       actor_id: "00000000-0000-0000-0000-000000000001",
       actor_role: "system",
       action: "REGULATORY_INCIDENT_ESCALATION",
@@ -172,11 +173,17 @@ export async function executeRegulatoryEscalation(
         http_status: httpStatus,
         timestamp: payload.timestamp,
       },
-    }).catch(() => undefined);
+    });
+    if (auditError) {
+      console.warn(`Regulatory escalation audit log failed for incident ${incidentId}: ${auditError.message}`);
+      throw auditError;
+    }
   };
 
   await Promise.race([
     escalationTask(),
-    new Promise((_, resolve) => setTimeout(resolve, 1500)),
-  ]).catch(() => undefined);
+    new Promise((_, reject) => setTimeout(() => reject(new Error("Regulatory escalation timed out")), 1500)),
+  ]).catch((error) => {
+    console.warn(`Regulatory escalation did not complete for incident ${incidentId}: ${String((error as Error).message ?? error).slice(0, 240)}`);
+  });
 }

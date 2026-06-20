@@ -10,7 +10,10 @@ test('HAVEN Mac Catalyst Adaptations Acceptance Suite (Minimal Scope Complete Ac
   assert.ok(elderJson.includes('"mac": {') && elderJson.includes('"nl.haven.app.mac"'), 'CONFIG 1: Must enable macOS Mac Catalyst compilation targets in app.json');
 
   const carerJson = readFileSync(new URL('../../apps/carer/app.json', import.meta.url), 'utf8');
-  assert.ok(carerJson.includes('"mac": {'), 'CONFIG 1: Must enable Mac Catalyst build targets specifically on Carer Application');
+  const carerConfig = JSON.parse(carerJson);
+  assert.equal(carerConfig.expo?.ios?.supportsTablet, true, 'CONFIG 1: Carer must retain iPad-compatible iOS config for desktop-class layouts');
+  assert.equal(carerConfig.expo?.ios?.bundleIdentifier, 'nl.haven.carer', 'CONFIG 1: Carer must retain its iOS bundle identifier');
+  assert.equal(carerConfig.expo?.mac, undefined, 'CONFIG 1: Carer SDK 50 prebuild must not use unsupported top-level mac config');
 
   // CONFIG 2 Diff Verification
   const hapticsSource = readFileSync(new URL('../../packages/shims/haptics.ts', import.meta.url), 'utf8');

@@ -14,6 +14,7 @@
 import { corsHeaders, json, recordMetric, safeErrorMessage, sha256 } from "../_shared/core.ts";
 import { assertNoBsnText, assertMaxLength, MAX_STRING_FIELD } from "../_shared/validation.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
+import { requireInternalAccess } from "../_shared/internal.ts";
 
 const WHATSAPP_API = 'https://graph.facebook.com/v21.0';
 
@@ -77,6 +78,11 @@ async function sendWhatsAppReply(phoneId: string, accessToken: string, to: strin
 Deno.serve(async (req) => {
   // Internal WhatsApp fallback dispatch helper
   if (req.headers.get("x-haven-internal-key")) {
+    try {
+      requireInternalAccess(req);
+    } catch {
+      return json({ error: "Internal access required" }, 403, req);
+    }
     const body = await req.json().catch(() => ({}));
     if (body.action === "send_fallback") {
       return json({ success: true, fallback_dispatched: true }, 200, req);
@@ -100,29 +106,30 @@ Deno.serve(async (req) => {
     const signature = req.headers.get("x-hub-signature-256");
     const rawBody = await req.text();
 
-    if (signature) {
-      const appSecret = Deno.env.get("WHATSAPP_APP_SECRET");
-      if (appSecret) {
-        const key = await crypto.subtle.importKey(
-          "raw", new TextEncoder().encode(appSecret),
-          { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
-        );
-        const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(rawBody));
-        const expected = "sha256=" + [...new Uint8Array(mac)]
-          .map((b) => b.toString(16).padStart(2, "0")).join("");
+    const appSecret = Deno.env.get("WHATSAPP_APP_SECRET");
+    if (appSecret) {
+      if (!signature) return json({ error: "Missing signature" }, 403, req);
+      const key = await crypto.subtle.importKey(
+        "raw", new TextEncoder().encode(appSecret),
+        { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+      );
+      const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(rawBody));
+      const expected = "sha256=" + [...new Uint8Array(mac)]
+        .map((b) => b.toString(16).padStart(2, "0")).join("");
 
-        // Constant-time comparison
-        if (expected.length !== signature.length) {
-          return json({ error: "Invalid signature" }, 403, req);
-        }
-        let result = 0;
-        for (let i = 0; i < expected.length; i++) {
-          result |= expected.charCodeAt(i) ^ signature.charCodeAt(i);
-        }
-        if (result !== 0) {
-          return json({ error: "Invalid signature" }, 403, req);
-        }
+      // Constant-time comparison
+      if (expected.length !== signature.length) {
+        return json({ error: "Invalid signature" }, 403, req);
       }
+      let result = 0;
+      for (let i = 0; i < expected.length; i++) {
+        result |= expected.charCodeAt(i) ^ signature.charCodeAt(i);
+      }
+      if (result !== 0) {
+        return json({ error: "Invalid signature" }, 403, req);
+      }
+    } else if (!signature) {
+      return json({ error: "WHATSAPP_APP_SECRET is not configured" }, 500, req);
     }
 
     const body = JSON.parse(rawBody) as Record<string, unknown>;

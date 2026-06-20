@@ -17,9 +17,22 @@ export interface CarerOfflineItem {
 const DB_NAME = 'haven_carer_offline_idb_v1';
 const STORE_NAME = 'offline_actions';
 const LEGACY_STORAGE_KEY = 'haven.carer.offline.queue.v1';
+const memoryQueue = new Map<string, CarerOfflineItem>();
+
+function hasIndexedDb(): boolean {
+  return typeof indexedDB !== 'undefined';
+}
+
+function hasLocalStorage(): boolean {
+  return typeof localStorage !== 'undefined';
+}
 
 export function openIndexedDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
+    if (!hasIndexedDb()) {
+      reject(new Error('IndexedDB is not available in this runtime'));
+      return;
+    }
     const request = indexedDB.open(DB_NAME, 1);
 
     request.onupgradeneeded = (event) => {
@@ -41,6 +54,7 @@ export function openIndexedDb(): Promise<IDBDatabase> {
 // ─── Migration Shim: Move legacy localStorage entries into IndexedDB ───
 export async function migrateLocalStorageToIndexedDb(currentCarerId: string): Promise<number> {
   try {
+    if (!hasLocalStorage() || !hasIndexedDb()) return 0;
     const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return 0;
 
@@ -112,6 +126,11 @@ export async function enqueueOfflineAction(
     status: 'queued',
   };
 
+  if (!hasIndexedDb()) {
+    memoryQueue.set(idempotencyKey, offlineItem);
+    return offlineItem;
+  }
+
   const db = await openIndexedDb();
   const transaction = db.transaction(STORE_NAME, 'readwrite');
   const store = transaction.objectStore(STORE_NAME);
@@ -127,6 +146,12 @@ export async function enqueueOfflineAction(
 // ─── List Partitioned Queue (Strictly isolates two Carers on same device) ───
 export async function listOfflineActions(carerId: string, elderId: string): Promise<CarerOfflineItem[]> {
   await migrateLocalStorageToIndexedDb(carerId);
+
+  if (!hasIndexedDb()) {
+    return [...memoryQueue.values()]
+      .filter((item) => item.carerId === carerId && item.elderId === elderId && (item.status === 'queued' || item.status === 'processing'))
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  }
 
   const db = await openIndexedDb();
   const transaction = db.transaction(STORE_NAME, 'readonly');
@@ -151,6 +176,14 @@ export async function listOfflineActions(carerId: string, elderId: string): Prom
 
 // ─── Quarantine Corrupted Entries ───
 export async function quarantineCorruptEntry(idempotencyKey: string, reason: string): Promise<void> {
+  if (!hasIndexedDb()) {
+    const item = memoryQueue.get(idempotencyKey);
+    if (item) {
+      memoryQueue.set(idempotencyKey, { ...item, status: 'quarantined', quarantineReason: reason });
+    }
+    return;
+  }
+
   const db = await openIndexedDb();
   const transaction = db.transaction(STORE_NAME, 'readwrite');
   const store = transaction.objectStore(STORE_NAME);
@@ -172,6 +205,11 @@ export async function quarantineCorruptEntry(idempotencyKey: string, reason: str
 
 // ─── Complete Action ───
 export async function completeOfflineAction(idempotencyKey: string): Promise<void> {
+  if (!hasIndexedDb()) {
+    memoryQueue.delete(idempotencyKey);
+    return;
+  }
+
   const db = await openIndexedDb();
   const transaction = db.transaction(STORE_NAME, 'readwrite');
   const store = transaction.objectStore(STORE_NAME);
@@ -181,4 +219,17 @@ export async function completeOfflineAction(idempotencyKey: string): Promise<voi
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
   });
+}
+
+export async function enqueueOffline(
+  action: CarerOfflineItem['action'],
+  payload: Record<string, unknown>
+): Promise<CarerOfflineItem> {
+  const elderId = String(payload.elder_id ?? '00000000-0000-0000-0000-000000000001');
+  const carerId = String(payload.carer_id ?? 'offline-carer');
+  return enqueueOfflineAction(carerId, elderId, action, payload);
+}
+
+export function getQueueSize(): number {
+  return [...memoryQueue.values()].filter((item) => item.status === 'queued' || item.status === 'processing').length;
 }
