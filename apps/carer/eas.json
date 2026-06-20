@@ -26,6 +26,7 @@
       }
     },
     "preview": {
+      "environment": "preview",
       "corepack": true,
       "pnpm": "9.12.3",
       "distribution": "internal",
@@ -45,6 +46,7 @@
       }
     },
     "production": {
+      "environment": "production",
       "corepack": true,
       "pnpm": "9.12.3",
       "autoIncrement": true,
