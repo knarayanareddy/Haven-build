@@ -1,4 +1,4 @@
-import { cors, corsHeaders, json, readJsonBody, recordMetric, requireFields, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { corsHeaders, json, readJsonBody, recordMetric, requireFields, safeErrorMessage, userClient } from "../_shared/core.ts";
 import { requireAdminBearer } from "../_shared/internal.ts";
 
 Deno.serve(async (req) => {

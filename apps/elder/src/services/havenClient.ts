@@ -5,6 +5,7 @@ import { translateElderError } from './errorMapper';
 export interface HavenClientConfig {
   supabaseUrl: string;
   accessToken: string;
+  supabaseAnonKey?: string;
 }
 
 export class HavenClient {
@@ -23,6 +24,22 @@ export class HavenClient {
     if (!response.ok) {
       // FIX P2: COGNITIVE LOAD Automatically translate all underlying API and network exceptions into reassuring Dutch B1 prose
       throw new Error(translateElderError(json.error ?? `HAVEN function failed: ${fn}`));
+    }
+    return json as T;
+  }
+
+  async rest<T>(path: string): Promise<T> {
+    const anonKey = this.config.supabaseAnonKey ?? process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${this.config.accessToken}`,
+      accept: 'application/json',
+    };
+    if (anonKey) headers.apikey = anonKey;
+
+    const response = await fetch(`${this.config.supabaseUrl}/rest/v1/${path}`, { headers });
+    const json = await response.json();
+    if (!response.ok) {
+      throw new Error(translateElderError(json.error ?? json.message ?? 'HAVEN data request failed'));
     }
     return json as T;
   }

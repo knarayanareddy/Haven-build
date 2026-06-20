@@ -1,5 +1,28 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+
+const root = new URL('../../', import.meta.url).pathname;
+
+const familyNextConfig = readFileSync(join(root, 'apps/family/next.config.mjs'), 'utf8');
+assert.equal(familyNextConfig.includes("'unsafe-eval'"), false, 'family dashboard CSP must not allow unsafe-eval');
+
+const coreSource = readFileSync(join(root, 'supabase/functions/_shared/core.ts'), 'utf8');
+assert.equal(coreSource.includes('export const cors'), false, 'shared core must not export wildcard CORS compatibility headers');
+
+function edgeFunctionFiles(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return edgeFunctionFiles(path);
+    return entry.isFile() && path.endsWith('.ts') ? [path] : [];
+  });
+}
+
+for (const file of edgeFunctionFiles(join(root, 'supabase/functions'))) {
+  const src = readFileSync(file, 'utf8');
+  assert.equal(/import \{[^}]*\bcors\b/.test(src), false, `${file} must not import deprecated wildcard cors headers`);
+  assert.equal(/Access-Control-Allow-Origin['"]?\s*:\s*['"]\*/.test(src), false, `${file} must not define wildcard CORS headers`);
+}
 
 const scam = readFileSync(new URL('../../supabase/functions/fn-scam-pipeline/index.ts', import.meta.url), 'utf8');
 assert.ok(scam.includes('validateBody'), 'scam pipeline should use strict validation');

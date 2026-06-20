@@ -1,4 +1,4 @@
-import { cors, corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
 import { generateEmbedding } from "../_shared/ai.ts";
 import { assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { assertNoBsnText, validateBody } from "../_shared/validation.ts";

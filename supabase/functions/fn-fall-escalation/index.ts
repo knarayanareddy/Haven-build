@@ -1,6 +1,7 @@
-import { admin, corsHeaders, dispatchNotification, json, requireInternalAccess } from "../_shared/core.ts";
+import { admin, corsHeaders, dispatchNotification, json } from "../_shared/core.ts";
 import { captureException } from "../_shared/sentry.ts";
 import { asyncWrapper } from "../_shared/async_wrapper.ts";
+import { requireInternalAccess } from "../_shared/internal.ts";
 
 const PRECISE_LOCATION_TTL = 1800; // 30 minutes signed GPS exposure window
 

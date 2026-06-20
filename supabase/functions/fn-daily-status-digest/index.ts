@@ -1,4 +1,5 @@
-import { admin, cors, corsHeaders, dispatchNotification, json, recordMetric, requireInternalAccess, safeErrorMessage } from "../_shared/core.ts";
+import { admin, corsHeaders, dispatchNotification, json, recordMetric, safeErrorMessage } from "../_shared/core.ts";
+import { requireInternalAccess } from "../_shared/internal.ts";
 
 type Status = "green" | "amber" | "red";
 

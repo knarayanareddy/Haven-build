@@ -1,4 +1,4 @@
-import { cors, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, requireFields, safeErrorMessage } from "../_shared/core.ts";
+import { corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, requireFields, safeErrorMessage } from "../_shared/core.ts";
 import { requireInternalAccess } from "../_shared/internal.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
 

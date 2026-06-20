@@ -1,6 +1,7 @@
-import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, requireInternalAccess, safeErrorMessage, sha256 } from "../_shared/core.ts";
+import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, safeErrorMessage, sha256 } from "../_shared/core.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
 import { captureException } from "../_shared/sentry.ts";
+import { requireInternalAccess } from "../_shared/internal.ts";
 
 const TWELVE_H = 12;
 const TWENTY_FOUR_H = 24;

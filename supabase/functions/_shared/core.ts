@@ -28,16 +28,6 @@ export function corsHeaders(req: Request): Record<string, string> {
   };
 }
 
-// ─── COMPATIBILITY BRIDGE: Deprecated wildcard CORS for gradual migration ───
-// 68 remaining Edge Functions still import { cors }. This bridge keeps them
-// compiling while they are refactored to corsHeaders(req).
-// Replace with corsHeaders(req) in production functions.
-export const cors: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-haven-internal-key, idempotency-key, x-haven-signature, x-tink-signature",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
 // P2-1 FIX: Security headers
 export const securityHeaders: Record<string, string> = {
   "X-Content-Type-Options": "nosniff",

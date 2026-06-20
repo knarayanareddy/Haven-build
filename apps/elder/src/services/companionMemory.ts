@@ -15,24 +15,22 @@ export async function getYesterdayMemoryRecap(
   elderId: string
 ): Promise<MemoryRecap[]> {
   try {
-    // In production this would call a dedicated Edge Function or RPC
-    // For now we return a realistic mock that matches the schema
-    const mockMemories: MemoryRecap[] = [
-      {
-        id: 'mem-1',
-        content_nl: 'Je hebt gisteren met je kleindochter Sofia gebeld.',
-        memory_type: 'personal_fact',
-        created_at: new Date(Date.now() - 1000 * 60 * 60 * 20).toISOString(),
-      },
-      {
-        id: 'mem-2',
-        content_nl: 'Je hebt je medicijnen ingenomen en voelde je rustig.',
-        memory_type: 'medical_context',
-        created_at: new Date(Date.now() - 1000 * 60 * 60 * 26).toISOString(),
-      },
-    ];
+    const end = new Date();
+    end.setHours(0, 0, 0, 0);
+    const start = new Date(end);
+    start.setDate(start.getDate() - 1);
 
-    return mockMemories.slice(0, 3);
+    const params = new URLSearchParams({
+      select: 'id,content_nl,memory_type,created_at',
+      elder_id: `eq.${elderId}`,
+      deleted_at: 'is.null',
+      created_at: `gte.${start.toISOString()}`,
+      order: 'created_at.desc',
+      limit: '3',
+    });
+    params.append('created_at', `lt.${end.toISOString()}`);
+
+    return await client.rest<MemoryRecap[]>(`companion_memory?${params.toString()}`);
   } catch (error) {
     console.error('Failed to fetch memory recap:', error);
     return [];

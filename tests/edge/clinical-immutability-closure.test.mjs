@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 const root = new URL('../../', import.meta.url).pathname;
 const migrationSql = readFileSync(join(root, 'supabase/migrations/20260615000002_final_targeted_iteration_red_team_gaps.sql'), 'utf8');
+const residueMigrationSql = readFileSync(join(root, 'supabase/migrations/20260620000003_security_residue_hardening.sql'), 'utf8');
 
 test('Part D - Forensic Immutability Bypasses completely closed via Event Triggers and Append-Only Model', () => {
   // 1. Confirm Event Trigger blocking prod DDL exists
@@ -12,8 +13,8 @@ test('Part D - Forensic Immutability Bypasses completely closed via Event Trigge
   assert.ok(migrationSql.includes('DDL OPERATIONS BANNED IN PRODUCTION'), 'Event trigger must throw custom exception');
 
   // 2. Confirm runtime role de-escalation statements executed
-  assert.ok(migrationSql.includes('ALTER ROLE authenticated NOSUPERUSER'), 'Must strip superuser execution privileges from authenticated roles');
-  assert.ok(migrationSql.includes('ALTER ROLE anon NOSUPERUSER'), 'Must strip superuser execution privileges from anon roles');
+  assert.ok(/ALTER ROLE authenticated NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION/i.test(residueMigrationSql), 'Must strip superuser execution privileges from authenticated roles in a forward migration');
+  assert.ok(/ALTER ROLE anon NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION/i.test(residueMigrationSql), 'Must strip superuser execution privileges from anon roles in a forward migration');
 
   // 3. Verify Breathtaking Append-Only clinical corrections view model
   assert.ok(migrationSql.includes('CREATE OR REPLACE VIEW effective_carer_handover_notes'), 'Must deploy effective clinical state View');

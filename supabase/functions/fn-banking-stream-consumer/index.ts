@@ -1,5 +1,6 @@
-import { admin, corsHeaders, json, recordMetric, requireInternalAccess, safeErrorMessage, sha256 } from "../_shared/core.ts";
+import { admin, corsHeaders, json, recordMetric, safeErrorMessage, sha256 } from "../_shared/core.ts";
 import { captureException } from "../_shared/sentry.ts";
+import { requireInternalAccess } from "../_shared/internal.ts";
 
 const REDIS_URL = Deno.env.get("UPSTASH_REDIS_URL");
 const REDIS_TOKEN = Deno.env.get("UPSTASH_REDIS_TOKEN");
