@@ -1,5 +1,14 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "jsx": "react-jsx", "outDir": "./dist" },
-  "include": ["./**/*.ts", "./**/*.tsx"]
+  "compilerOptions": {
+    "types": ["node", "react"],
+    "jsx": "react-jsx"
+  },
+  "include": [
+    "App.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "../../types/mobile-shims.d.ts"
+  ],
+  "exclude": ["node_modules"]
 }

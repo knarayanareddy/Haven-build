@@ -86,7 +86,7 @@ export async function migrateLocalStorageToIndexedDb(currentCarerId: string): Pr
     }
 
     return new Promise((resolve, reject) => {
-      transaction.onsuccess = () => {
+      transaction.oncomplete = () => {
         localStorage.removeItem(LEGACY_STORAGE_KEY);
         resolve(migrated);
       };
@@ -198,7 +198,7 @@ export async function quarantineCorruptEntry(idempotencyKey: string, reason: str
         store.put(item);
       }
     };
-    transaction.onsuccess = () => resolve();
+    transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
 }

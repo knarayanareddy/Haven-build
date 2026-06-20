@@ -14,6 +14,11 @@ declare module 'react-native' {
   export const Easing: any;
   export const Modal: any;
   export const StatusBar: any;
+  export const AccessibilityInfo: {
+    isBoldTextEnabled: () => Promise<boolean>;
+    addEventListener: (event: string, handler: (...args: any[]) => void) => { remove: () => void };
+  };
+  export function useWindowDimensions(): { width: number; height: number; scale: number; fontScale: number };
 }
 
 declare module 'expo-calendar';
@@ -72,6 +77,16 @@ declare module 'expo-camera' {
 
 declare module 'expo-sqlite' {
   export function openDatabaseSync(name: string): any;
+}
+
+declare module 'expo-local-authentication' {
+  export function hasHardwareAsync(): Promise<boolean>;
+  export function isEnrolledAsync(): Promise<boolean>;
+  export function authenticateAsync(options?: {
+    promptMessage?: string;
+    fallbackLabel?: string;
+    subtitle?: string;
+  }): Promise<{ success: boolean }>;
 }
 
 declare module 'expo-av' {

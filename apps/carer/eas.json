@@ -5,8 +5,6 @@
   },
   "build": {
     "development": {
-      "corepack": true,
-      "pnpm": "9.12.3",
       "developmentClient": true,
       "distribution": "internal",
       "ios": {
@@ -27,8 +25,6 @@
     },
     "preview": {
       "environment": "preview",
-      "corepack": true,
-      "pnpm": "9.12.3",
       "distribution": "internal",
       "ios": {
         "simulator": false,
@@ -47,8 +43,6 @@
     },
     "production": {
       "environment": "production",
-      "corepack": true,
-      "pnpm": "9.12.3",
       "autoIncrement": true,
       "distribution": "store",
       "ios": {
