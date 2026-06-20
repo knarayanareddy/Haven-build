@@ -218,7 +218,11 @@ importers:
 
   packages/contracts: {}
 
-  packages/database: {}
+  packages/database:
+    dependencies:
+      '@supabase/supabase-js':
+        specifier: ^2.43.0
+        version: 2.108.1
 
   packages/i18n: {}
 
