@@ -124,7 +124,7 @@ export function useHavenActions(screenId: string) {
       }
       try {
         if (!elderId) throw new Error('Missing elder profile for signed-in session');
-        await client.screenData({ elder_id: elderId, screen_id: 'INCOMING_CALL', locale: 'nl-NL' });
+        await client.videoCallJoinToken({ session_id: sessionId, elder_id: elderId });
         Alert.alert('HAVEN', t('actions.call_answered.alert', { sessionId }));
       } catch (error) {
         Alert.alert(t('haven_explanation_title'), translateElderError(error));

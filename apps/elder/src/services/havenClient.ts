@@ -41,4 +41,5 @@ export class HavenClient {
   featureFlags(elder_id: string) { return this.invoke('fn-feature-flags', { elder_id }); }
   screenData(input: Record<string, unknown>) { return this.invoke('fn-screen-data', input); }
   registerPushToken(input: Record<string, unknown>) { return this.invoke('fn-push-token-register', input); }
+  videoCallJoinToken(input: Record<string, unknown>) { return this.invoke('fn-video-call-join-token', input); }
 }
