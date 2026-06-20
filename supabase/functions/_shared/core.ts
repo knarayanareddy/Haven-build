@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.43.0";
+import { createClient } from "npm:@supabase/supabase-js@2.43.0";
 import { alertLevelFromScore, scoreScamText } from "../../../packages/scam-engine/src/catalog.mjs";
 
 // ─── P0-1 FIX: CORS — dynamic origin validation, not wildcard ───
