@@ -16,11 +16,18 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const supabase = useMemo(() => createClient<Database>(process.env.EXPO_PUBLIC_SUPABASE_URL!, process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false, autoRefreshToken: true } }), []);
+  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+
+  const supabase = useMemo(() => {
+    if (!supabaseUrl || !supabaseAnonKey) return null as unknown as SupabaseClient<Database>;
+    return createClient<Database>(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: true } });
+  }, [supabaseUrl, supabaseAnonKey]);
   const [session, setSession] = useState<Session | null>(null);
   const [isReady, setReady] = useState(false);
 
   useEffect(() => {
+    if (!supabase) { setReady(true); return; }
     let mounted = true;
     SecureStore.getItemAsync(SESSION_KEY).then(async (stored: string | null) => {
       if (!mounted) return;
@@ -40,12 +47,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [supabase]);
 
   async function signInWithOtp(emailOrPhone: string) {
+    if (!supabase) throw new Error('Supabase client not initialized');
     if (emailOrPhone.includes('@')) await supabase.auth.signInWithOtp({ email: emailOrPhone });
     else await supabase.auth.signInWithOtp({ phone: emailOrPhone });
   }
 
   async function signOut() {
-    await supabase.auth.signOut();
+    if (supabase) await supabase.auth.signOut();
     await SecureStore.deleteItemAsync(SESSION_KEY);
     setSession(null);
   }
