@@ -45,7 +45,7 @@
       ["expo-camera", {
         "cameraPermission": "Allow HAVEN to use the camera for medication labels and care documents."
       }],
-      ["expo-av", {
+      ["expo-audio", {
         "microphonePermission": "Allow HAVEN to use the microphone for voice help and medication confirmations."
       }],
       ["expo-location", {
