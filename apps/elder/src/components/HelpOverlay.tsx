@@ -29,7 +29,7 @@ export function HelpOverlay({ screenTitle, helpText }: HelpOverlayProps) {
         }}
         style={{
           position: 'absolute', top: 20, right: 12,
-          minWidth: 48, minHeight: 48, borderRadius: 24,
+          minWidth: 72, minHeight: 72, borderRadius: 36,
           backgroundColor: colors.paper, borderWidth: 2, borderColor: colors.sage,
           justifyContent: 'center', alignItems: 'center',
           shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 6, shadowOffset: { width: 0, height: 2 },
