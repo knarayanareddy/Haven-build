@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { SafeAreaView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { colors } from '@haven/ui/src/tokens';
 import { sendGrandchildHello } from './src/client';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 
-export default function GrandchildApp() {
+function GrandchildContent() {
   const [elderId, setElderId] = useState('');
   const [familyMemberId, setFamilyMemberId] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -37,23 +39,31 @@ export default function GrandchildApp() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#FAF0E8', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-      <Text style={{ fontSize: 44, fontWeight: '900', color: '#1A1F2E', textAlign: 'center' }}>Send Grandma a hello</Text>
-      <Text style={{ fontSize: 24, color: '#3D4558', textAlign: 'center', marginTop: 12 }}>One button. A warm message goes to HAVEN.</Text>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.linen, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <Text style={{ fontSize: 44, fontWeight: '900', color: colors.ink, textAlign: 'center' }}>Send Grandma a hello</Text>
+      <Text style={{ fontSize: 24, color: colors.graphite, textAlign: 'center', marginTop: 12 }}>One button. A warm message goes to HAVEN.</Text>
       <View style={{ width: '100%', gap: 10, marginTop: 24 }}>
         <TextInput placeholder="Elder profile ID" value={elderId} onChangeText={setElderId} autoCapitalize="none" style={inputStyle} />
         <TextInput placeholder="Family member ID" value={familyMemberId} onChangeText={setFamilyMemberId} autoCapitalize="none" style={inputStyle} />
         <TextInput placeholder="Grandchild display name" value={displayName} onChangeText={setDisplayName} style={inputStyle} />
         <TextInput placeholder="Family access token" value={accessToken} onChangeText={setAccessToken} autoCapitalize="none" secureTextEntry style={inputStyle} />
       </View>
-      <TouchableOpacity disabled={state === 'sending'} onPress={sendHello} style={{ marginTop: 24, minHeight: 96, width: '100%', borderRadius: 32, backgroundColor: '#5E4A8A', alignItems: 'center', justifyContent: 'center', opacity: state === 'sending' ? 0.7 : 1 }}>
+      <TouchableOpacity disabled={state === 'sending'} onPress={sendHello} style={{ marginTop: 24, minHeight: 96, width: '100%', borderRadius: 32, backgroundColor: colors.violet, alignItems: 'center', justifyContent: 'center', opacity: state === 'sending' ? 0.7 : 1 }}>
         <Text style={{ color: 'white', fontSize: 28, fontWeight: '900' }}>{state === 'sent' ? 'Sent' : state === 'sending' ? 'Sending...' : 'Send hello'}</Text>
       </TouchableOpacity>
-      {error ? <Text style={{ fontSize: 16, color: '#B42318', textAlign: 'center', marginTop: 12 }}>{error}</Text> : null}
-      <View style={{ marginTop: 24, backgroundColor: 'white', borderRadius: 24, padding: 20 }}>
-        <Text style={{ fontSize: 20, color: '#3D4558' }}>Guardian consent and elder consent are checked by fn-grandchild-message-send.</Text>
+      {error ? <Text style={{ fontSize: 18, color: colors.rose, textAlign: 'center', marginTop: 12 }}>{error}</Text> : null}
+      <View style={{ marginTop: 24, backgroundColor: colors.paper, borderRadius: 24, padding: 20 }}>
+        <Text style={{ fontSize: 20, color: colors.graphite }}>Guardian consent and elder consent are checked by fn-grandchild-message-send.</Text>
       </View>
     </SafeAreaView>
+  );
+}
+
+export default function GrandchildApp() {
+  return (
+    <ErrorBoundary>
+      <GrandchildContent />
+    </ErrorBoundary>
   );
 }
 
@@ -65,5 +75,5 @@ const inputStyle = {
   borderColor: '#D8D2CA',
   paddingHorizontal: 16,
   fontSize: 18,
-  color: '#1A1F2E',
+  color: colors.ink,
 };

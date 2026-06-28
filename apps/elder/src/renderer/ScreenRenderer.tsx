@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { productionScreens, ScreenSchema, ScreenId } from '@haven/schema/src/screenSchema';
@@ -10,6 +10,29 @@ import { translate, useTranslation } from '@haven/i18n';
 import { FloatingVoiceButton } from '../components/FloatingVoiceButton';
 import { HelpOverlay } from '../components/HelpOverlay';
 
+function computeColors(isHC: boolean): Record<string, string> {
+  return {
+    ...baseColors,
+    linen: isHC ? '#000000' : baseColors.linen,
+    paper: isHC ? '#000000' : baseColors.paper,
+    ink: isHC ? '#FFFFFF' : baseColors.ink,
+    graphite: isHC ? '#FFFFFF' : baseColors.graphite,
+    pewter: isHC ? '#DDDDDD' : baseColors.pewter,
+    mist: isHC ? '#888888' : baseColors.mist,
+    sage: isHC ? '#FFFFFF' : baseColors.sage,
+    sagePale: isHC ? '#000000' : baseColors.sagePale,
+    amber: isHC ? '#FFFFFF' : baseColors.amber,
+    amberPale: isHC ? '#000000' : baseColors.amberPale,
+    rose: isHC ? '#FFFFFF' : baseColors.rose,
+    rosePale: isHC ? '#000000' : baseColors.rosePale,
+    slate: isHC ? '#FFFFFF' : baseColors.slate,
+    slatePale: isHC ? '#000000' : baseColors.slatePale,
+    terracotta: isHC ? '#FFFFFF' : baseColors.terracotta,
+    terracottaPale: isHC ? '#000000' : baseColors.terracottaPale,
+  };
+}
+
+// Keep module-level reference for render helpers that need colors before ScreenRenderer runs
 let colors: Record<string, string> = { ...baseColors };
 
 export interface ElderProfile {
@@ -533,34 +556,7 @@ function renderSettings(ctx: ScreenContext) {
   );
 }
 
-function renderScreen(ctx: ScreenContext) {
-  switch (ctx.profile.id === ctx.profile.id && ctx.profile.id ? 'x' : 'x') {
-    default:
-      break;
-  }
-  switch (true) {
-    case true:
-      break;
-  }
-  // Use screen id routing via the schema registry order (productionScreens order).
-  // We use a flat map keyed by ScreenId for direct dispatch.
-  const dispatch: Partial<Record<ScreenId, (ctx: ScreenContext) => React.ReactNode>> = {
-    HOME: renderHome,
-    TODAY: renderToday,
-    PILLS: renderPills,
-    SHIELD: renderShield,
-    FAMILY: renderFamily,
-    BUURT: renderBuurt,
-    KOMPAS: renderKompas,
-    STEM: renderStem,
-    WACHT: renderWacht,
-    SETTINGS: renderSettings,
-  };
-  // We will pick the screen id by introspecting which top-level action was last invoked.
-  // Simpler approach: take the last argument passed via context. Default to HOME.
-  // The wrapper component passes a hint via ScreenContext.
-  return null;
-}
+
 
 export interface ScreenRendererProps {
   schema: ScreenSchema;
@@ -575,27 +571,11 @@ export function ScreenRenderer({ schema, context }: ScreenRendererProps) {
   // FIX P1: FONT SCALING Dynamic DB font_size_multiplier scaling baselines
   const fontMult = context?.profile?.fontSizeMultiplier ?? 1.0;
 
-  // FIX P1: CONTRAST RATIOS High Contrast Mode DB flag dynamically overwriting EMR tokens with true #000000 / #FFFFFF pairs
+  // FIX P1: CONTRAST RATIOS High Contrast Mode — use memoized computation instead of module-level mutation
   const isHC = context?.profile?.highContrast === true;
-  colors = {
-    ...baseColors,
-    linen: isHC ? '#000000' : baseColors.linen,
-    paper: isHC ? '#000000' : baseColors.paper,
-    ink: isHC ? '#FFFFFF' : baseColors.ink,
-    graphite: isHC ? '#FFFFFF' : baseColors.graphite,
-    pewter: isHC ? '#DDDDDD' : baseColors.pewter,
-    mist: isHC ? '#888888' : baseColors.mist,
-    sage: isHC ? '#FFFFFF' : baseColors.sage,
-    sagePale: isHC ? '#000000' : baseColors.sagePale,
-    amber: isHC ? '#FFFFFF' : baseColors.amber,
-    amberPale: isHC ? '#000000' : baseColors.amberPale,
-    rose: isHC ? '#FFFFFF' : baseColors.rose,
-    rosePale: isHC ? '#000000' : baseColors.rosePale,
-    slate: isHC ? '#FFFFFF' : baseColors.slate,
-    slatePale: isHC ? '#000000' : baseColors.slatePale,
-    terracotta: isHC ? '#FFFFFF' : baseColors.terracotta,
-    terracottaPale: isHC ? '#000000' : baseColors.terracottaPale,
-  };
+  const computedColors = useMemo(() => computeColors(isHC), [isHC]);
+  // Sync module-level ref for helper functions that rely on it
+  colors = computedColors;
 
   const titleEn = schema.titleEn;
   const titleNl = schema.titleNl;
