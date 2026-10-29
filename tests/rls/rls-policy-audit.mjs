@@ -1,27 +1,33 @@
-import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+#!/usr/bin/env node
+/**
+ * RLS policy audit — historical entry point.
+ *
+ * This file used to grep 11 of 41 migration files for substrings such as
+ * `alter table medications enable row level security`. It could not fail for any
+ * table introduced after migration 11, could not see a policy dropped in a later
+ * migration, and its own name (`assert.ok(migrations.includes(...))`) hid that it was
+ * a text search rather than a policy evaluation.
+ *
+ * It now runs the real auditor (scripts/ci/audit-rls-coverage.mjs), which reads every
+ * migration, tracks create-table / enable / force / policy per table, and fails on:
+ *   • a table with no RLS, or RLS not forced;
+ *   • a table with no policy and no documented service-role-only exemption;
+ *   • an exemption that no longer matches a table.
+ *
+ * Kept at this path because several documents reference it; new work should call
+ * `node scripts/ci/audit-rls-coverage.mjs` (or `pnpm run audit:rls`) directly.
+ */
 
-const migrations = [
-  '../../supabase/migrations/20260611000001_haven_v121_production_schema.sql',
-  '../../supabase/migrations/20260611000002_storage_rpc_security.sql',
-  '../../supabase/migrations/20260611000003_full_feature_domain_tables.sql',
-  '../../supabase/migrations/20260611000004_production_automation_realtime.sql',
-  '../../supabase/migrations/20260611000005_compliance_care_release_ops.sql',
-  '../../supabase/migrations/20260611000006_integrations_observability_grandchild.sql',
-  '../../supabase/migrations/20260611000007_grandchild_unique_fix.sql',
-  '../../supabase/migrations/20260611000008_phase3_safety_community_legacy.sql',
-  '../../supabase/migrations/20260611000009_hardening_idempotency_integration_status.sql',
-  '../../supabase/migrations/20260613000010_edge_authz_hardening.sql',
-  '../../supabase/migrations/20260613000011_voice_interactions_self_write.sql',
-].map((path) => readFileSync(new URL(path, import.meta.url), 'utf8')).join('\n');
+import { auditRlsCoverage } from '../../scripts/ci/audit-rls-coverage.mjs';
 
-for (const table of ['profiles', 'medications', 'scam_events', 'location_events', 'companion_memory', 'audit_log', 'neighbourhood_profiles', 'carer_visit_logs', 'care_plans', 'vendor_register', 'browser_shield_events', 'grandchild_profiles', 'wearable_devices', 'driving_events', 'legacy_accounts']) {
-  assert.ok(migrations.includes(`alter table ${table} enable row level security`), `${table} should enable RLS`);
-  assert.ok(migrations.includes(`alter table ${table} force row level security`), `${table} should force RLS`);
+const result = auditRlsCoverage();
+
+if (result.violations.length > 0) {
+  console.error(`rls-policy audit FAILED — ${result.violations.length} violation(s):`);
+  for (const violation of result.violations) console.error(`  ✗ ${violation}`);
+  process.exit(1);
 }
-assert.ok(migrations.includes('revoke select (location_precise)'), 'precise location column should be revoked');
-assert.ok(migrations.includes('document_vault_elder_only'), 'document vault storage policy exists');
-assert.ok(migrations.includes('create policy memory_elder_insert'), 'companion memory write policy exists');
-assert.ok(migrations.includes('create policy audit_log_self_select'), 'audit log read policy exists');
-assert.ok(migrations.includes('create policy voice_elder_insert'), 'voice interaction write policy exists');
-console.log('rls-policy audit passed');
+
+console.log(
+  `rls-policy audit passed — ${result.tables} tables, ${result.serviceRoleOnly} documented service-role-only`,
+);
