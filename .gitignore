@@ -48,3 +48,12 @@ pnpm-debug.log*
 # Temporary files
 /tmp/
 *.bak
+
+# Python (scripts/ci/verify-sql.sh may run in a local venv)
+.venv*/
+__pycache__/
+*.pyc
+
+# Deno (Edge Function typechecking)
+supabase/functions/node_modules/
+.supabase/deno.lock

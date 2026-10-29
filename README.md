@@ -28,10 +28,11 @@ Validation currently reports:
 | Layer | Source | Lines | Status |
 |---|---|---|---|
 | **Original SSOT** | `designdoc.md` v1.2.1 | ~6,939 | Built |
-| **P0 security hardening closure** | 12 migrations + 55 Edge Functions | ~2,900 SQL / ~5,500 TS | Built (June 2026) |
+| **P0 security hardening closure** | 12 migrations + 55 Edge Functions *at that time* (the repository now holds 43 migrations and 81 functions) | ~2,900 SQL / ~5,500 TS | Built (June 2026) |
 | **vNext Well-Rounded Patch** | `docs/implementation/VNEXT_IMPLEMENTATION_REPORT.md` | 13 migrations + 72 Edge Functions at the time of that report | Built (June 2026) |
 | **End-to-end runtime/config pass** | Supabase grants/lint fixes, Expo/EAS/env wiring, hosted smoke script, demo-data removal, token encryption/config gates | 81 Edge Functions + current migrations | Built (June 20, 2026) |
-| **Test pyramid** | `tests/edge/*.test.mjs` + `tests/rls/*.audit.mjs` + `tests/integration/live-rls.test.mjs` + static smoke tests | full local suite | Green locally |
+| **Test pyramid** | `tests/edge/*.test.mjs` + `tests/integration/live-rls.test.mjs` + static smoke tests | `node --experimental-transform-types --test tests/edge/*.test.mjs` | 220 assertions green (`corepack pnpm run test:edge`) |
+| **October 2026 remediation** | `docs/implementation/REMEDIATION_PLAN_2026-10.md` | RLS closure + audit, rate limiting, error contract, Edge Function typecheck, family-dashboard auth, voice fail-closed, CI consolidation | Executing — see that plan for the rubric per step |
 
 ### vNext patch at a glance
 
@@ -77,11 +78,19 @@ corepack pnpm test
 
 Current test coverage includes:
 
-- **suite structure validation** (`validate:suite` — 71 functions + 158 KB schema + every required file present)
+- **suite structure validation** (`validate:suite` — required files present)
+
+The suites below are illustrative, not a complete list. `corepack pnpm run test:edge` runs
+every `tests/edge/*.test.mjs` file (220 assertions at the time of writing); the runner is
+`node --test` with a glob, so adding a file cannot silently skip it.
 - **scam-engine tests** (5 NL rule patterns + scoring)
 - **screen-schema constitution tests** (UX enforcement: ≤2 nav depth, ≤4 items, emergency button, banned AI copy)
 - **Edge Function hardening checks** (markers: every protected function references the right authz helpers)
-- **authz behavioural tests** (27 assertions exercising real `_shared/authz.ts` against a mock Supabase client)
+- **authz behavioural tests** (exercising real `_shared/authz.ts` against a mock Supabase client)
+- **error contract tests** (401/403/404/409/413/422/429/500 mapping, no internal leakage)
+- **rate-limit contract tests** (identity/network buckets, spoofed headers, backend degradation)
+- **Edge Function coverage audit** (81 functions: 65 rate-limited, 16 documented exemptions)
+- **RLS coverage audit** (110 tables, forced RLS, service-role-only list justified)
 - **RLS policy static audit** (15 critical tables with forced RLS, all expected policies)
 - **Storage policy static audit** (7 buckets + 4 critical policies)
 - **data-lifecycle diff audit** (export + erasure coverage of every GDPR-relevant table)
@@ -331,7 +340,7 @@ Covers:
 ### Supabase migrations
 
 ```text
-supabase/migrations/
+supabase/migrations/                                           # 43 migrations applied in order
 ├── 20260611000001_haven_v121_production_schema.sql            # v1.2.1 canonical schema
 ├── 20260611000002_storage_rpc_security.sql                    # Storage RLS + column revoke
 ├── 20260611000003_full_feature_domain_tables.sql             # WACHT + ANKER extension

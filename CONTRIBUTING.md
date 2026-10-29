@@ -4,13 +4,22 @@ HAVEN is an elder-care, safety and health-adjacent product. Contributions must p
 
 ## Required before a pull request
 
-Run:
+Run the same gates CI runs (`corepack pnpm install --frozen-lockfile` first):
 
 ```bash
-corepack pnpm test
+corepack pnpm run typecheck        # packages + elder, grandchild, family, carer apps
+corepack pnpm run lint             # eslint, zero warnings
+corepack pnpm run test:edge        # every tests/edge/*.test.mjs file
+corepack pnpm run audit:rls        # RLS enabled + forced on every table
+corepack pnpm run build:family     # the Next dashboard must build
+corepack pnpm run verify:edge      # deno check on every Edge Function (needs Deno)
+corepack pnpm run verify:sql       # every migration parses; RLS audit (needs pglast)
 ```
 
-The test suite must pass before review.
+`corepack pnpm test` runs the first four plus the suite-structure validation.
+
+Nothing may be skipped silently: if a tool is missing, its script exits non-zero and
+says how to install it. A pull request is not reviewable until these pass.
 
 ## Engineering rules
 
@@ -54,12 +63,22 @@ Banned deceptive copy:
 
 Use the shared helpers where applicable:
 
-- `_shared/validation.ts`
-- `_shared/authz.ts`
-- `_shared/idempotency.ts`
-- `_shared/webhook.ts`
-- `_shared/sentry.ts`
-- `_shared/core.ts`
+- `_shared/validation.ts` — input validation
+- `_shared/authz.ts` — authorization; throws `AuthzError` (403)
+- `_shared/idempotency.ts` — `withIdempotency()` for anything that mutates state
+- `_shared/webhook.ts` — `verifyHmacSha256()` for vendor webhooks
+- `_shared/errors.ts` — throw errors with a `status`/`code`; never format responses ad hoc
+- `_shared/sentry.ts` — error reporting (envelope endpoint, PII scrubbed)
+- `_shared/settle.ts` — `settleQuery()` for queries that may fail
+- `_shared/ratelimit.ts` — `rateLimit(req, "fn-name")`; see `scripts/ci/function-coverage-allowlist.json` if it must not be throttled
+- `_shared/core.ts` — client factories, `json()`, `errorResponse()`
+
+A Postgrest builder is `PromiseLike` only: it has `then()` and **no** `catch()`.
+Write `await settleQuery(builder, 'table.operation')` instead of `builder.catch(...)` —
+the latter throws `TypeError: ….catch is not a function` at runtime.
+
+Every Edge Function must typecheck: `corepack pnpm run verify:edge` runs `deno check`
+across all of them. `tsc` does not cover `supabase/functions`.
 
 ## Review focus
 

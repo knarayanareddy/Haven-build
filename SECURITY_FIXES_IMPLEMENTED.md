@@ -50,7 +50,9 @@ HAVEN-build has impressive security architecture on paper (forced RLS, JWT, idem
 ### P0-4: No Rate Limiting on Any Endpoint
 **Risk:** All functions audited at the time had zero rate limiting. Attackers can brute-force JWT tokens, flood `fn-onboarding` to create fake users, exhaust function memory, enumerate elder UUIDs.
 
-**Fix:** New `ratelimit.ts` module implements in-memory sliding-window rate limiting (30 req/min/caller, identified by JWT suffix or IP). Applied to all sensitive endpoints: `fn-right-to-erasure`, `fn-onboarding`, `fn-scam-coaching`, `fn-emergency-profile`, and available via `havenHandler()` wrapper for all functions.
+**Fix:** New `ratelimit.ts` module implements fixed-window rate limiting (30 req/min per identity, plus a wider network bucket). Applied to the endpoints named here at the time.
+
+**Correction (2026-10-29).** The original text implied complete coverage; it was not. At the October review only 29 of 81 functions called a limiter, so `fn-medication-ocr`, `fn-document-analyse`, `fn-storage-signed-url`, `fn-consent-update` and `fn-audit-query` were unprotected. Coverage is now 65 rate-limited + 16 documented exemptions, enforced by `node scripts/ci/audit-function-coverage.mjs` (see `scripts/ci/function-coverage-allowlist.json`). A new function without a limiter or an exemption fails CI.
 
 ---
 

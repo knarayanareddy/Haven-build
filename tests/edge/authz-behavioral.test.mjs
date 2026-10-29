@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { linkSharedModules } from './support/shared-loader.mjs';
 
 // ---------- Deno shim ----------
 // authz.ts calls admin() from core.ts which calls Deno.env.get.
@@ -175,97 +176,12 @@ const mock = {
 
 globalThis.__HAVEN_SUPABASE_MOCK__ = mock;
 
-// ---------- Strip-types loader (TypeScript transpileModule) ----------
-const sharedDir = fileURLToPath(new URL('../../supabase/functions/_shared/', import.meta.url));
-async function loadAuthzModule() {
-  let ts;
-  try {
-    ts = await import('/tmp/haven-test-deps/node_modules/typescript/lib/typescript.js');
-    ts = ts.default ?? ts;
-  } catch {
-    try {
-      ts = await import('typescript');
-      ts = ts.default ?? ts;
-    } catch (error) {
-      throw new Error(`Unable to import TypeScript: ${error.message ?? error}. Install with: npm install --prefix /tmp/haven-test-deps typescript`, { cause: error });
-    }
-  }
-
-  function transpile(relPath, outName) {
-    const src = readFileSync(join(sharedDir, relPath), 'utf8');
-    const result = ts.transpileModule(src, {
-      compilerOptions: {
-        module: ts.ModuleKind.ESNext,
-        target: ts.ScriptTarget.ES2022,
-        esModuleInterop: true,
-        removeComments: true,
-      },
-      fileName: relPath,
-    });
-    if (result.diagnostics && result.diagnostics.length > 0) {
-      const messages = result.diagnostics.map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n'));
-      throw new Error(`TypeScript transpile of ${relPath} failed:\n${messages.join('\n')}`);
-    }
-    const compiledPath = join(stubDir, outName);
-    writeFileSync(compiledPath, result.outputText);
-    return compiledPath;
-  }
-
-  // Order matters: core must exist before authz imports it.
-  const coreSrc = readFileSync(join(sharedDir, 'core.ts'), 'utf8');
-  const coreResult = ts.transpileModule(coreSrc, {
-    compilerOptions: {
-      module: ts.ModuleKind.ESNext,
-      target: ts.ScriptTarget.ES2022,
-      esModuleInterop: true,
-      removeComments: true,
-    },
-    fileName: 'core.ts',
-  });
-  if (coreResult.diagnostics && coreResult.diagnostics.length > 0) {
-    const messages = coreResult.diagnostics.map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n'));
-    throw new Error(`TypeScript transpile of core.ts failed:\n${messages.join('\n')}`);
-  }
-  // Rewrite both the esm.sh import and the relative scam-engine import.
-  const coreRewritten = coreResult.outputText
-    .replace(/from\s+['"](?:https:\/\/esm\.sh\/|npm:)@supabase\/supabase-js(?:@2.*)?['"]/g, `from './supabase-stub.mjs'`)
-    .replace(/from\s+['"]\.\.\/\.\.\/\.\.\/packages\/scam-engine\/src\/catalog\.mjs['"]/g, `from './catalog-stub.mjs'`);
-  writeFileSync(join(stubDir, 'core.mjs'), coreRewritten);
-
-  // Provide a stub for catalog.mjs so core.ts can import it without hitting the network.
-  writeFileSync(join(stubDir, 'catalog-stub.mjs'), `
-export function alertLevelFromScore(score) {
-  if (score >= 90) return 'zwart';
-  if (score >= 70) return 'rood';
-  if (score >= 40) return 'amber';
-  return 'none';
-}
-export function scoreScamText(input) {
-  return { score: 0, level: 'none', hits: [] };
-}
-`);
-  // Rewrite the relative .ts imports in authz.ts to .mjs after transpile.
-  const authzSrc = readFileSync(join(sharedDir, 'authz.ts'), 'utf8');
-  const authzResult = ts.transpileModule(authzSrc, {
-    compilerOptions: {
-      module: ts.ModuleKind.ESNext,
-      target: ts.ScriptTarget.ES2022,
-      esModuleInterop: true,
-      removeComments: true,
-    },
-    fileName: 'authz.ts',
-  });
-  if (authzResult.diagnostics && authzResult.diagnostics.length > 0) {
-    const messages = authzResult.diagnostics.map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n'));
-    throw new Error(`TypeScript transpile of authz.ts failed:\n${messages.join('\n')}`);
-  }
-  const rewritten = authzResult.outputText.replace(/from\s+['"]\.\/core\.ts['"]/g, `from './core.mjs'`);
-  const authzCompiledPath = join(stubDir, 'authz.mjs');
-  writeFileSync(authzCompiledPath, rewritten);
-  return import(authzCompiledPath);
-}
-
-const authz = await loadAuthzModule();
+// ---------- Loader ----------
+// Transpiles _shared/*.ts into a temp dir (shared helper: tests/edge/support/shared-loader.mjs).
+// The Deno shim and the Supabase mock are installed above; the stub client reads
+// globalThis.__HAVEN_SUPABASE_MOCK__ on each createClient() call.
+const sharedDir = await linkSharedModules();
+const authz = await import(`${sharedDir}/authz.mjs`);
 
 // ---------- Tests ----------
 
