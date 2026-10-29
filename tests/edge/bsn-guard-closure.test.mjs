@@ -1,149 +1,137 @@
+// Behavioural tests for the server-side BSN guard.
+//
+// What this file replaced
+// ───────────────────────
+// The previous version of this file pasted `isValid11Proef`, `containsBsn`,
+// `scrubBsnFromLogs` and `assertNoBsnInPayload` into the test as local functions,
+// built a fake "simulatedVoiceHandler" on top of those copies, and asserted the
+// copies worked. `supabase/functions/_shared/bsn_guard.ts` was never imported. The
+// suite therefore stayed green if the real guard was broken, weakened, or deleted —
+// for the one control that stops Dutch citizen service numbers (BSN) reaching an
+// LLM, a TTS vendor or an audit log.
+//
+// These tests import the real module and call it.
+//
+// Run with: `node tests/edge/bsn-guard-closure.test.mjs`
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-// Authoritative JavaScript implementation of bsn_guard helpers for Node execution
-function isValid11Proef(digits) {
-  if (!/^\d{9}$/.test(digits)) return false;
-  const d = digits.split('').map(Number);
-  const sum = (d[0] * 9) + (d[1] * 8) + (d[2] * 7) + (d[3] * 6) + (d[4] * 5) + (d[5] * 4) + (d[6] * 3) + (d[7] * 2) - (d[8] * 1);
-  return sum % 11 === 0;
-}
+import { transpileModuleFile } from './support/shared-loader.mjs';
 
-function containsBsn(text) {
-  if (!text) return false;
-  const clean = text.replace(/[\s\-._/,\u200B-\u200D\uFEFF]/g, '');
-  if (clean.length < 9) return false;
+const MODULE = new URL('../../supabase/functions/_shared/bsn_guard.ts', import.meta.url);
 
-  for (let i = 0; i <= clean.length - 9; i++) {
-    const candidate = clean.slice(i, i + 9);
-    if (/^\d{9}$/.test(candidate)) {
-      if (isValid11Proef(candidate)) return true;
-    }
-  }
-  return false;
-}
+// bsn_guard.ts imports nothing, so it transpiles without a Deno shim or a client.
+const guard = await import(await transpileModuleFile(MODULE));
 
-function scrubBsnFromLogs(payload) {
-  if (typeof payload === 'string') {
-    return payload.replace(/([0-9][\s\-._/,\u200B-\u200D\uFEFF]*){8}[0-9]/g, (match) => {
-      const clean = match.replace(/[^0-9]/g, '');
-      if (clean.length === 9 && isValid11Proef(clean)) {
-        return '[REDACTED_BSN]';
+/** A number that satisfies the Dutch 11-proef. */
+const VALID_BSN = '123456782';
+
+const FORMATTED = [
+  ['plain digits', '123456782'],
+  ['hyphens', '123-456-782'],
+  ['spaces', '123 456 782'],
+  ['dots', '123.456.782'],
+  ['zero-width characters', '123\u200B456\u200D782'],
+  ['byte-order mark', '123\uFEFF456\uFEFF782'],
+];
+
+test('the 11-proef accepts a valid BSN and rejects an invalid one', () => {
+  assert.equal(guard.isValid11Proef(VALID_BSN), true);
+  assert.equal(guard.isValid11Proef('123456783'), false, 'fails modulo 11');
+  assert.equal(guard.isValid11Proef('12345678'), false, 'too short');
+  assert.equal(guard.isValid11Proef('1234567820'), false, 'too long');
+  assert.equal(guard.isValid11Proef('12345678a'), false, 'not numeric');
+});
+
+for (const [label, value] of FORMATTED) {
+  test(`a BSN written with ${label} is detected`, () => {
+    assert.equal(guard.containsBsn(`Hier is mijn BSN ${value} voor het dossier.`), true);
+  });
+
+  test(`a BSN written with ${label} is rejected with 422 before anything else runs`, () => {
+    const error = (() => {
+      try {
+        guard.assertNoBsnInPayload({ note_text: `Hier is mijn BSN ${value} voor het dossier.` });
+        return null;
+      } catch (err) {
+        return err;
       }
-      return match;
-    });
-  }
-  if (Array.isArray(payload)) {
-    return payload.map(scrubBsnFromLogs);
-  }
-  if (payload !== null && typeof payload === 'object') {
-    const res = {};
-    for (const [k, v] of Object.entries(payload)) {
-      res[k] = scrubBsnFromLogs(v);
+    })();
+
+    assert.ok(error, 'the guard must throw');
+    assert.equal(error.status, 422);
+    assert.equal(error.isBsnViolation, true);
+    assert.equal(error.code, 'UNPROCESSABLE_ENTITY');
+    assert.match(error.message, /Prohibited Dutch Citizen Service Number/);
+    // The rejection must not hand the BSN back to whoever sent it.
+    for (const digits of ['123', '456', '782', VALID_BSN]) {
+      assert.equal(error.message.includes(digits), false, `the message must not echo "${digits}"`);
     }
-    return res;
-  }
-  return payload;
+  });
 }
 
-function assertNoBsnInPayload(body) {
-  const serialized = typeof body === 'string' ? body : JSON.stringify(body);
-  if (containsBsn(serialized)) {
-    const err = new Error('422: Prohibited Dutch Citizen Service Number (BSN) detected. Storage, transmission, and processing of BSN is strictly prohibited.');
-    err.status = 422;
-    err.isBsnViolation = true;
-    throw err;
+test('a 9-digit number that fails the 11-proef is allowed', () => {
+  assert.equal(guard.containsBsn('Mijn willekeurige code is 123456783.'), false);
+  assert.doesNotThrow(() => guard.assertNoBsnInPayload({ transcript: 'Mijn willekeurige code is 123456783.' }));
+});
+
+test('a BSN embedded in a longer digit run is still found', () => {
+  // Sliding window: the guard must not only look at whole fields.
+  assert.equal(guard.containsBsn(`ref 991${VALID_BSN}887`), true);
+});
+
+test('a BSN nested inside an object is rejected', () => {
+  assert.throws(
+    () => guard.assertNoBsnInPayload({ elder: { note: { body: `bsn ${VALID_BSN}` } } }),
+    (err) => err.status === 422,
+  );
+});
+
+test('short or empty input is not mistaken for a BSN', () => {
+  for (const value of ['', null, undefined, '12345678', 'geen nummer hier']) {
+    assert.equal(guard.containsBsn(value), false, `must not flag ${String(value)}`);
   }
-}
+});
 
-test('BSN Guard Acceptance Tests Suite (Finding #2 Minimal Scope Complete Closure)', async () => {
-  // Mock external AI dependencies tracker
-  let openAiCalled = false;
-  let elevenLabsCalled = false;
+test('the scrubber redacts a BSN in strings, arrays and nested objects', () => {
+  const scrubbed = guard.scrubBsnFromLogs({
+    transcript: `Mijn bsn is ${VALID_BSN}.`,
+    formatted: 'bsn 123-456-782',
+    list: [`weer ${VALID_BSN}`, 'niets hier'],
+    safe_number: '123456783',
+    count: 7,
+    nothing: null,
+  });
 
-  const mockOpenAiCall = async () => { openAiCalled = true; };
-  const mockElevenLabsCall = async () => { elevenLabsCalled = true; };
+  assert.equal(scrubbed.transcript, 'Mijn bsn is [REDACTED_BSN].');
+  assert.equal(scrubbed.formatted, 'bsn [REDACTED_BSN]');
+  assert.equal(scrubbed.list[0], 'weer [REDACTED_BSN]');
+  assert.equal(scrubbed.list[1], 'niets hier');
+  assert.equal(scrubbed.safe_number, '123456783', 'a number failing the 11-proef is left alone');
+  assert.equal(scrubbed.count, 7);
+  assert.equal(scrubbed.nothing, null);
+  assert.equal(JSON.stringify(scrubbed).includes(VALID_BSN), false, 'no raw BSN may survive');
+});
 
-  // Simulated Edge Function Execution Handler
-  const simulatedVoiceHandler = async (payload) => {
-    try {
-      assertNoBsnInPayload(payload);
-      if (payload.transcript) {
-        assertNoBsnInPayload({ transcript: payload.transcript });
-      }
-      // If safe, call external AI
-      await mockOpenAiCall();
-      await mockElevenLabsCall();
-      return { status: 200, body: { success: true } };
-    } catch (err) {
-      const scrubbed = scrubBsnFromLogs(payload);
-      return {
-        status: err.status ?? 400,
-        error: err.message,
-        loggedTelemetry: scrubbed
-      };
-    }
-  };
+test('the scrubber is applied to the whole payload, not just known fields', () => {
+  const scrubbed = guard.scrubBsnFromLogs({ unexpected_field: { deep: `x ${VALID_BSN} y` } });
+  assert.equal(scrubbed.unexpected_field.deep, 'x [REDACTED_BSN] y');
+});
 
-  // ══════════════════════════════════════════════════════════════════════════════
-  // CLOSURE TEST 1 — Server blocks BSN variants with 422. Response does NOT echo BSN.
-  // ══════════════════════════════════════════════════════════════════════════════
-  const validBsnPureDigits = '123456782';
-  const validBsnHyphenDelimited = '123-456-782';
-  const validBsnSpaceDelimited = '123 456 782';
-  const validBsnDotDelimited = '123.456.782';
-  const validBsnZeroWidthUnicode = '123\u200B456\u200D782'; // Formatted with Zero-Width spaces
-
-  const testVariants = [
-    { name: 'Pure Digits', val: validBsnPureDigits },
-    { name: 'Hyphen Delimited', val: validBsnHyphenDelimited },
-    { name: 'Space Delimited', val: validBsnSpaceDelimited },
-    { name: 'Dot Delimited', val: validBsnDotDelimited },
-    { name: 'Zero-Width Obfuscated', val: validBsnZeroWidthUnicode }
+test('the guard lives in _shared so every function shares one rule set', async () => {
+  const { readFileSync } = await import('node:fs');
+  // The point of this test is not the import statement, it is that no function
+  // carries a private copy of the rule: a divergent copy is how the earlier test
+  // suite stayed green while the production guard could drift.
+  const callers = [
+    'supabase/functions/fn-voice-pipeline/index.ts',
+    'supabase/functions/fn-document-analyse/index.ts',
+    'supabase/functions/fn-carer-handover-note/index.ts',
   ];
-
-  for (const variant of testVariants) {
-    const res = await simulatedVoiceHandler({ note_text: `Hier is mijn BSN ${variant.val} voor het dossier.` });
-    assert.equal(res.status, 422, `Server must aggressively block ${variant.name} BSN variant with 422`);
-    assert.equal(res.error.includes('Prohibited Dutch Citizen Service Number'), true, 'Must return clear BSN rejection notice');
-    assert.equal(res.error.includes('123'), false, 'Response message must absolutely NOT echo any fragments of the prohibited BSN');
+  for (const caller of callers) {
+    const source = readFileSync(new URL(`../../${caller}`, import.meta.url), 'utf8');
+    assert.match(source, /from ["']\.\.\/_shared\/bsn_guard\.ts["']/, `${caller} must import the shared guard`);
+    assert.equal(/function\s+isValid11Proef/.test(source), false, `${caller} must not define its own 11-proef`);
   }
-
-  // Verify they were not called during blocked BSN requests
-  assert.equal(openAiCalled, false, 'OpenAI should not be called on blocked BSN input');
-  assert.equal(elevenLabsCalled, false, 'ElevenLabs should not be called on blocked BSN input');
-
-  // ══════════════════════════════════════════════════════════════════════════════
-  // CLOSURE TEST 2 — Voice Path: transcript containing BSN aborts BEFORE external AI calls
-  // ══════════════════════════════════════════════════════════════════════════════
-  openAiCalled = false;
-  elevenLabsCalled = false;
-
-  const voiceRes = await simulatedVoiceHandler({ elder_id: '1111-2222', transcript: `Mijn bsn is 123-456-782.` });
-
-  assert.equal(voiceRes.status, 422, 'Voice path must reject BSN transcript with 422');
-  assert.equal(openAiCalled, false, 'OpenAI companion LLM must absolutely NOT be called');
-  assert.equal(elevenLabsCalled, false, 'ElevenLabs TTS engine must absolutely NOT be called');
-
-  // ══════════════════════════════════════════════════════════════════════════════
-  // CLOSURE TEST 3 — No BSN in Logs: Scrubber removes 9-digit candidates from logged telemetry
-  // ══════════════════════════════════════════════════════════════════════════════
-  const logged = voiceRes.loggedTelemetry;
-  assert.equal(logged.transcript, 'Mijn bsn is [REDACTED_BSN].', 'Scrubber helper must deterministically replace prohibited 9-digit BSN sequences with [REDACTED_BSN]');
-  assert.equal(JSON.stringify(logged).includes('123456782'), false, 'Absolutely zero raw BSN residues permitted in Sentry or metric payload drains');
-
-  // ══════════════════════════════════════════════════════════════════════════════
-  // CLOSURE TEST 4 — False Positives: 9-digit string failing 11-proef is allowed
-  // ══════════════════════════════════════════════════════════════════════════════
-  openAiCalled = false;
-  elevenLabsCalled = false;
-
-  const falsePositiveCandidate = '123456783'; // 9 digits, fails Modulo-11 11-proef
-  assert.equal(isValid11Proef(falsePositiveCandidate), false);
-
-  const fpRes = await simulatedVoiceHandler({ elder_id: '1111-3333', transcript: `Mijn willekeurige code is ${falsePositiveCandidate}.` });
-
-  assert.equal(fpRes.status, 200, 'Server must successfully allow 9-digit string failing 11-proef (no false positive blocking)');
-  assert.equal(openAiCalled, true, 'OpenAI must be called for legitimate non-BSN conversational interactions');
-  assert.equal(elevenLabsCalled, true);
 });

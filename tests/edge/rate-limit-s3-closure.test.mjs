@@ -1,133 +1,75 @@
+// Behavioural tests for the PSD2 ingress-buffer limiter and index (Finding S3).
+//
+// What this file replaced
+// ───────────────────────
+// The previous version re-implemented `rateLimit()` and a
+// `SimulatedS3ApiGateway` inside the test, and concluded with a *simulated*
+// `EXPLAIN` output ("must show Index Scan") — a string the test itself wrote.
+// None of it touched `_shared/ratelimit.ts` or a database.
+//
+// What survives is testable: the real limiter separates the PSD2 ingress from the
+// life-safety endpoints, and the migration really creates the index the consumer
+// query depends on. The plan-shape assertion is gone rather than faked; whether
+// Postgres picks the index is a `EXPLAIN` question that belongs in the live
+// database job, not in a string comparison.
+//
+// Run with: `node tests/edge/rate-limit-s3-closure.test.mjs`
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
-const root = new URL('../../', import.meta.url).pathname;
-const migrationSql = readFileSync(join(root, 'supabase/migrations/20260615000015_psd2_ingress_buffer_index_s3_fix.sql'), 'utf8');
+import { installDenoShim, linkSharedModules } from './support/shared-loader.mjs';
 
-test('High-Risk Endpoints Rate Limiting & Buffer Indexing Suite (Finding S3 Acceptance)', async () => {
-  class RateLimitBreachError extends Error {
-    constructor(message, retryAfterSeconds) {
-      super(message);
-      this.name = 'RateLimitBreachError';
-      this.retryAfterSeconds = retryAfterSeconds;
-      this.status = 429;
-    }
-  }
+installDenoShim({ HAVEN_RATELIMIT_BACKEND: 'memory', HAVEN_INTERNAL_KEY: 'k'.repeat(40) });
+process.env.HAVEN_RATELIMIT_BACKEND = 'memory';
 
-  // Pure JS in-memory rate limit engine representing _shared/ratelimit.ts helper rules
-  const buckets = new Map();
+const shared = await linkSharedModules();
+const { rateLimit, resetRateLimitState } = await import(`${shared}/ratelimit.mjs`);
 
-  async function rateLimit(req, fnName, maxRequests = 30, windowSeconds = 60) {
-    const ip = req.headers ? req.headers.get('x-real-ip') : 'unknown';
-    const key = `${fnName}:${ip}`;
-    const now = Date.now();
-    const windowMs = windowSeconds * 1000;
+const requestFor = (ip) => new Request('https://haven.test/fn-psd2-webhook', {
+  method: 'POST',
+  headers: { 'x-real-ip': ip },
+});
 
-    const entry = buckets.get(key);
-    if (!entry || now > entry.resetAt) {
-      buckets.set(key, { count: 1, resetAt: now + windowMs });
-      return;
-    }
-
-    entry.count++;
-    if (entry.count > maxRequests) {
-      const retryAfterSec = Math.ceil((entry.resetAt - now) / 1000);
-      throw new RateLimitBreachError(`429 Too Many Requests: Rate limit exceeded for ${fnName}.`, Math.max(1, retryAfterSec));
-    }
-  }
-
-  class SimulatedS3ApiGateway {
-    constructor() {
-      this.wearable_events = [];
-      this.escalated_falls = [];
-    }
-
-    async handlerWearableEvent(req, ip) {
-      await rateLimit(req, 'fn-wearable-event', 30, 60);
-      this.wearable_events.push({ ip, time: Date.now() });
-      return { status: 200, body: { success: true } };
-    }
-
-    async handlerFallEscalation(req) {
-      // Independent isolate or scheduled cron entirely uncoupled from wearable user floods
-      await rateLimit(req, 'fn-fall-escalation', 100, 60);
-      this.escalated_falls.push({ id: crypto.randomUUID(), time: Date.now() });
-      return { status: 200, body: { ok: true } };
-    }
-
-    serializeResponse(resObject, errCaught) {
-      if (errCaught) {
-        const isRateErr = errCaught.name === 'RateLimitBreachError' || errCaught.status === 429;
-        const status = isRateErr ? 429 : 500;
-        const headers = { 'Content-Type': 'application/json' };
-        
-        if (isRateErr) {
-          headers['Retry-After'] = String(errCaught.retryAfterSeconds ?? 60);
-        }
-        return { status, headers, body: { error: errCaught.message } };
-      }
-      return { status: resObject.status, headers: { 'Content-Type': 'application/json' }, body: resObject.body };
-    }
-  }
-
-  const gateway = new SimulatedS3ApiGateway();
-  const testWearableIp = '192.168.2.50';
-
-  const makeWearableReq = async (ip) => {
-    const mockReq = { headers: new Map([['x-real-ip', ip]]) };
+async function exhaust(ip, fnName, budget) {
+  let breach = null;
+  for (let i = 0; i < budget + 1 && !breach; i += 1) {
     try {
-      const res = await gateway.handlerWearableEvent(mockReq, ip);
-      return gateway.serializeResponse(res, null);
+      await rateLimit(requestFor(ip), fnName, { maxRequests: budget, windowSeconds: 60 });
     } catch (err) {
-      return gateway.serializeResponse(null, err);
+      breach = err;
     }
-  };
-
-  // ══════════════════════════════════════════════════════════════════════════════
-  // CLOSURE TEST 2 — Normal traffic -> accepted normally (No False Positive)
-  // ══════════════════════════════════════════════════════════════════════════════
-  for (let step = 1; step <= 30; step++) {
-    const res = await makeWearableReq(testWearableIp);
-    assert.equal(res.status, 200, `Wearable request #${step} within 30 TPS cap must succeed`);
   }
+  return breach;
+}
 
-  // ══════════════════════════════════════════════════════════════════════════════
-  // CLOSURE TEST 1 — Burst above threshold on fn-wearable-event -> 429 returned
-  // ══════════════════════════════════════════════════════════════════════════════
-  const breachWearableRes = await makeWearableReq(testWearableIp); // 31st request
-  assert.equal(breachWearableRes.status, 429, '31st burst request must be actively rejected with 429');
-  assert.equal(breachWearableRes.headers['Retry-After'], '60');
-  assert.ok(breachWearableRes.body.error.includes('Rate limit exceeded'));
+test.beforeEach(() => {
+  resetRateLimitState();
+});
 
-  // ══════════════════════════════════════════════════════════════════════════════
-  // CLOSURE TEST 3 — Flood on fn-wearable-event does NOT block fn-fall-escalation
-  // ══════════════════════════════════════════════════════════════════════════════
-  const mockCronReq = { headers: new Map([['x-haven-internal-key', 'sys_key_99'], ['x-real-ip', '10.0.0.1']]) };
-  let errEscalation = null;
-  let resEscalation = null;
+test('the PSD2 webhook ingress is capped per caller', async () => {
+  const breach = await exhaust('198.51.100.7', 'fn-psd2-webhook', 5);
+  assert.ok(breach, 'traffic past the budget must be rejected');
+  assert.equal(breach.status, 429);
+  assert.match(breach.message, /fn-psd2-webhook/);
+});
 
-  try {
-    const rawRes = await gateway.handlerFallEscalation(mockCronReq);
-    resEscalation = gateway.serializeResponse(rawRes, null);
-  } catch (err) { errEscalation = err; }
+test('a PSD2 flood cannot consume the fall-escalation budget', async () => {
+  await exhaust('198.51.100.8', 'fn-psd2-webhook', 5);
 
-  assert.equal(errEscalation, null, 'Core life-safety emergency fall escalations must execute concurrently without being blocked by wearable endpoint floods');
-  assert.equal(resEscalation.status, 200);
-  assert.equal(gateway.escalated_falls.length, 1, 'Assert fall still processed completely');
+  await assert.doesNotReject(
+    () => rateLimit(requestFor('198.51.100.8'), 'fn-fall-escalation', { maxRequests: 100, windowSeconds: 60 }),
+    'life-safety escalation must have an independent budget',
+  );
+});
 
-  // ══════════════════════════════════════════════════════════════════════════════
-  // CLOSURE TEST 4 — psd2_webhook_ingress_buffer consumer scan uses index
-  // ══════════════════════════════════════════════════════════════════════════════
-  assert.ok(migrationSql.includes('CREATE INDEX'), 'Must deploy index creation DDL');
-  assert.ok(migrationSql.includes('idx_psd2_buffer_received_at'), 'Must establish idx_psd2_buffer_received_at on psd2_webhook_ingress_buffer');
-  assert.ok(migrationSql.includes('received_at ASC'), 'Index must sort received_at ascending to perfectly match Consumer LIMIT queries');
-
-  const simulatedExplainOutput = `
-    Limit  (cost=0.42..18.50 rows=500 width=128)
-      -> Index Scan using idx_psd2_buffer_received_at on psd2_webhook_ingress_buffer  (cost=0.42..3650.12 rows=100000 width=128)
-  `;
-  assert.ok(simulatedExplainOutput.includes('Index Scan'), 'EXPLAIN on psd2_webhook_ingress_buffer consumer query must show Index Scan, absolutely not Seq Scan');
-  assert.equal(simulatedExplainOutput.includes('Seq Scan'), false);
+test('the ingress-buffer migration creates the index the consumer query needs', () => {
+  const sql = readFileSync(
+    new URL('../../supabase/migrations/20260615000015_psd2_ingress_buffer_index_s3_fix.sql', import.meta.url),
+    'utf8',
+  );
+  assert.match(sql, /CREATE INDEX/i, 'the migration must create an index');
+  assert.match(sql, /idx_psd2_buffer_received_at/, 'the index must be the one the consumer query uses');
+  assert.match(sql, /received_at\s+ASC/i, 'the index order must match ORDER BY received_at ASC');
 });

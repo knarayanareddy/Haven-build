@@ -1,131 +1,98 @@
+// Behavioural tests for inbound-endpoint rate limiting (Finding R4).
+//
+// What this file replaced
+// ───────────────────────
+// The previous version defined `class RateLimitBreachError` and its own in-memory
+// bucket map inside the test, wired them into a `SimulatedS3ApiGateway`, and
+// asserted that the simulation returned 429 — while
+// `supabase/functions/_shared/ratelimit.ts` was never imported. The assertions
+// would pass with the real limiter deleted.
+//
+// These tests drive the real limiter and the real error mapper.
+//
+// Run with: `node tests/edge/rate-limit-r4-closure.test.mjs`
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-test('High-Risk Inbound Endpoints Rate Limiting Acceptance Suite (Finding R4 Complete Closure)', async () => {
-  class RateLimitBreachError extends Error {
-    constructor(message, retryAfterSeconds) {
-      super(message);
-      this.name = 'RateLimitBreachError';
-      this.retryAfterSeconds = retryAfterSeconds;
-      this.status = 429;
-    }
-  }
+import { installDenoShim, linkSharedModules } from './support/shared-loader.mjs';
 
-  // Authoritative pure JS rate limit implementation for Node runner
-  const buckets = new Map();
+installDenoShim({ HAVEN_RATELIMIT_BACKEND: 'memory', HAVEN_INTERNAL_KEY: 'k'.repeat(40) });
+process.env.HAVEN_RATELIMIT_BACKEND = 'memory';
 
-  async function rateLimit(req, fnName, maxRequests = 30, windowSeconds = 60) {
-    const ip = req.headers ? req.headers.get('x-real-ip') : 'unknown';
-    const key = `${fnName}:${ip}`;
-    const now = Date.now();
-    const windowMs = windowSeconds * 1000;
+const shared = await linkSharedModules();
+const { rateLimit, resetRateLimitState } = await import(`${shared}/ratelimit.mjs`);
+const { errorResponse } = await import(`${shared}/core.mjs`);
 
-    const entry = buckets.get(key);
-    if (!entry || now > entry.resetAt) {
-      buckets.set(key, { count: 1, resetAt: now + windowMs });
-      return;
-    }
+const requestFor = (ip) => new Request('https://haven.test/fn-wearable-event', {
+  method: 'POST',
+  headers: { 'x-real-ip': ip },
+});
 
-    entry.count++;
-    if (entry.count > maxRequests) {
-      const retryAfterSec = Math.ceil((entry.resetAt - now) / 1000);
-      throw new RateLimitBreachError(`429 Too Many Requests: Rate limit exceeded for ${fnName}.`, Math.max(1, retryAfterSec));
-    }
-  }
-
-  class SimulatedApiGateway {
-    constructor() {
-      this.health_logs = [];
-      this.escalated_falls = [];
-    }
-
-    async handlerHealthLog(req, userKey) {
-      await rateLimit(req, 'fn-health-log', 30, 60);
-      this.health_logs.push({ userKey, time: Date.now() });
-      return { status: 200, body: { success: true } };
-    }
-
-    async handlerFallEscalation(req) {
-      await rateLimit(req, 'fn-fall-escalation', 100, 60);
-      this.escalated_falls.push({ id: crypto.randomUUID(), time: Date.now() });
-      return { status: 200, body: { ok: true } };
-    }
-
-    serializeResponse(resObject, errCaught) {
-      if (errCaught) {
-        const isRateErr = errCaught.name === 'RateLimitBreachError' || errCaught.status === 429;
-        const status = isRateErr ? 429 : 500;
-        const headers = { 'Content-Type': 'application/json' };
-        
-        if (isRateErr) {
-          headers['Retry-After'] = String(errCaught.retryAfterSeconds ?? 60);
-        }
-        return { status, headers, body: { error: errCaught.message } };
-      }
-      return { status: resObject.status, headers: { 'Content-Type': 'application/json' }, body: resObject.body };
-    }
-  }
-
-  const gateway = new SimulatedApiGateway();
-  const testFloodIp = '192.168.1.99';
-  
-  const makeLogReq = async (ip) => {
-    const mockReq = { headers: new Map([['x-real-ip', ip]]) };
+/** Runs the real limiter `times` times, returning the first breach (or null). */
+async function consume(ip, fnName, times, options) {
+  let breach = null;
+  for (let i = 0; i < times && !breach; i += 1) {
     try {
-      const res = await gateway.handlerHealthLog(mockReq, ip);
-      return gateway.serializeResponse(res, null);
+      await rateLimit(requestFor(ip), fnName, options);
     } catch (err) {
-      return gateway.serializeResponse(null, err);
+      breach = err;
     }
-  };
-
-  // ══════════════════════════════════════════════════════════════════════════════
-  // CLOSURE TEST 2 — Requests within limit -> accepted normally (No False Positives)
-  // ══════════════════════════════════════════════════════════════════════════════
-  for (let i = 1; i <= 30; i++) {
-    const res = await makeLogReq(testFloodIp);
-    assert.equal(res.status, 200, `Request #${i} within permitted 30 TPS window must succeed`);
   }
+  return breach;
+}
 
-  // ══════════════════════════════════════════════════════════════════════════════
-  // CLOSURE TEST 1 — Burst above threshold -> 429 with Retry-After header
-  // ══════════════════════════════════════════════════════════════════════════════
-  const breachRes = await makeLogReq(testFloodIp); 
-  
-  assert.equal(breachRes.status, 429, '31st burst request must sit aggressively rejected with 429');
-  assert.equal(breachRes.headers['Retry-After'], '60', 'Must return exact canonical Retry-After header');
-  assert.ok(breachRes.body.error.includes('Rate limit exceeded'), 'Must return concise clear error copy');
+test.beforeEach(() => {
+  resetRateLimitState();
+});
 
-  // ══════════════════════════════════════════════════════════════════════════════
-  // CLOSURE TEST 3 — fn-fall-escalation still processes after flood on fn-health-log
-  // ══════════════════════════════════════════════════════════════════════════════
-  const mockCronReq = { headers: new Map([['x-haven-internal-key', 'sys_cron_key'], ['x-real-ip', '10.0.0.1']]) };
-  let errEscalation = null;
-  let resEscalation = null;
+test('a burst past the budget is rejected by the real limiter', async () => {
+  const ip = '203.0.113.10';
+  assert.equal(await consume(ip, 'fn-wearable-event', 30, { maxRequests: 30, windowSeconds: 60 }), null);
 
-  try {
-    const rawRes = await gateway.handlerFallEscalation(mockCronReq);
-    resEscalation = gateway.serializeResponse(rawRes, null);
-  } catch (err) { errEscalation = err; }
+  const breach = await consume(ip, 'fn-wearable-event', 1, { maxRequests: 30, windowSeconds: 60 });
+  assert.ok(breach, 'the 31st request must be rejected');
+  assert.equal(breach.name, 'RateLimitBreachError');
+  assert.equal(breach.status, 429);
+  assert.ok(breach.retryAfterSeconds >= 1, 'the caller must be told when to retry');
+  assert.match(breach.message, /Rate limit exceeded for fn-wearable-event/);
+});
 
-  assert.equal(errEscalation, null, 'Core life-safety emergency crons must remain 100% isolated and unaffected by inbound IoT floods');
-  assert.equal(resEscalation.status, 200);
-  assert.equal(gateway.escalated_falls.length, 1);
+test('the 429 reaches the client with a Retry-After header and the canonical body', async () => {
+  const ip = '203.0.113.11';
+  await consume(ip, 'fn-wearable-event', 3, { maxRequests: 2, windowSeconds: 60 });
+  const breach = await consume(ip, 'fn-wearable-event', 1, { maxRequests: 2, windowSeconds: 60 });
 
-  // ══════════════════════════════════════════════════════════════════════════════
-  // CLOSURE TEST 4 — Rate limit counter resets after window expires
-  // ══════════════════════════════════════════════════════════════════════════════
-  const testWindowIp = '10.0.0.5';
-  
-  for (let k = 1; k <= 30; k++) await makeLogReq(testWindowIp);
-  assert.equal((await makeLogReq(testWindowIp)).status, 429);
+  const response = errorResponse(breach, requestFor(ip));
+  assert.equal(response.status, 429);
+  assert.ok(Number(response.headers.get('Retry-After')) >= 1);
+  assert.equal(response.headers.get('Cache-Control'), 'no-store');
 
-  // Force reset At into the past to simulate window elapsing
-  const activeBucket = buckets.get(`fn-health-log:${testWindowIp}`);
-  if (activeBucket) {
-    activeBucket.resetAt = Date.now() - 1000;
-  }
+  const body = await response.json();
+  assert.equal(body.error_code, 'TOO_MANY_REQUESTS');
+  assert.match(body.error, /Too many requests/i);
+});
 
-  const resReset = await makeLogReq(testWindowIp);
-  assert.equal(resReset.status, 200, 'Must cleanly permit requests once sliding rate window expires');
+test('a life-safety cron is not affected by an inbound device flood', async () => {
+  // Different function name → different bucket. This is the property the old
+  // simulation was trying to demonstrate; it is a property of buildRateLimitKey().
+  const floodIp = '203.0.113.12';
+  await consume(floodIp, 'fn-wearable-event', 40, { maxRequests: 30, windowSeconds: 60 });
+
+  await assert.doesNotReject(
+    () => rateLimit(requestFor('203.0.113.12'), 'fn-fall-escalation', { maxRequests: 100, windowSeconds: 60 }),
+    'an unrelated function must keep its own budget',
+  );
+});
+
+test('an in-flight bucket resets once the window passes', async () => {
+  const ip = '203.0.113.13';
+  const breach = await consume(ip, 'fn-medication-log', 3, { maxRequests: 2, windowSeconds: 1 });
+  assert.ok(breach, 'budget exhausted');
+
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  await assert.doesNotReject(
+    () => rateLimit(requestFor(ip), 'fn-medication-log', { maxRequests: 2, windowSeconds: 1 }),
+    'the window must reopen',
+  );
 });

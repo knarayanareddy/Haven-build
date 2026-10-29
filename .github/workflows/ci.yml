@@ -78,6 +78,12 @@ jobs:
       - name: Edge Function contract tests
         run: corepack pnpm run test:edge
 
+      # Half the edge suite still asserts on source text; this keeps that number
+      # from growing and fails when an allowlisted file is converted without the
+      # entry being removed.
+      - name: Test-substance audit
+        run: corepack pnpm run audit:tests
+
       - name: Every function is rate-limited or exempt
         run: corepack pnpm run audit:functions
 

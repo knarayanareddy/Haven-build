@@ -503,23 +503,90 @@ same files were `.includes()` assertions that pass for the broken code too:
 
 ### Still open after this sweep
 
-- **~40 of 79 `tests/edge` files assert on source text, not behaviour**
-  (`readFileSync` + `.includes`, no `await import`). They pass for code that is
-  broken, and S2 and S4 above are precisely the kind of defect they cannot catch.
-  Converting all of them is a dedicated change, not a sweep; the two highest-risk
-  subjects (medication confirmation ordering, retention-sweeper health) were
-  converted here. `health-check-observability-closure.test.mjs` demonstrated the
-  failure mode: it asserted the literal comment text `Critical pg_cron Jobs Last
-  Run Time`, so rewording a comment broke the "test" while the check itself was
-  wrong.
-- **`delegateCache` in `_shared/authz.ts` is per-isolate.** The comment claims it
-  "compresses horizontal auth sharding lag exploit windows from 15–30 s down to
-  ≤10 s", but a `Map` cannot span isolates, so a revocation is only reflected in
-  the isolate that served it; the worst case there is the 10 s TTL, and any other
-  isolate is bounded only by its own TTL. It is a micro-optimisation, not a security
-  control, and should be described as one (or removed) — not a functional bug, so
-  it is flagged rather than changed.
-- **No live Postgres in this environment.** `20261029000003` is validated
-  statically (`pglast` parses all 44 migrations) and by the RLS audit; the view's
-  `cron.job_run_details` join only proves itself against a real database, which is
-  the `database` job in `ci.yml`.
+- **55 of 79 `tests/edge` files still assert on source text** (down from 59, and now
+  measured — see §9). They are enumerated in `scripts/ci/test-substance-allowlist.json`
+  with the reason each one is hard to convert, and the audit stops any new one appearing.
+
+---
+
+## 9. Third pass — the two flagged items (2026-10-29)
+
+### 9.1 `delegateCache`: removed, not documented
+
+The second sweep flagged this rather than changing it. On review that was the wrong
+call: the code was not merely suboptimal, its comment asserted a security property
+that did not exist, and four documents repeated the claim.
+
+| Claim that was made | Why it was false |
+|---|---|
+| "Compresses sharding-lag exploit windows from 15–30 s down to ≤10 s" | The `Map` is module-scoped, so it exists in one isolate. `invalidateRelationshipCache()` — called from `fn-consent-update` — clears the entry in whichever isolate served the consent update. The other N−1 isolates keep serving the revoked delegate until their own TTL expires. Nothing is compressed. |
+| "Compensating control for cross-isolate revocation" | A cache hit and a cache miss end in the same authorisation decision; the cache could only make revocation *later* (by up to 10 s), never earlier. It was a latency optimisation wearing a security label, which is worse than no optimisation because it stops people looking. |
+| `SELECT invalidate_relationship_cache_rpc(...)` in the on-call runbook | No such function exists in any migration. A DBA following `docs/production/TECHNICAL_RUNBOOK.md` during an incident would have hit `function does not exist`. |
+
+Removed:
+`_shared/authz.ts` (`delegateCache`, `invalidateRelationshipCache`, and the
+`isMockTest` branch that existed only to make the cache test-friendly),
+`fn-consent-update` (the invalidation call and a now-redundant pre-read),
+`tests/edge/auth-sharding-lag-s4-closure.test.mjs` (see 9.2).
+
+Also removed while in the file: `assertSelfOrVerifiedGuardian` branched on a
+`__mockPoa` property of the admin client, and
+`_shared/regulatory_escalation.ts` read a `__mockDns` property off the Supabase
+client. Nothing ever set either, so the only effect was that the real query and the
+real resolver were never exercised. Both now run the production path; the tests stub
+`Deno.resolveDns` instead.
+
+Docs corrected (claim replaced with what the code now does, history annotated where
+the line is historical): `CONTINUATION_SPEC.md`, `docs/CONTINUATION_PROMPT.md`,
+`docs/execution-agent/CONTINUATION_SPEC.md`,
+`docs/execution-agent/EDGE_FUNCTIONS_SPEC.md`,
+`docs/execution-agent/REMEDIATION_HISTORY.md`,
+`docs/execution-agent/SPRINT_1_ROADMAP_AND_RUNBOOK.md`,
+`docs/execution-agent/TESTING_AND_VERIFICATION.md`,
+`docs/production/TECHNICAL_RUNBOOK.md`,
+`docs/runbooks/DISASTER_RECOVERY_PLAN.md`,
+`docs/security/ROUND6_SECURITY_REVIEW.md`.
+
+New behaviour, pinned by `tests/edge/delegate-revocation-behavioral.test.mjs` (8 tests):
+a withdrawal is effective on the very next check in the same process with no
+invalidation call, every check reads the database, and a database error denies.
+
+### 9.2 Test substance: measured, ratcheted, and six suites converted
+
+The second sweep flagged ~40 files as asserting on source text. The real number,
+measured by the new audit, was **59 of 78** — and several of the worst did not merely
+grep: they defined a `class SimulatedAuthEngine` / `SimulatedRegulatoryEngine` /
+`HardenedAuthzEngine` that *re-implemented* the production logic inside the test and
+then asserted the re-implementation worked. `bsn-guard-closure.test.mjs` carried its
+own copy of the 11-proef; `rate-limit-s3-closure.test.mjs` ended with an assertion
+about an `EXPLAIN` string the test itself had written.
+
+Converted to behavioural (each now imports and drives the real module):
+
+| File | Now exercises |
+|---|---|
+| `bsn-guard-closure.test.mjs` | `_shared/bsn_guard.ts` — 11-proef, formatting and zero-width obfuscation, scrubber over nested payloads (20 tests) |
+| `dns-rebinding-closure.test.mjs` | `executeRegulatoryEscalation` + `assertPublicHttpsUrl` against a stub resolver and a recording fetch: private IP, IMDS, multi-answer, credentials, scheme (10 tests) |
+| `authz-soft-fail-closure.test.mjs` | `assertElderOrFamilyCan` deny paths and the `AUTHZ_DENY_GATE` audit row (6 tests) |
+| `rate-limit-r4-closure.test.mjs` | real `rateLimit()` to a 429, and `errorResponse()` emitting `Retry-After` (4 tests) |
+| `rate-limit-s3-closure.test.mjs` | real limiter per-function budgets + the migration's index DDL (3 tests) |
+| `auth-sharding-lag-s4-closure.test.mjs` | deleted; replaced by `delegate-revocation-behavioral.test.mjs` (8 tests) |
+| `health-check-observability-closure.test.mjs` | deleted; its five-check assertion folded into `health-check-cron-honesty.test.mjs`, which drives the real handler (8 tests) |
+
+Converting `health-check-observability-closure` immediately found **S7** below — which
+is the argument for the whole exercise: the static version had been green for months
+while asserting the presence of a comment.
+
+| # | Defect | Why it matters | Fix |
+|---|---|---|---|
+| S7 | `fn-health-check` returned **500** for every failure, including the `requireInternalAccess` rejection, because it caught the error and answered with its own flat 500 instead of the shared `errorResponse()`. | An unauthenticated caller was told the server had broken rather than that it was forbidden, and the endpoint was the one function bypassing the error contract the other 80 use. Scrapers alert on 500s; 403s are noise. | `errorResponse(error, req)`; the 403 `FORBIDDEN` mapping comes from `_shared/errors.ts`. |
+
+New gate: `scripts/ci/audit-test-substance.mjs` (wired as `pnpm audit:tests`, chained
+into `pnpm test`, and a step in `ci.yml`). It classifies every file in `tests/edge` and
+fails when a new static-only file appears, when an allowlisted file becomes
+behavioural without the entry being removed, or when an entry no longer exists. The
+allowlist (`scripts/ci/test-substance-allowlist.json`) records 55 files with the reason
+each is hard to convert, and may only shrink.
+
+Current state of the suite: **79 files · 24 behavioural · 55 static-only
+(allowlisted)**.

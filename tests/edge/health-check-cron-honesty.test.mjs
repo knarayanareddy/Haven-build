@@ -184,6 +184,34 @@ test('pg_cron absent is not_applicable, not a silent pass', async () => {
   assert.match(body.checks.pg_cron_sweeper.error, /pg_cron not installed/);
 });
 
+test('the response reports every check the endpoint claims to perform', async () => {
+  const handler = await loadHandler(createMockDb({
+    row: { jobname: 'haven-database-retention-r5', status: 'succeeded', start_time: hoursAgo(3), end_time: hoursAgo(3) },
+  }));
+  const body = await (await invoke(handler)).json();
+
+  // These five keys are what the old static suite asserted by grepping for the
+  // comment above each check. Asserting the shape of the real response is the
+  // same claim, and this one fails when a check is removed.
+  assert.deepEqual(
+    Object.keys(body.checks).sort(),
+    ['database', 'elevenlabs', 'openai', 'pg_cron_sweeper', 'redis'],
+  );
+  for (const [name, check] of Object.entries(body.checks)) {
+    assert.equal(typeof check.ok, 'boolean', `${name} must report a boolean health`);
+  }
+  assert.equal(typeof body.duration_ms, 'number');
+});
+
+test('the endpoint refuses a request without the internal key', async () => {
+  const handler = await loadHandler(createMockDb({ row: null }));
+  const response = await handler(new Request('https://example.test/fn-health-check', { method: 'POST' }));
+  assert.equal(response.status, 403, 'health detail is internal, not public');
+
+  const body = await response.json();
+  assert.equal(body.error_code, 'FORBIDDEN');
+});
+
 test('the check reads the real cron run history, never perf_metrics', () => {
   // Comments legitimately quote the old code, so only executable text counts.
   const source = readFileSync(SOURCE, 'utf8')

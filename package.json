@@ -9,7 +9,7 @@
     "test:edge": "node --experimental-transform-types --test tests/edge/*.test.mjs",
     "test:e2e": "node tests/e2e/iphone-suite-smoke.test.mjs",
     "test:integration:live": "node tests/integration/live-rls.test.mjs",
-    "test": "corepack pnpm run validate:suite && corepack pnpm run typecheck && corepack pnpm run lint && corepack pnpm run test:edge && corepack pnpm run test:rls && corepack pnpm run audit:functions && corepack pnpm run audit:docs",
+    "test": "corepack pnpm run validate:suite && corepack pnpm run typecheck && corepack pnpm run lint && corepack pnpm run test:edge && corepack pnpm run test:rls && corepack pnpm run audit:functions && corepack pnpm run audit:tests && corepack pnpm run audit:docs",
     "preview:iphone": "python3 -m http.server 4173 --directory apps/iphone-suite",
     "preview:family": "python3 -m http.server 4174 --directory apps/family-dashboard",
     "mock:ai": "node scripts/mock-ai-server.mjs",
@@ -40,7 +40,8 @@
     "audit:rls": "node scripts/ci/audit-rls-coverage.mjs",
     "test:rls": "node tests/rls/rls-policy-audit.mjs && node tests/rls/storage-policy-audit.mjs",
     "audit:functions": "node scripts/ci/audit-function-coverage.mjs",
-    "audit:docs": "node scripts/ci/audit-docs-truth.mjs"
+    "audit:docs": "node scripts/ci/audit-docs-truth.mjs",
+    "audit:tests": "node scripts/ci/audit-test-substance.mjs"
   },
   "workspaces": [
     "apps/*",
