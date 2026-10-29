@@ -1,4 +1,5 @@
-import { admin, corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage } from "../_shared/core.ts";
+import { rateLimit } from "../_shared/ratelimit.ts";
+import { admin, corsHeaders, json, readJsonBody, recordMetric, errorResponse } from "../_shared/core.ts";
 import { assertActorMatches, assertElderOrFamilyCan, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 
@@ -19,6 +20,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
   try {
+    await rateLimit(req, "fn-medication-ocr");
     const body = await readJsonBody(req) as Record<string, unknown>;
     validateBody(body, { elder_id: "uuid", uploaded_by_id: "uuid", storage_path: "string" }, { allowUnknown: true });
     const userId = await getJwtUserId(req);
@@ -93,6 +95,6 @@ Deno.serve(async (req) => {
     return json({ success: true, job_id: job.id, medication_id: med.id, review_required: false, extracted: parsed, uploaded_by_id: userId });
   } catch (e) {
     await recordMetric("fn-medication-ocr", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

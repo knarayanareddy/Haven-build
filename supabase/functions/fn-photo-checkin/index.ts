@@ -1,4 +1,4 @@
-import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
 import { assertElderOrFamilyCan, assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { assertMaxLength, assertNoBsnText, MAX_STRING_FIELD, validateBody } from "../_shared/validation.ts";
 import { withIdempotency } from "../_shared/idempotency.ts";
@@ -83,6 +83,6 @@ Deno.serve(async (req) => {
     return json(result.body, result.status ?? 200, req);
   } catch (e) {
     await recordMetric("fn-photo-checkin", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

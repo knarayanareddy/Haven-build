@@ -1,4 +1,5 @@
-import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { rateLimit } from "../_shared/ratelimit.ts";
+import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
 import { assertActorMatches, assertElderOrFamilyCan, assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 
@@ -6,6 +7,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
   try {
+    await rateLimit(req, "fn-telehealth-transport");
     const body = await readJsonBody(req) as Record<string, unknown>;
     validateBody(body, { elder_id: 'uuid', action: 'string' }, { allowUnknown: true });
     const userId = await getJwtUserId(req);
@@ -27,7 +29,7 @@ Deno.serve(async (req) => {
       const { data, error } = await userClient(req).from("transport_requests").insert({ elder_id: body.elder_id, appointment_id: body.appointment_id, requested_by_id: userId, pickup_label: body.pickup_label, destination_label: body.destination_label, pickup_time: body.pickup_time, status: "requested" }).select().single();
       if (error) throw error;
       const { data: family } = await admin().from("family_relationships").select("family_member_id").eq("elder_id", body.elder_id).eq("elder_consented", true).eq("is_active", true);
-      await Promise.all((family ?? []).map((f) => dispatchNotification({ recipient_id: f.family_member_id, elder_id: body.elder_id, notification_type: "systeem", title_nl: "Vervoer gevraagd", title_en: "Transport requested", body_nl: "Er is hulp met vervoer gevraagd voor een afspraak.", body_en: "Help with transport was requested for an appointment.", data: { transport_request_id: data.id } })));
+      await Promise.all((family ?? []).map((f: { family_member_id: string }) => dispatchNotification({ recipient_id: f.family_member_id, elder_id: String(body.elder_id), notification_type: "systeem", title_nl: "Vervoer gevraagd", title_en: "Transport requested", body_nl: "Er is hulp met vervoer gevraagd voor een afspraak.", body_en: "Help with transport was requested for an appointment.", data: { transport_request_id: data.id } })));
       await recordMetric("fn-telehealth-transport", started, "success");
       return json({ success: true, transport_request_id: data.id, requested_by_id: userId });
     }
@@ -44,6 +46,6 @@ Deno.serve(async (req) => {
     throw new Error("Unsupported telehealth or transport action");
   } catch (e) {
     await recordMetric("fn-telehealth-transport", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

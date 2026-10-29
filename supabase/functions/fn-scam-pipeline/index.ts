@@ -1,4 +1,5 @@
-import { admin, corsHeaders, dispatchNotification, json, recordMetric, readJsonBody, safeErrorMessage, scoreScam, sha256, userClient } from "../_shared/core.ts";
+import { rateLimit } from "../_shared/ratelimit.ts";
+import { admin, corsHeaders, dispatchNotification, json, recordMetric, readJsonBody, scoreScam, sha256, userClient, errorResponse } from "../_shared/core.ts";
 import { getJwtUserId, assertElderOrFamilyCan } from "../_shared/authz.ts";
 import { withIdempotency } from "../_shared/idempotency.ts";
 import { assertNoBsnText, assertMaxLength, MAX_STRING_FIELD, validateBody } from "../_shared/validation.ts";
@@ -9,6 +10,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
   try {
+    await rateLimit(req, "fn-scam-pipeline");
     const body = await readJsonBody(req) as Record<string, unknown>;
     validateBody(body, { elder_id: 'uuid', channel: 'string', signal_reference: 'string', raw_content: 'string' }, { allowUnknown: true });
     assertNoBsnText(body.raw_content);
@@ -59,6 +61,6 @@ Deno.serve(async (req) => {
   } catch (e) {
     await captureException(e, { fn: 'fn-scam-pipeline' });
     await recordMetric("fn-scam-pipeline", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

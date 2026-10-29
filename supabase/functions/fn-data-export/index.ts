@@ -1,3 +1,4 @@
+import { settleQuery } from "../_shared/settle.ts";
 import { admin, corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
 import { getJwtUserId, assertSelfOrVerifiedGuardian } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
@@ -16,7 +17,7 @@ Deno.serve(async (req: Request) => {
     const { data, error } = await db.rpc("export_elder_data", { p_elder_id: userId });
     if (error) throw error;
 
-    await admin().from("audit_log").insert({
+    await settleQuery(admin().from("audit_log").insert({
       actor_id: userId,
       actor_role: "elder",
       action: "GDPR_DATA_EXPORT",
@@ -24,7 +25,7 @@ Deno.serve(async (req: Request) => {
       record_id: userId,
       elder_id: userId,
       extra: { channel: "api_export", timestamp: new Date().toISOString() },
-    }).catch(() => undefined);
+    }), "audit_log");
 
     await recordMetric("fn-data-export", started, "success");
 

@@ -1,4 +1,4 @@
-import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
 import { assertActorMatches, assertElderOrFamilyCan, getJwtUserId, getProfileRole } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
@@ -43,8 +43,8 @@ Deno.serve(async (req) => {
     const recipient = userId === body.elder_id ? body.recipient_id : body.elder_id;
     if (recipient) {
       await dispatchNotification({
-        recipient_id: recipient,
-        elder_id: body.elder_id,
+        recipient_id: String(recipient),
+        elder_id: String(body.elder_id),
         notification_type: "familiebericht",
         title_nl: "Nieuw familiebericht",
         title_en: "New family message",
@@ -58,6 +58,6 @@ Deno.serve(async (req) => {
     return json({ success: true, message_id: msg.id, sender_id: userId, sender_role: senderRole });
   } catch (e) {
     await recordMetric("fn-family-message-send", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

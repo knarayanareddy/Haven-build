@@ -1,4 +1,4 @@
-import { admin, corsHeaders, dispatchNotification, json, recordMetric, safeErrorMessage } from "../_shared/core.ts";
+import { admin, corsHeaders, dispatchNotification, json, recordMetric, errorResponse } from "../_shared/core.ts";
 import { requireInternalAccess } from "../_shared/internal.ts";
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
@@ -20,6 +20,6 @@ Deno.serve(async (req) => {
     return json({ success: true, escalated });
   } catch (e) {
     await recordMetric("fn-medication-escalation", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

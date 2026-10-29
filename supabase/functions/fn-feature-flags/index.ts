@@ -1,4 +1,5 @@
-import { corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { rateLimit } from "../_shared/ratelimit.ts";
+import { corsHeaders, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
 import { assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 
@@ -6,6 +7,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
   try {
+    await rateLimit(req, "fn-feature-flags");
     const body = await readJsonBody(req) as Record<string, unknown>;
     validateBody(body, { elder_id: 'uuid' }, { allowUnknown: true });
     const userId = await getJwtUserId(req);
@@ -24,6 +26,6 @@ Deno.serve(async (req) => {
     return json({ success: true, flags: entries });
   } catch (e) {
     await recordMetric("fn-feature-flags", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

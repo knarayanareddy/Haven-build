@@ -1,4 +1,5 @@
-import { admin, corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, sha256, userClient } from "../_shared/core.ts";
+import { rateLimit } from "../_shared/ratelimit.ts";
+import { admin, corsHeaders, json, readJsonBody, recordMetric, sha256, userClient, errorResponse } from "../_shared/core.ts";
 import { assertElderOrFamilyCan, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { withIdempotency } from "../_shared/idempotency.ts";
@@ -7,6 +8,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
   try {
+    await rateLimit(req, "fn-video-call-join-token");
     const body = await readJsonBody(req) as Record<string, unknown>;
     validateBody(body, { video_call_session_id: "uuid" }, { allowUnknown: true });
     const userId = await getJwtUserId(req);
@@ -36,6 +38,6 @@ Deno.serve(async (req) => {
     return json(result.body, result.status ?? 200, req);
   } catch (e) {
     await recordMetric("fn-video-call-join-token", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

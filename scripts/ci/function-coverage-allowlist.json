@@ -1,0 +1,21 @@
+{
+  "$comment": "Edge Functions that intentionally call no limiter. Every entry needs a reason a reviewer can check, and stale entries fail the audit. See scripts/ci/audit-function-coverage.mjs.",
+  "exempt": {
+    "fn-banking-stream-consumer": "Internal-key gated streaming consumer invoked by the banking worker; it drains a queue, so throttling would drop financial events.",
+    "fn-buurt-events-ingest": "Internal-key gated batch ingest from the neighbourhood data partner.",
+    "fn-care-system-sync": "Internal-key gated sync from the care system (EHR).",
+    "fn-community-events-ingest": "Internal-key gated batch ingest from the community calendar partner.",
+    "fn-daily-checkin-scheduler": "pg_cron scheduler. No user traffic reaches it; throttling would silently skip scheduled check-ins.",
+    "fn-daily-reminder-scheduler": "pg_cron scheduler. Throttling would silently skip medication reminders.",
+    "fn-daily-status-digest": "pg_cron digest job that emails the daily status summary; no user traffic reaches it and throttling would delay the digest.",
+    "fn-health-check": "Internal-key gated readiness probe. Must never be throttled, or the platform will mark a healthy function down.",
+    "fn-medication-catalog-sync": "Internal-key gated catalog sync.",
+    "fn-medication-escalation": "pg_cron escalation job. Throttling would delay a missed-medication escalation.",
+    "fn-medication-refill": "pg_cron job that raises medication refill reminders; throttling would drop a refill request.",
+    "fn-medmij-fhir-import": "Internal-key gated MedMij import.",
+    "fn-quiet-day-detector": "pg_cron job that suppresses non-urgent notifications on quiet days; no user traffic reaches it.",
+    "fn-transaction-intercept": "PSD2 webhook. HMAC is verified before any handling and the ingress buffer (fn-banking-ingress-buffer) owns throttling; adding a second limiter here would reject legitimate bank retries.",
+    "fn-vital-threshold-check": "pg_cron job that evaluates vital-sign thresholds and escalates; throttling would delay an escalation.",
+    "fn-weekly-digest": "pg_cron job that builds the weekly family digest; no user traffic reaches it and throttling would skip a week."
+  }
+}

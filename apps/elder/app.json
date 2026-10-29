@@ -5,8 +5,8 @@
     "scheme": "haven",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "ios": { 
-      "bundleIdentifier": "nl.haven.elder", 
+    "ios": {
+      "bundleIdentifier": "nl.haven.elder",
       "supportsTablet": true,
       "infoPlist": {
         "UISupportsDocumentBrowser": true,
@@ -17,7 +17,12 @@
         "NSLocationAlwaysAndWhenInUseUsageDescription": "HAVEN can keep safety location monitoring active in the background when you enable it.",
         "NSCalendarsUsageDescription": "HAVEN can sync medical appointments to your calendar when you enable agenda sync.",
         "NSCalendarsFullAccessUsageDescription": "HAVEN can sync medical appointments to your calendar when you enable agenda sync.",
-        "UIBackgroundModes": ["audio", "fetch", "location", "remote-notification"]
+        "UIBackgroundModes": [
+          "audio",
+          "fetch",
+          "location",
+          "remote-notification"
+        ]
       }
     },
     "web": {
@@ -39,30 +44,46 @@
         "android.permission.WRITE_CALENDAR",
         "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
         "android.permission.SCHEDULE_EXACT_ALARM"
-      ]
+      ],
+      "softwareKeyboardLayoutMode": "resize"
     },
     "plugins": [
-      ["expo-camera", {
-        "cameraPermission": "Allow HAVEN to use the camera for medication labels and care documents."
-      }],
-      ["expo-audio", {
-        "microphonePermission": "Allow HAVEN to use the microphone for voice help and medication confirmations."
-      }],
-      ["expo-location", {
-        "locationAlwaysAndWhenInUsePermission": "Allow HAVEN to keep safety location monitoring active when enabled.",
-        "locationAlwaysPermission": "Allow HAVEN to keep safety location monitoring active when enabled.",
-        "locationWhenInUsePermission": "Allow HAVEN to use your location for fall response and safe-zone support.",
-        "isIosBackgroundLocationEnabled": true,
-        "isAndroidBackgroundLocationEnabled": true,
-        "isAndroidForegroundServiceEnabled": true
-      }],
-      ["expo-notifications", {
-        "color": "#1A2B4C",
-        "defaultChannel": "haven-safety"
-      }],
-      ["expo-calendar", {
-        "calendarPermission": "Allow HAVEN to sync medical appointments with your calendar."
-      }],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow HAVEN to use the camera for medication labels and care documents."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow HAVEN to use the microphone for voice help and medication confirmations."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow HAVEN to keep safety location monitoring active when enabled.",
+          "locationAlwaysPermission": "Allow HAVEN to keep safety location monitoring active when enabled.",
+          "locationWhenInUsePermission": "Allow HAVEN to use your location for fall response and safe-zone support.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#1A2B4C",
+          "defaultChannel": "haven-safety"
+        }
+      ],
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "Allow HAVEN to sync medical appointments with your calendar."
+        }
+      ],
       "expo-secure-store"
     ],
     "extra": {

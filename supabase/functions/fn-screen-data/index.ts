@@ -1,4 +1,4 @@
-import { corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { corsHeaders, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
 import { assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
 import { validateBody } from "../_shared/validation.ts";
@@ -47,6 +47,6 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     await recordMetric("fn-screen-data", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

@@ -14,9 +14,24 @@ test('HAVEN Cross-Platform Android Adaptations Suite (Minimal Scope Complete Acc
   assert.ok(carerAppSource.includes('SafeAreaView'), 'FIX 1: Must wrap Carer surfaces in SafeAreaView');
 
   // Config Validation
-  const elderAppJson = readFileSync(new URL('../../apps/elder/app.json', import.meta.url), 'utf8');
-  assert.ok(elderAppJson.includes('"windowSoftInputMode": "adjustResize"'), 'FIX 1: Must manage soft keyboard layout mode in app.json');
-  assert.ok(elderAppJson.includes('"IGNORE_BATTERY_OPTIMIZATIONS"'), 'FIX 2: Must request Doze whitelist permission in permissions array');
+  //
+  // `windowSoftInputMode` is an AndroidManifest attribute and is NOT a supported
+  // Expo app-config key — the previous assertion here could only pass by editing
+  // generated native files, which Expo overwrites. The supported equivalent is
+  // `android.softwareKeyboardLayoutMode: "resize"`, which Expo maps to
+  // adjustResize in the manifest. The old expectation made this suite
+  // unfixable-by-configuration; it now asserts the key Expo actually honours.
+  const elderAppConfig = JSON.parse(readFileSync(new URL('../../apps/elder/app.json', import.meta.url), 'utf8'));
+  const elderAndroid = elderAppConfig?.expo?.android ?? {};
+  assert.equal(
+    elderAndroid.softwareKeyboardLayoutMode,
+    'resize',
+    'FIX 1: android.softwareKeyboardLayoutMode must be "resize" (Expo equivalent of adjustResize)',
+  );
+  assert.ok(
+    (elderAndroid.permissions ?? []).includes('android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS'),
+    'FIX 2: Doze whitelist permission must be declared (REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)',
+  );
 
   // FIX 2 Verification
   const dozeGuardSource = readFileSync(new URL('../../apps/elder/src/services/dozeGuard.ts', import.meta.url), 'utf8');
@@ -25,9 +40,28 @@ test('HAVEN Cross-Platform Android Adaptations Suite (Minimal Scope Complete Acc
   assert.ok(dozeGuardSource.includes('Patiëntveiligheid'), 'FIX 2: Must provide explicit Older Adult patient safety rationale');
 
   // FIX 3 Verification
+  //
+  // The prompt copy lives in the i18n dictionaries, not inline in the component.
+  // Asserting the literals against AuthProvider.tsx (as this suite used to) could
+  // only pass by hard-coding Dutch UI text in a React Native component — the
+  // opposite of the requirement. Assert the wiring AND the copy it resolves to.
   const authProviderSource = readFileSync(new URL('../../apps/carer/src/auth/AuthProvider.tsx', import.meta.url), 'utf8');
-  assert.ok(authProviderSource.includes('HAVEN Verificatie'), 'FIX 3: Must customize BiometricPrompt title');
-  assert.ok(authProviderSource.includes('Bevestig uw identiteit om door te gaan'), 'FIX 3: Must customize BiometricPrompt subtitle');
+  assert.ok(
+    /promptMessage:\s*translate\('auth\.biometric\.android\.prompt'/.test(authProviderSource),
+    'FIX 3: Android BiometricPrompt title must come from auth.biometric.android.prompt',
+  );
+  assert.ok(
+    /subtitle:\s*translate\('auth\.biometric\.android\.subtitle'/.test(authProviderSource),
+    'FIX 3: Android BiometricPrompt subtitle must come from auth.biometric.android.subtitle',
+  );
+
+  const nlCopy = JSON.parse(readFileSync(new URL('../../packages/i18n/locales/nl-NL.json', import.meta.url), 'utf8'));
+  assert.equal(nlCopy['auth.biometric.android.prompt'], 'HAVEN Verificatie', 'FIX 3: Dutch prompt title');
+  assert.equal(
+    nlCopy['auth.biometric.android.subtitle'],
+    'Bevestig uw identiteit om door te gaan',
+    'FIX 3: Dutch prompt subtitle',
+  );
 
   // ─── Phase 2: Complete Executable Subsystem Simulation Harness ───
   class SimulatedAndroidSubsystem {
@@ -47,10 +81,14 @@ test('HAVEN Cross-Platform Android Adaptations Suite (Minimal Scope Complete Acc
     }
 
     // Doze DoS OEM Battery Execution Simulation
+    //
+    // Doze state is recomputed per scenario. It used to be a latch: once the
+    // un-mitigated run set `dozeModeActive = true`, the whitelisted run that
+    // follows could never clear it, so the harness reported a telemetry kill even
+    // when the mitigations under test were active.
     async runDozeFallTelemetryScenario(minutesScreenOff) {
-      if (minutesScreenOff > 5 && !this.batteryOptimizationsIgnored && !this.foregroundServiceActive) {
-        this.dozeModeActive = true;
-      }
+      this.dozeModeActive =
+        minutesScreenOff > 5 && !this.batteryOptimizationsIgnored && !this.foregroundServiceActive;
 
       // Simulate fall sensor POST telemetry over time
       for (let min = 1; min <= minutesScreenOff; min++) {

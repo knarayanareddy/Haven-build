@@ -1,3 +1,4 @@
+import { rateLimit } from "../_shared/ratelimit.ts";
 import { admin, corsHeaders, json, readJsonBody, recordMetric, userClient } from "../_shared/core.ts";
 import { assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
@@ -6,6 +7,7 @@ import { asyncWrapper } from "../_shared/async_wrapper.ts";
 
 Deno.serve(asyncWrapper("fn-pending-confirmation-respond", async (req: Request) => {
   const started = Date.now();
+  await rateLimit(req, "fn-pending-confirmation-respond");
   const body = await readJsonBody(req) as Record<string, unknown>;
   validateBody(body, { confirmation_id: "uuid", resolution: "boolean" }, { allowUnknown: true });
   const userId = await getJwtUserId(req);

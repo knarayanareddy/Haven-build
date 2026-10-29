@@ -1,4 +1,4 @@
-import { admin, corsHeaders, json, recordMetric, safeErrorMessage } from "../_shared/core.ts";
+import { admin, corsHeaders, json, recordMetric, errorResponse } from "../_shared/core.ts";
 import { requireInternalAccess } from "../_shared/internal.ts";
 
 Deno.serve(async (req) => {
@@ -52,6 +52,6 @@ Deno.serve(async (req) => {
     return json({ ok: true, scheduled: scheduled.length });
   } catch (e) {
     await recordMetric("fn-daily-checkin-scheduler", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

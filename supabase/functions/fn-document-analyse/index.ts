@@ -1,3 +1,4 @@
+import { rateLimit } from "../_shared/ratelimit.ts";
 import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
 import { assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
@@ -20,6 +21,7 @@ Deno.serve(async (req: Request) => {
   const started = Date.now();
   let rawBodyPayload: unknown = null;
   try {
+    await rateLimit(req, "fn-document-analyse");
     const body = await readJsonBody(req) as Record<string, unknown>;
     rawBodyPayload = body;
 

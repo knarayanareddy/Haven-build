@@ -15,9 +15,11 @@ Deno.serve(async (req) => {
     const db = admin();
 
     // 1. Database Connection & Relational Pool Reachability Check
-    const dbPromise = db.from("profiles").select("id", { count: "exact", head: true })
-      .then((res) => ({ ok: !res.error, error: res.error ? res.error.message : null }))
-      .catch((err) => ({ ok: false, error: safeErrorMessage(err) }));
+    // Supabase builders are PromiseLike only: `.catch` does not exist on them.
+    const dbPromise = Promise.resolve(
+      db.from("profiles").select("id", { count: "exact", head: true })
+        .then((res) => ({ ok: !res.error, error: res.error ? res.error.message : null })),
+    ).catch((err: unknown) => ({ ok: false, error: safeErrorMessage(err) }));
 
     // 2. Upstash Redis Stream Reachability Check
     const redisPromise = (async () => {

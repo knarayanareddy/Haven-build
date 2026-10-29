@@ -1,4 +1,4 @@
-import { admin, corsHeaders, json, readJsonBody, recordMetric, requireFields, safeErrorMessage } from "../_shared/core.ts";
+import { admin, corsHeaders, json, readJsonBody, recordMetric, requireFields, errorResponse } from "../_shared/core.ts";
 import { requireInternalAccess, requireVendorSecretHeader } from "../_shared/internal.ts";
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
@@ -8,6 +8,7 @@ Deno.serve(async (req) => {
     else requireVendorSecretHeader(req, 'HAVEN_EVENT_INGEST_SECRET', ['x-haven-event-secret', 'x-haven-vendor-secret']);
     const body = await readJsonBody(req) as Record<string, unknown>;
     requireFields(body, ["events"]);
+    if (!Array.isArray(body.events) || body.events.length === 0) throw new Error("events must be a non-empty array");
     const db = admin();
     let inserted = 0;
     for (const event of body.events) {
@@ -37,6 +38,6 @@ Deno.serve(async (req) => {
     return json({ success: true, events_inserted: inserted });
   } catch (e) {
     await recordMetric("fn-buurt-events-ingest", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

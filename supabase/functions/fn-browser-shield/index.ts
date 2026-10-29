@@ -1,4 +1,5 @@
-import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, safeErrorMessage, scoreScam, sha256 } from "../_shared/core.ts";
+import { rateLimit } from "../_shared/ratelimit.ts";
+import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, scoreScam, sha256, userClient, errorResponse } from "../_shared/core.ts";
 import { assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 
@@ -8,6 +9,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
   try {
+    await rateLimit(req, "fn-browser-shield");
     const body = await readJsonBody(req) as Record<string, unknown>;
     validateBody(body, { elder_id: 'uuid', url: 'string' }, { allowUnknown: true });
     const userId = await getJwtUserId(req);
@@ -30,12 +32,12 @@ Deno.serve(async (req) => {
     if (error) throw error;
     if (['rood','zwart'].includes(risk)) {
       const { data: family } = await db.from('family_relationships').select('family_member_id').eq('elder_id', userId).eq('elder_consented', true).eq('is_active', true).eq('can_view_alerts', true);
-      await Promise.all((family ?? []).map((f) => dispatchNotification({ recipient_id: f.family_member_id, elder_id: userId, notification_type: risk === 'zwart' ? 'scam_zwart' : 'scam_rood', title_nl: 'Verdachte webpagina', title_en: 'Suspicious web page', body_nl: 'HAVEN zag een verdachte webpagina. Bel rustig even mee.', body_en: 'HAVEN saw a suspicious web page. Please calmly check in.', data: { browser_event_id: event.id } })));
+      await Promise.all((family ?? []).map((f: { family_member_id: string }) => dispatchNotification({ recipient_id: f.family_member_id, elder_id: userId, notification_type: risk === 'zwart' ? 'scam_zwart' : 'scam_rood', title_nl: 'Verdachte webpagina', title_en: 'Suspicious web page', body_nl: 'HAVEN zag een verdachte webpagina. Bel rustig even mee.', body_en: 'HAVEN saw a suspicious web page. Please calmly check in.', data: { browser_event_id: event.id } })));
     }
     await recordMetric('fn-browser-shield', started, 'success');
     return json({ success: true, browser_event_id: event.id, risk_level: risk, risk_score: riskScore, detected_patterns: patterns });
   } catch (e) {
     await recordMetric('fn-browser-shield', started, 'error');
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

@@ -1,4 +1,5 @@
-import { admin, corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { rateLimit } from "../_shared/ratelimit.ts";
+import { admin, corsHeaders, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
 import { assertSelf, getJwtUserId, invalidateRelationshipCache } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { captureException } from "../_shared/sentry.ts";
@@ -7,6 +8,7 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
   try {
+    await rateLimit(req, "fn-consent-update");
     const body = await readJsonBody(req) as Record<string, unknown>;
     validateBody(body, { elder_id: 'uuid', consent_type: 'string', granted: 'boolean' }, { allowUnknown: true });
     const userId = await getJwtUserId(req);
@@ -78,6 +80,6 @@ Deno.serve(async (req: Request) => {
   } catch (e) {
     await captureException(e, { fn: "fn-consent-update" });
     await recordMetric("fn-consent-update", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

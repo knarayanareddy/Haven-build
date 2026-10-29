@@ -1,4 +1,4 @@
-import { admin, corsHeaders, json, readJsonBody, recordMetric, requireFields, safeErrorMessage } from "../_shared/core.ts";
+import { admin, corsHeaders, json, readJsonBody, recordMetric, requireFields, errorResponse } from "../_shared/core.ts";
 import { requireInternalAccess } from "../_shared/internal.ts";
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
@@ -17,6 +17,6 @@ Deno.serve(async (req) => {
     return json({ success: true, sync_job_id: job.id, records_pushed: (visits ?? 0) + (incidents ?? 0) });
   } catch (e) {
     await recordMetric('fn-care-system-sync', started, 'error');
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

@@ -1,4 +1,4 @@
-import { admin, corsHeaders, dispatchNotification, json, recordMetric, safeErrorMessage } from "../_shared/core.ts";
+import { admin, corsHeaders, dispatchNotification, json, recordMetric, errorResponse } from "../_shared/core.ts";
 import { requireInternalAccess } from "../_shared/internal.ts";
 
 // ─── Phase 2.4: Weekly digest email delivery ───
@@ -195,6 +195,6 @@ Deno.serve(async (req) => {
     return json({ success: true, digests_created: created, emails_sent: emailsSent }, 200, req);
   } catch (e) {
     await recordMetric("fn-weekly-digest", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

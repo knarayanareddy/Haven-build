@@ -1,4 +1,4 @@
-import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
 import { assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { withIdempotency } from "../_shared/idempotency.ts";
@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
           for (const f of family ?? []) {
             await dispatchNotification({
               recipient_id: f.family_member_id,
-              elder_id: body.elder_id,
+              elder_id: String(body.elder_id),
               notification_type: "welzijnscheck",
               title_nl: "Stemming — check even in",
               title_en: "Mood — please check in",
@@ -81,6 +81,6 @@ Deno.serve(async (req) => {
     return json(result.body, result.status ?? 200, req);
   } catch (e) {
     await recordMetric("fn-wellness-checkin", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

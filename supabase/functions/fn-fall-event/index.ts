@@ -1,4 +1,4 @@
-import { corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { corsHeaders, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
 import { assertCarerCan, assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { withIdempotency } from "../_shared/idempotency.ts";
@@ -61,6 +61,6 @@ Deno.serve(async (req) => {
     return json(result.body, result.status ?? 200, req);
   } catch (e) {
     await recordMetric("fn-fall-event", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

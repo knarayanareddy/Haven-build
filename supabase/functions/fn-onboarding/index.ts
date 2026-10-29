@@ -1,4 +1,4 @@
-import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, requireFields, safeErrorMessage } from "../_shared/core.ts";
+import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, requireFields, errorResponse } from "../_shared/core.ts";
 import { requireInternalAccess } from "../_shared/internal.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
 
@@ -54,6 +54,6 @@ Deno.serve(async (req) => {
     return json({ success: true, elder_id: elderId, relationship_id: relationship.id, activation_required: true }, 200, req);
   } catch (e) {
     await recordMetric("fn-onboarding", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

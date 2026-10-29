@@ -1,10 +1,12 @@
-import { corsHeaders, json, readJsonBody, recordMetric, requireFields, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { rateLimit } from "../_shared/ratelimit.ts";
+import { corsHeaders, json, readJsonBody, recordMetric, requireFields, userClient, errorResponse } from "../_shared/core.ts";
 import { requireAdminBearer } from "../_shared/internal.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
   try {
+    await rateLimit(req, "fn-breach-incident");
     const adminUserId = await requireAdminBearer(req);
     const body = await readJsonBody(req) as Record<string, unknown>;
     requireFields(body, ["severity", "summary"]);
@@ -14,6 +16,6 @@ Deno.serve(async (req) => {
     return json({ success: true, breach_incident_id: data.id, status: data.status });
   } catch (e) {
     await recordMetric("fn-breach-incident", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

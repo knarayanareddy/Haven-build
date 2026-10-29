@@ -1,4 +1,4 @@
-import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
 import { assertCarerCan, assertElderOrFamilyCan, assertSelf, AuthzError, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
@@ -63,6 +63,6 @@ Deno.serve(async (req) => {
     return json({ success: true, bereavement_event_id: event.id, tone_adjustment_until: until }, 200, req);
   } catch (e) {
     await recordMetric('fn-bereavement-support', started, 'error');
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

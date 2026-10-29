@@ -1,4 +1,5 @@
-import { corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { rateLimit } from "../_shared/ratelimit.ts";
+import { corsHeaders, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
 import { generateEmbedding } from "../_shared/ai.ts";
 import { assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { assertNoBsnText, validateBody } from "../_shared/validation.ts";
@@ -7,6 +8,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
   try {
+    await rateLimit(req, "fn-companion-memory");
     const body = await readJsonBody(req) as Record<string, unknown>;
     validateBody(body, { elder_id: 'uuid', memory_type: 'string', content: 'string' }, { allowUnknown: true });
     assertNoBsnText(body.content);
@@ -57,6 +59,6 @@ Deno.serve(async (req) => {
     return json({ memories_created: 1, memories_updated: 0, memories_skipped: 0, memory_id: row.id });
   } catch (e) {
     await recordMetric("fn-companion-memory", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

@@ -1,4 +1,5 @@
-import { admin, corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, sha256 } from "../_shared/core.ts";
+import { rateLimit } from "../_shared/ratelimit.ts";
+import { admin, corsHeaders, json, readJsonBody, recordMetric, sha256, errorResponse } from "../_shared/core.ts";
 import { assertElderOrFamilyCan, assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 
@@ -6,6 +7,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
   try {
+    await rateLimit(req, "fn-call-reputation");
     const body = await readJsonBody(req) as Record<string, unknown>;
     validateBody(body, { phone: 'string', provider: 'string' }, { allowUnknown: true });
     const userId = await getJwtUserId(req);
@@ -26,6 +28,6 @@ Deno.serve(async (req) => {
     return json({ success: true, lookup_id: lookup.id, reputation_score: score, report_count: reportCount, cache_hit: Boolean(cached) });
   } catch (e) {
     await recordMetric('fn-call-reputation', started, 'error');
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

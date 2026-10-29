@@ -1,4 +1,5 @@
-import { corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { rateLimit } from "../_shared/ratelimit.ts";
+import { corsHeaders, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
 import { assertActorMatches, assertCarerCan, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 
@@ -6,6 +7,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
   try {
+    await rateLimit(req, "fn-care-plan");
     const body = await readJsonBody(req) as Record<string, unknown>;
     validateBody(body, { elder_id: 'uuid', created_by_id: 'uuid', title_nl: 'string' }, { allowUnknown: true });
     const userId = await getJwtUserId(req);
@@ -22,6 +24,6 @@ Deno.serve(async (req) => {
     return json({ success: true, care_plan_id: plan.id });
   } catch (e) {
     await recordMetric("fn-care-plan", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

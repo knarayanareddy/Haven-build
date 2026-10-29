@@ -1,4 +1,4 @@
-import { admin, corsHeaders, json, readJsonBody, recordMetric, requireFields, safeErrorMessage } from "../_shared/core.ts";
+import { admin, corsHeaders, json, readJsonBody, recordMetric, requireFields, errorResponse } from "../_shared/core.ts";
 import { requireInternalAccess, requireVendorSecretHeader } from "../_shared/internal.ts";
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
@@ -13,6 +13,7 @@ Deno.serve(async (req) => {
     if (sourceError) throw sourceError;
     if (!source) throw new Error('Community event source is not active');
     let inserted = 0;
+    if (!Array.isArray(body.events) || body.events.length === 0) throw new Error('events must be a non-empty array');
     for (const event of body.events) {
       requireFields(event, ['postcode_pc4', 'location_label_nl', 'title_nl', 'event_date']);
       const { data: tags } = await db.from('interest_tags').select('id').in('tag_key', event.relevant_tag_keys ?? []);
@@ -25,6 +26,6 @@ Deno.serve(async (req) => {
     return json({ success: true, events_inserted: inserted });
   } catch (e) {
     await recordMetric('fn-community-events-ingest', started, 'error');
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

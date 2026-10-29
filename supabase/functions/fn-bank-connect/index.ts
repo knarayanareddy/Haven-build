@@ -11,7 +11,7 @@
 //   - callback: Tink redirect (verify state parameter, no JWT)
 //   - revoke: assertElderOrFamilyCan(userId, elderId, 'financials')
 
-import { admin, corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, sha256 } from "../_shared/core.ts";
+import { admin, corsHeaders, json, readJsonBody, recordMetric, sha256, errorResponse } from "../_shared/core.ts";
 import { assertElderOrFamilyCan, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { withIdempotency } from "../_shared/idempotency.ts";
@@ -264,6 +264,6 @@ Deno.serve(async (req) => {
     }, 200, req);
   } catch (e) {
     await recordMetric("fn-bank-connect", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });
