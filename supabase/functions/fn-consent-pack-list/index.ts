@@ -14,26 +14,42 @@ Deno.serve(async (req) => {
     assertSelf(userId, String(body.elder_id), "elder");
 
     const db = userClient(req);
-    const { data: packs } = await db.from("consent_packs").select("pack_key, title_nl, title_en, description_nl, description_en, recommended_day").order("recommended_day", { ascending: true });
-    if (!packs) return json({ body: { elder_id: body.elder_id, packs: [], pending_packs: [] } });
+    // supabase-js returns errors in `{ error }` and resolves `data` to null; the
+    // unchecked read below used to turn a failed catalog query into "you have no
+    // consent packs" — indistinguishable from the elder having accepted nothing.
+    const { data: packs, error: packsError } = await db.from("consent_packs")
+      .select("pack_key, title_nl, title_en, description_nl, description_en, recommended_day")
+      .order("recommended_day", { ascending: true });
+    if (packsError) throw packsError;
 
-    const { data: statuses } = await db.from("consent_pack_status")
+    const { data: statuses, error: statusesError } = await db.from("consent_pack_status")
       .select("pack_key, status, decided_at").eq("elder_id", body.elder_id);
+    if (statusesError) throw statusesError;
+
     const statusByKey: Record<string, { status: string; decided_at: string | null }> = {};
     for (const s of statuses ?? []) statusByKey[s.pack_key] = { status: s.status, decided_at: s.decided_at };
 
     // Pending = not shown yet OR shown but deferred.
-    const pending = packs
+    const pending = (packs ?? [])
       .filter((p) => !statusByKey[p.pack_key] || statusByKey[p.pack_key].status === "not_shown" || statusByKey[p.pack_key].status === "deferred")
       .map((p) => ({ ...p, current_status: statusByKey[p.pack_key]?.status ?? "not_shown" }));
 
     // Accepted list (for the elder's records view).
-    const accepted = packs
+    const accepted = (packs ?? [])
       .filter((p) => statusByKey[p.pack_key]?.status === "accepted")
       .map((p) => ({ pack_key: p.pack_key, decided_at: statusByKey[p.pack_key].decided_at }));
 
+    // Flat envelope, matching every other function. This one returned
+    // `{ body: { ... } }`, which forced clients to unwrap one extra level; no
+    // client reads this response yet (apps/elder/src/state/consentPacks.ts ships
+    // a hard-coded copy), so the fix is free.
     await recordMetric("fn-consent-pack-list", started, "success");
-    return json({ body: { elder_id: body.elder_id, pending_count: pending.length, pending_packs: pending, accepted_packs: accepted } });
+    return json({
+      elder_id: body.elder_id,
+      pending_count: pending.length,
+      pending_packs: pending,
+      accepted_packs: accepted,
+    }, 200, req);
   } catch (e) {
     await recordMetric("fn-consent-pack-list", started, "error");
     return errorResponse(e, req);

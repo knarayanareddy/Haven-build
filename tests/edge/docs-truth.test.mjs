@@ -10,8 +10,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+const root = fileURLToPath(new URL('../../', import.meta.url));
 const read = (rel) => readFileSync(new URL(`../../${rel}`, import.meta.url), 'utf8');
 
 test('no documented claim is stale', () => {
@@ -36,7 +39,18 @@ test('the security report no longer implies complete rate-limit coverage', () =>
 test('the README states current counts instead of historical ones', () => {
   const readme = read('README.md');
   assert.match(readme, /currently\s+\*\*81 Edge Functions\*\*/i);
-  assert.match(readme, /43 migrations applied in order/);
+
+  // The migration count used to be hard-coded here *and* in the README, so adding
+  // a migration failed this test with "the README is wrong" even when the README
+  // was the only accurate copy. Derive the count from the tree instead.
+  const migrations = readdirSync(join(root, 'supabase/migrations')).filter((f) => f.endsWith('.sql'));
+  assert.ok(migrations.length > 0, 'migration directory must not be empty');
+  assert.match(
+    readme,
+    new RegExp(`${migrations.length} migrations applied in order`),
+    `the README must state the real migration count (${migrations.length})`,
+  );
+
   assert.equal(
     /12 migrations \+ 55 Edge Functions \|/i.test(readme),
     false,

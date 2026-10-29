@@ -57,12 +57,11 @@ const CLAIMS = [
     pattern: /currently\s+\*\*(\d+)\s+Edge Functions\*\*/i,
     compute: countEdgeFunctions,
   },
-  {
-    file: 'README.md',
-    label: 'current test assertion count',
-    pattern: /runs\s+every\s+`tests\/edge\/\*\.test\.mjs`\s+file\s+\((\d+)\s+assertions/i,
-    compute: null, // computed from the live suite run; the CI job compares the number it observed
-  },
+  // (A "current test assertion count" claim used to live here with `compute: null`,
+  // i.e. recorded but never asserted. Nothing compared it to a live run, so it
+  // drifted the first time a test was added. The count cannot be derived
+  // statically — node counts table-driven tests once per iteration — so the
+  // README no longer quotes a number and there is nothing to verify.)
   {
     file: 'README.md',
     label: 'migration file count (repository tree)',

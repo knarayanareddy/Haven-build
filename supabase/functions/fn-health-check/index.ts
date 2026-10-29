@@ -60,20 +60,61 @@ Deno.serve(async (req) => {
       }
     })();
 
-    // 5. Critical pg_cron Jobs Last Run Time
-    // Verify canonical sweeper ('haven-database-retention-r5') execution freshness
+    // 5. Critical pg_cron jobs — freshness of the canonical retention sweeper
+    //
+    // This used to read `perf_metrics`, which `recordMetric()` writes on every
+    // request and which no cron job ever touches, so the check measured traffic
+    // rather than the sweeper. Worse, `maybeSingle()` reports failure in
+    // `{ error }` instead of throwing, so a failed or empty query fell through to
+    // `new Date(Date.now() - 3600000)` + `status: "healthy"` — a fabricated
+    // timestamp asserting that the GDPR retention sweeper was running. It now
+    // reads the real run history (public.cron_job_health, migration
+    // 20261029000003), fails closed, and enforces the staleness window.
+    const SWEEPER_JOB = "haven-database-retention-r5";
+    const SWEEPER_MAX_AGE_MS = 26 * 60 * 60 * 1000; // daily at 03:00 + 2h slack
     const cronPromise = (async () => {
       try {
-        const res = await db.from("perf_metrics")
-          .select("recorded_at")
-          .order("recorded_at", { ascending: false })
-          .limit(1)
+        const { data, error } = await db.from("cron_job_health")
+          .select("jobname, status, start_time, end_time, return_message")
+          .eq("jobname", SWEEPER_JOB)
           .maybeSingle();
 
-        return { 
-          ok: true, 
-          last_cron_sweep: res.data?.recorded_at ?? new Date(Date.now() - 3600000).toISOString(),
-          status: "healthy",
+        if (error) {
+          // 42P01 = undefined_table: pg_cron (and therefore the view) is not
+          // installed in this environment. That is "not applicable", not
+          // "healthy" — say so instead of inventing a pass.
+          const isMissingView = error.code === "42P01";
+          return {
+            ok: isMissingView,
+            last_cron_sweep: null,
+            status: isMissingView ? "not_applicable" : "error",
+            error: isMissingView ? "pg_cron not installed; retention sweeper not scheduled" : safeErrorMessage(error),
+          };
+        }
+
+        if (!data) {
+          return {
+            ok: false,
+            last_cron_sweep: null,
+            status: "missing",
+            error: `Job ${SWEEPER_JOB} is not scheduled`,
+          };
+        }
+
+        const lastRun = data.start_time ? new Date(data.start_time) : null;
+        const ageMs = lastRun ? Date.now() - lastRun.getTime() : Number.POSITIVE_INFINITY;
+        const fresh = ageMs <= SWEEPER_MAX_AGE_MS;
+        const failed = data.status !== "succeeded";
+
+        return {
+          ok: fresh && !failed,
+          last_cron_sweep: data.start_time ?? null,
+          last_cron_end: data.end_time ?? null,
+          age_hours: Number.isFinite(ageMs) ? Math.round(ageMs / 360000) / 10 : null,
+          status: failed ? "failed" : fresh ? "healthy" : "stale",
+          error: failed
+            ? `Last run ended with status ${String(data.status)}: ${String(data.return_message ?? "").slice(0, 200)}`
+            : fresh ? null : `Last run was ${Math.round(ageMs / 3600000)}h ago (max 26h)`,
         };
       } catch (err) {
         return { ok: false, last_cron_sweep: null, status: "error", error: safeErrorMessage(err) };
@@ -84,7 +125,11 @@ Deno.serve(async (req) => {
       dbPromise, redisPromise, openaiPromise, elevenPromise, cronPromise,
     ]);
 
-    const isCompletelyHealthy = dbCheck.ok && (redisCheck.ok || !REDIS_URL);
+    // A stalled retention sweeper is a compliance regression (data kept past its
+    // GDPR window), so it degrades health rather than being reported alongside a
+    // 200. `not_applicable` is the only state that does not count against it.
+    const cronIsApplicable = cronCheck.status !== "not_applicable";
+    const isCompletelyHealthy = dbCheck.ok && (redisCheck.ok || !REDIS_URL) && (cronCheck.ok || !cronIsApplicable);
     const statusCode = isCompletelyHealthy ? 200 : 503;
 
     await recordMetric("fn-health-check", started, isCompletelyHealthy ? "success" : "slo_breach");
@@ -101,10 +146,10 @@ Deno.serve(async (req) => {
       },
       duration_ms: Date.now() - started,
       timestamp: new Date().toISOString(),
-    }, statusCode);
+    }, statusCode, req);
 
   } catch (error) {
     await recordMetric("fn-health-check", started, "error");
-    return json({ success: false, status: "error", error: safeErrorMessage(error) }, 500);
+    return json({ success: false, status: "error", error: safeErrorMessage(error) }, 500, req);
   }
 });

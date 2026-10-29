@@ -181,12 +181,41 @@ export function scoreScam(raw: string) {
   };
 }
 
+/**
+ * Record one request in `perf_metrics` without holding up the response.
+ *
+ * This runs on the response path of every Edge Function. It used to be a bare
+ * `await` of a PostgREST insert, so each request paid a full database round trip
+ * (a second connection, auth check and WAL write) *before* the body left the
+ * isolate — the metric meant to observe latency was adding to it, and a slow
+ * `perf_metrics` table slowed down every user-facing call. The insert is now
+ * handed to `EdgeRuntime.waitUntil`, which keeps the isolate alive until it
+ * settles while the response returns immediately.
+ *
+ * Two behaviour changes beyond timing:
+ *  - The insert result is inspected. supabase-js reports failures in `{ error }`
+ *    instead of throwing, so the old `try/catch` never fired and dropped-metric
+ *    failures were invisible; they now emit the structured `local-log` line.
+ *  - Where `waitUntil` is unavailable (Deno tests, other runtimes) the insert is
+ *    still awaited, so callers keep deterministic behaviour.
+ */
 export async function recordMetric(fn_name: string, started: number, status: "success" | "error" | "fallback" | "slo_breach") {
-  try {
-    await admin().from("perf_metrics").insert({ fn_name, duration_ms: Date.now() - started, status, env: Deno.env.get("HAVEN_ENV") ?? "production" });
-  } catch (_) {
-    console.log(JSON.stringify({ fn_name, status, duration_ms: Date.now() - started, metric: "local-log" }));
+  const duration_ms = Date.now() - started;
+  const write = (async () => {
+    const { error } = await admin().from("perf_metrics").insert({
+      fn_name, duration_ms, status, env: Deno.env.get("HAVEN_ENV") ?? "production",
+    });
+    if (error) throw error;
+  })().catch(() => {
+    console.log(JSON.stringify({ fn_name, status, duration_ms, metric: "local-log" }));
+  });
+
+  const runtime = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+  if (typeof runtime?.waitUntil === "function") {
+    runtime.waitUntil(write);
+    return;
   }
+  await write;
 }
 
 // ─── FINDING 1 & FINDING 2: BCP47 Strict Equality Guard & Pre-Dispatch Content Validation ───

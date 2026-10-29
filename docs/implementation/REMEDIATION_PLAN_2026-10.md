@@ -447,9 +447,9 @@ the *Rubric met by* column is what was run; the *Observed* column is its output.
 | P2.3 Intercept ordering | **done** | `node --test tests/edge/transaction-intercept-ordering.test.mjs` | 6/6 pass |
 | P2.4 Error contract | **done** | `node --test tests/edge/error-contract.test.mjs` | 13/13 pass |
 | P2.5 Error reporting | **done** | `node --test tests/edge/sentry-envelope.test.mjs` | 7/7 pass (envelope endpoint, release/env, PII scrub) |
-| P3.1 One runner | **done** | `node --experimental-transform-types --test tests/edge/*.test.mjs` | **220 tests, 220 pass, 0 fail** |
+| P3.1 One runner | **done** | `node --experimental-transform-types --test tests/edge/*.test.mjs` | **233 tests, 233 pass, 0 fail** |
 | P3.2 One CI pipeline | **done** | workflow file inspection + `deno check` | `ci.yml` is the only PR gate; `.github/workflows/pr.yml` removed; 81/81 functions pass `deno check`; typecheck covers packages + elder + grandchild + family + carer |
-| P3.3 Docs guard | **done** | `node scripts/ci/audit-docs-truth.mjs` | `3 documented claims checked` · `No stale claims.` |
+| P3.3 Docs guard | **done** | `node scripts/ci/audit-docs-truth.mjs` | `2 documented claims checked` · `No stale claims.` |
 | P4.1 Status docs | **done** | this section | — |
 | P4.2 Hygiene | **done** | `git status --short` after a build | `apps/family/tsconfig.tsbuildinfo` untracked and ignored; no build output tracked |
 
@@ -477,3 +477,49 @@ corepack pnpm test   # exit 0
 - `tests/edge/clinical-immutability-closure.test.mjs` asserts on SQL *text*, not behaviour. It is honest about what it checks now, but a real guarantee needs a live database; `ci.yml`'s `database` job is where that belongs.
 - The repository still carries 19 root-level planning documents (`HAVEN_BLUEPRINT.md`, `designdoc.md`, `CONTINUATION_SPEC.md`, …). Archiving them is P4.1 follow-up work that changes links in ~6 other documents, so it is left as a single dedicated change rather than mixed into this one.
 - `fn-transaction-intercept` still fans out to admins on a *verified* failure. That is intended, but the volume should be capped by a budget rather than an allowlist; tracked as follow-up.
+
+---
+
+## 8. Second sweep — further defects (2026-10-29, follow-up)
+
+After §7 was committed, a second pass looked for defects the original list did not
+name. Six were found and fixed. The rubric for each is a command a reviewer can run
+and the output it printed here.
+
+| # | Defect | Why it matters | Fix | Rubric (command → observed) |
+|---|---|---|---|---|
+| S1 | **50 JSON responses carried no CORS headers.** `corsHeaders(req)` existed and 74 `json()` calls used it, but 50 success/error paths returned `json(body)` with only `Content-Type`. | A browser or Expo web client received the body but was blocked by the browser: the request "succeeded" server-side and failed client-side, with no server-side signal. The family dashboard and web build are browser clients. | `req` threaded into every `json()` call (single-argument calls became `json(x, 200, req)`) across 39 functions. | balanced-paren scan of `fn-*/index.ts` → `remaining: 0` (124 `json()` calls total); `deno check` → 81/81 |
+| S2 | **A medication confirmation was marked `resolved` before the MAR row was written**, and neither write's `{ error }` was read. | supabase-js reports failures in the result object, so a rejected MAR update left `pending_confirmations.status = 'resolved'` with no dose in `medication_reminders`. The elder's screen said "confirmed", the clinical record stayed empty, and the confirmation was closed so nobody asked again. | Side effect first, error checked, confirmation resolved last; a confirmation with no `medication_reminder_id` now returns 409 instead of resolving against nothing. | `node tests/edge/pending-confirmation-ordering.test.mjs` → 7/7 pass, incl. "a rejected MAR write leaves the confirmation unresolved" and "the MAR write happens before the confirmation is marked resolved" |
+| S3 | **`recordMetric` awaited a database insert on the response path** — 176 call sites, every request. | The metric that exists to observe latency was adding a full PostgREST round trip to it, and a slow `perf_metrics` slowed every user-facing call. The `try/catch` also never fired: supabase-js returns `{ error }` instead of throwing, so dropped metrics were invisible. | Insert handed to `EdgeRuntime.waitUntil`; result inspected; awaited only where `waitUntil` does not exist. | `deno check` 81/81; `corepack pnpm test` 233/233 (metrics still recorded under the Node shim) |
+| S4 | **`fn-health-check` reported a healthy retention sweeper that it never checked.** It read `perf_metrics` (written per request, by no cron job) and, on a null result, substituted `new Date(Date.now() - 3600000)` with `status: "healthy"`. The check also did not participate in the overall status, so even a failed one returned 200. | The sweeper enforces the GDPR retention windows. A dead sweeper means data kept past its lawful retention period, and the only thing watching it reported green. | Migration `20261029000003` exposes `public.cron_job_health` (definer-owned, `service_role` only, reads `cron.job_run_details`); the check reads it, fails closed on missing/stale/failed, treats an absent pg_cron as `not_applicable`, and a failing applicable check now degrades `/health` to 503. | `node tests/edge/health-check-cron-honesty.test.mjs` → 6/6 pass (missing, stale 50 h, failed run, fresh, pg_cron absent, and "never reads perf_metrics"); `bash scripts/ci/verify-sql.sh` → 44 migrations, RLS 110/110 |
+| S5 | **`fn-consent-pack-list` returned `{ body: { … } }`** — a double-wrapped envelope — and ignored both read errors. | Every other function returns a flat object, so a client written against the API reads `undefined`; and a failed catalog query was indistinguishable from "this elder has no packs". | Flat envelope, `{ error }` rethrown. No client reads it yet (`apps/elder/src/state/consentPacks.ts` ships a hard-coded copy), so the change is free. | `grep -rn "json({ body:"` → no matches; `deno check` 81/81 |
+| S6 | **Two docs-truth claims rotted by construction.** `tests/edge/docs-truth.test.mjs` hard-coded `43 migrations`, so adding migration 44 failed the test claiming the README was wrong; the README also quoted "220 assertions" that `audit-docs-truth.mjs` recorded but never verified. | A guard that has to be edited whenever the thing it guards changes gets edited to match, which is exactly how the `ALTER ROLE` comment test became theatre. | Migration count derived from the directory listing; the unverifiable assertion count removed from prose and from `CLAIMS`. | `node scripts/ci/audit-docs-truth.mjs` → `2 documented claims checked · No stale claims.`; `node --test tests/edge/docs-truth.test.mjs` → 4/4 |
+
+Two behavioural suites were added because the ordering and health guarantees above
+are not observable from source text, and because the existing closure tests for the
+same files were `.includes()` assertions that pass for the broken code too:
+`tests/edge/pending-confirmation-ordering.test.mjs` (7 tests) and
+`tests/edge/health-check-cron-honesty.test.mjs` (6 tests).
+
+### Still open after this sweep
+
+- **~40 of 79 `tests/edge` files assert on source text, not behaviour**
+  (`readFileSync` + `.includes`, no `await import`). They pass for code that is
+  broken, and S2 and S4 above are precisely the kind of defect they cannot catch.
+  Converting all of them is a dedicated change, not a sweep; the two highest-risk
+  subjects (medication confirmation ordering, retention-sweeper health) were
+  converted here. `health-check-observability-closure.test.mjs` demonstrated the
+  failure mode: it asserted the literal comment text `Critical pg_cron Jobs Last
+  Run Time`, so rewording a comment broke the "test" while the check itself was
+  wrong.
+- **`delegateCache` in `_shared/authz.ts` is per-isolate.** The comment claims it
+  "compresses horizontal auth sharding lag exploit windows from 15–30 s down to
+  ≤10 s", but a `Map` cannot span isolates, so a revocation is only reflected in
+  the isolate that served it; the worst case there is the 10 s TTL, and any other
+  isolate is bounded only by its own TTL. It is a micro-optimisation, not a security
+  control, and should be described as one (or removed) — not a functional bug, so
+  it is flagged rather than changed.
+- **No live Postgres in this environment.** `20261029000003` is validated
+  statically (`pglast` parses all 44 migrations) and by the RLS audit; the view's
+  `cron.job_run_details` join only proves itself against a real database, which is
+  the `database` job in `ci.yml`.
