@@ -55,6 +55,7 @@ export function assertNoBsnInPayload(body: unknown): void {
     const err = new Error("422: Prohibited Dutch Citizen Service Number (BSN) detected. Storage, transmission, and processing of BSN is strictly prohibited.");
     (err as unknown as { status: number; isBsnViolation: boolean }).status = 422;
     (err as unknown as { status: number; isBsnViolation: boolean }).isBsnViolation = true;
+    (err as unknown as { code: string }).code = "UNPROCESSABLE_ENTITY";
     throw err;
   }
 }

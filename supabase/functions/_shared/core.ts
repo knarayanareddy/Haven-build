@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.43.0";
+import { toHttpError } from "./errors.ts";
 import { alertLevelFromScore, scoreScamText } from "../../../packages/scam-engine/src/catalog.mjs";
 
 // ─── P0-1 FIX: CORS — dynamic origin validation, not wildcard ───
@@ -72,17 +73,25 @@ export function json(body: unknown, status = 200, req?: Request, customHeaders?:
   Object.assign(extraHeaders, securityHeaders);
   if (customHeaders) Object.assign(extraHeaders, customHeaders);
 
-  let finalStatus = status;
-  const bodyString = typeof body === "string" ? body : JSON.stringify(body);
-  if (bodyString.includes("Rate limit exceeded") || bodyString.includes("429")) {
-    finalStatus = 429;
-    extraHeaders["Retry-After"] = "60";
-  }
-
+  // The status is the caller's decision. This function used to rewrite it to 429
+  // whenever the serialised body contained the text "429", which turned ordinary
+  // successes into rate-limit responses (and confused monitoring). Status now comes
+  // from _shared/errors.ts::toHttpError only.
   return new Response(JSON.stringify(body), {
-    status: finalStatus,
+    status,
     headers: { ...extraHeaders, "content-type": "application/json; charset=utf-8" },
   });
+}
+
+/**
+ * Builds the response for a thrown error using the shared contract, so every
+ * function returns the same status and header set for the same failure.
+ */
+export function errorResponse(error: unknown, req?: Request) {
+  const http = toHttpError(error);
+  const headers: Record<string, string> = { "cache-control": "no-store" };
+  if (http.retryAfterSeconds) headers["Retry-After"] = String(http.retryAfterSeconds);
+  return json({ error: http.message, error_code: http.code }, http.status, req, headers);
 }
 
 // P1-3 FIX: max body size (1 MB default for JSON, configurable)

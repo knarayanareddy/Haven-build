@@ -1,23 +1,35 @@
+import { settleQuery } from "./settle.ts";
 import { admin } from './core.ts';
 
 export class AuthzError extends Error {
-  constructor(message: string, public readonly reasonCode: "SYSTEM_UNCERTAINTY" | "UNAUTHORIZED_DELEGATE" | "MISSING_PERMISSION" | "INVALID_TOKEN") {
+  readonly status: number;
+  readonly code: "UNAUTHORIZED" | "FORBIDDEN";
+
+  constructor(
+    message: string,
+    public readonly reasonCode: "SYSTEM_UNCERTAINTY" | "UNAUTHORIZED_DELEGATE" | "MISSING_PERMISSION" | "INVALID_TOKEN",
+  ) {
     super(message);
     this.name = "AuthzError";
-    (this as unknown as { status: number }).status = 403;
+    // Every AuthzError is 403. This preserves the contract the functions and the
+    // trust-boundary matrix already publish ("403: Emergency brief unavailable or
+    // token expired", assertSelf, assertElderOrFamilyCan …) while adding a machine
+    // readable code so clients stop having to parse prose.
+    this.status = 403;
+    this.code = reasonCode === "INVALID_TOKEN" ? "UNAUTHORIZED" : "FORBIDDEN";
   }
 }
 
 async function logDenyAudit(actorId: string, elderId: string | null, resource: string, reasonCode: string) {
   const db = admin();
-  await db.from("audit_log").insert({
+  await settleQuery(db.from("audit_log").insert({
     actor_id: actorId ? String(actorId) : "00000000-0000-0000-0000-000000000001",
     actor_role: "system",
     action: "AUTHZ_DENY_GATE",
     table_name: resource,
     elder_id: elderId ? String(elderId) : null,
     extra: { reason_code: reasonCode, timestamp: new Date().toISOString() },
-  }).catch(() => undefined);
+  }), "audit_log");
 }
 
 // ─── COMPENSATING CONTROL — full fix tracked in R3 (RBAC JWT + Central TRL) ───
