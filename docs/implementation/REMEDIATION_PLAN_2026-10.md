@@ -686,8 +686,8 @@ or `packages/`), drives a process, or queries the schema/AST model. Reading sour
 only disqualifying when that is all the file does. `sourceReads` is reported for every
 file, so a reviewer can still see how much of a "behavioural" suite is text matching.
 
-Measured after the correction and the conversions: **57 files · 30 behavioural ·
-27 static-only (allowlisted)**.
+Measured after the correction and the conversions: **56 files · 30 behavioural ·
+26 static-only (allowlisted)**.
 
 ### 11.2 Converted or deleted
 
