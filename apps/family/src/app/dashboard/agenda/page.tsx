@@ -1,39 +1,29 @@
-// ─── Phase 4.6: Family Agenda Tab ───
-// Shows elder's upcoming HAVEN appointments + synced calendar events.
-// Consent-gated: only visible if elder has shared appointment data.
+// ─── Family Agenda Tab ───
+// Consent-gated: only visible if the older adult shares appointment data.
+//
+// This page previously rendered `DEMO_AGENDA`: three invented medical appointments
+// ("Huisartsafspraak dr. van der Linden", "Bloedprikken (nuchter)", "OLVG locatie
+// Oost") shown to every visitor, under a heading that claimed it only appeared with
+// the older adult's consent. Invented clinical appointments in a family dashboard are
+// indistinguishable from real ones to the reader, so this now reads `appointments`
+// under RLS and shows an explicit empty state.
 
 import React from 'react';
-import { DashboardCard } from '../../../components/DashboardCard';
 
-interface AgendaEvent {
+import { DashboardCard } from '../../../components/DashboardCard';
+import { withFamilyConsent } from '../../../components/ConsentGate';
+import { createSupabaseServerClient } from '../../../lib/supabase-server';
+
+export const dynamic = 'force-dynamic';
+
+interface AppointmentRow {
   id: string;
   title_nl: string;
   starts_at: string;
-  ends_at: string;
+  ends_at: string | null;
   location_label: string | null;
   is_medical: boolean;
 }
-
-const DEMO_AGENDA: AgendaEvent[] = [
-  {
-    id: 'apt-1', title_nl: 'Huisartsafspraak dr. van der Linden',
-    starts_at: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
-    ends_at: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000).toISOString(),
-    location_label: 'Huisartsenpraktijk De Pijp', is_medical: true,
-  },
-  {
-    id: 'apt-2', title_nl: 'Apotheek refill ophalen',
-    starts_at: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
-    ends_at: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000 + 15 * 60 * 1000).toISOString(),
-    location_label: 'Apotheek De Pijp', is_medical: true,
-  },
-  {
-    id: 'apt-3', title_nl: 'Bloedprikken (nuchter)',
-    starts_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000 + 8 * 60 * 60 * 1000).toISOString(),
-    ends_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000 + 8 * 60 * 60 * 1000 + 15 * 60 * 1000).toISOString(),
-    location_label: 'OLVG locatie Oost', is_medical: true,
-  },
-];
 
 function formatDateTime(iso: string): { date: string; time: string } {
   const d = new Date(iso);
@@ -44,72 +34,70 @@ function formatDateTime(iso: string): { date: string; time: string } {
 }
 
 export default function AgendaPage() {
-  const data = DEMO_AGENDA;
+  // Appointment data follows medication visibility: it is the same clinical scope.
+  return withFamilyConsent('medications', 'Agenda', async (session) => {
+    const supabase = await createSupabaseServerClient();
 
-  return (
-    <main style={{ display: 'grid', gap: 24, padding: 32, background: '#F5F3EE', minHeight: '100vh', fontFamily: 'Nunito, system-ui, sans-serif', color: '#1A1F2E' }}>
-      <header>
-        <h1 style={{ margin: 0, fontSize: 36 }}>Agenda — Margreet Bakker</h1>
-        <p style={{ color: '#6B7490', fontWeight: 700, marginTop: 6 }}>
-          Gesynchroniseerd met de telefoonagenda van de oudere. Alleen medische afspraken worden getoond.
-        </p>
-      </header>
+    const { data, error } = supabase
+      ? await supabase
+          .from('appointments')
+          .select('id, title_nl, starts_at, ends_at, location_label, is_medical')
+          .eq('elder_id', session.elderId)
+          .is('deleted_at', null)
+          .gte('starts_at', new Date().toISOString())
+          .order('starts_at', { ascending: true })
+          .limit(30)
+      : { data: null, error: null };
 
-      <DashboardCard title="Komende afspraken" subtitle={`${data.length} afspraken in de komende 30 dagen`}>
-        <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 12 }}>
-          {data.map((event) => {
-            const dt = formatDateTime(event.starts_at);
-            const et = formatDateTime(event.ends_at);
-            return (
-              <li key={event.id} style={{
-                padding: 18, borderRadius: 22,
-                background: event.is_medical ? '#EBF4EE' : '#FFFFFF',
-                border: event.is_medical ? '2px solid #4A7B5A' : '1px solid #E8EBF2',
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
-                  <div>
-                    <div style={{ fontWeight: 900, fontSize: 18 }}>
-                      {event.is_medical ? '💊 ' : '📅 '}{event.title_nl}
+    const rows = (data ?? []) as AppointmentRow[];
+
+    return (
+      <>
+        <DashboardCard title="Komende afspraken" subtitle={`${rows.length} afspraken in de komende 30 dagen`}>
+          {error ? (
+            <p style={{ margin: 0, fontWeight: 700 }}>De agenda kon niet worden geladen.</p>
+          ) : rows.length === 0 ? (
+            <p style={{ margin: 0, fontWeight: 700 }}>Er staan geen afspraken gepland, of de oudere heeft de agenda niet gedeeld.</p>
+          ) : (
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 12 }}>
+              {rows.map((event) => {
+                const dt = formatDateTime(event.starts_at);
+                const et = event.ends_at ? formatDateTime(event.ends_at) : null;
+                return (
+                  <li
+                    key={event.id}
+                    style={{
+                      padding: 18,
+                      borderRadius: 22,
+                      background: event.is_medical ? '#EBF4EE' : '#FFFFFF',
+                      border: event.is_medical ? '2px solid #4A7B5A' : '1px solid #E8EBF2',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+                      <div>
+                        <div style={{ fontWeight: 900, fontSize: 18 }}>{event.title_nl}</div>
+                        <div style={{ color: '#6B7490', fontSize: 14, fontWeight: 700, marginTop: 4 }}>{dt.date}</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontWeight: 900, fontSize: 16, color: '#2C3E6B' }}>{dt.time}</div>
+                        {et ? <div style={{ color: '#6B7490', fontSize: 13 }}>tot {et.time}</div> : null}
+                      </div>
                     </div>
-                    <div style={{ color: '#6B7490', fontSize: 14, fontWeight: 700, marginTop: 4 }}>
-                      {dt.date}
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontWeight: 900, fontSize: 16, color: '#2C3E6B' }}>{dt.time}</div>
-                    <div style={{ color: '#6B7490', fontSize: 13 }}>tot {et.time}</div>
-                  </div>
-                </div>
-                {event.location_label && (
-                  <div style={{ marginTop: 8, fontSize: 14, color: '#6B7490', fontWeight: 700 }}>
-                    📍 {event.location_label}
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      </DashboardCard>
-
-      <DashboardCard title="Synchronisatie" subtitle="HAVEN synchroniseert met de telefoonagenda van de oudere">
-        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-          <div style={{ background: '#EBF4EE', borderRadius: 16, padding: '12px 18px', fontWeight: 700, color: '#4A7B5A' }}>
-            ✅ Agenda automatisch gesynchroniseerd
-          </div>
-          <div style={{ background: '#FDF3E0', borderRadius: 16, padding: '12px 18px', fontWeight: 700, color: '#A56A00' }}>
-            ⚠️ Alleen medische afspraken worden geüpload
-          </div>
-        </div>
-      </DashboardCard>
-
-      <nav style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        <a href="/dashboard" style={navLinkStyle}>← Dashboard</a>
-      </nav>
-    </main>
-  );
+                    {event.location_label ? (
+                      <div style={{ marginTop: 8, fontSize: 14, color: '#6B7490', fontWeight: 700 }}>📍 {event.location_label}</div>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </DashboardCard>
+        <DashboardCard title="Privacy" subtitle="Wat u hier ziet">
+          <p style={{ margin: 0, fontWeight: 700 }}>
+            Alleen afspraken die de oudere met u deelt. Niet-medische afspraken blijven privé.
+          </p>
+        </DashboardCard>
+      </>
+    );
+  });
 }
-
-const navLinkStyle: React.CSSProperties = {
-  background: '#2C3E6B', color: '#FFFFFF', padding: '12px 18px', borderRadius: 18,
-  fontWeight: 900, textDecoration: 'none', minHeight: 56, display: 'inline-flex', alignItems: 'center',
-};
