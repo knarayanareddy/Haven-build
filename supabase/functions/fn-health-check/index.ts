@@ -1,4 +1,4 @@
-import { admin, corsHeaders, json, recordMetric, safeErrorMessage } from "../_shared/core.ts";
+import { admin, corsHeaders, errorResponse, json, recordMetric, safeErrorMessage } from "../_shared/core.ts";
 import { requireInternalAccess } from "../_shared/internal.ts";
 
 const REDIS_URL = Deno.env.get("UPSTASH_REDIS_URL");
@@ -150,6 +150,11 @@ Deno.serve(async (req) => {
 
   } catch (error) {
     await recordMetric("fn-health-check", started, "error");
-    return json({ success: false, status: "error", error: safeErrorMessage(error) }, 500, req);
+    // This used to return a flat 500 for every failure, including the
+    // `requireInternalAccess` rejection — so an unauthenticated caller was told the
+    // server had broken rather than that it was forbidden, and the function
+    // bypassed the shared error contract the other 80 use. `errorResponse` maps the
+    // throw to 403 FORBIDDEN via _shared/errors.ts.
+    return errorResponse(error, req);
   }
 });
