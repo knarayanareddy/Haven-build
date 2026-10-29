@@ -271,13 +271,13 @@ COMMENT ON FUNCTION public.ensure_location_partition_rls() IS
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Runtime-role de-escalation
 -- ─────────────────────────────────────────────────────────────────────────────
--- 20260615000002 left these two statements commented out:
---     -- ALTER ROLE authenticated NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
---     -- ALTER ROLE anon          NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
--- because ALTER ROLE needs a role with ADMIN OPTION, and migrations run as a
--- non-superuser on Supabase. Leaving them as comments means the hardening exists
--- only in prose, and tests/edge/clinical-immutability-closure.test.mjs asserted on
--- the comment text.
+-- 20260615000002 shipped these two statements, then commented them out because they
+-- aborted the migration (they need a role with ADMIN OPTION; Supabase migrations run
+-- as a non-superuser, so `insufficient_privilege` rolled back the whole transaction —
+-- see commit f8c8d19 "remove redundant ALTER ROLE statements causing migration
+-- failure"). Commenting them out removed the failure but also the hardening, and
+-- tests/edge/clinical-immutability-closure.test.mjs then asserted on the comment text,
+-- so the check passed precisely because the hardening was absent.
 --
 -- The DO block below performs the de-escalation whenever the executing role is
 -- allowed to (self-hosted Postgres, or supabase_admin), and otherwise records a
