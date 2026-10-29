@@ -177,6 +177,15 @@ export function buildModel({ dir = MIGRATIONS_DIR, files = null } = {}) {
   const views = new Map();
   const extensions = new Set();
   const foreignKeys = [];
+  const dropFk = (table, name) => {
+    const idx = foreignKeys.findIndex((fk) => fk.table === table && fk.name === name);
+    if (idx >= 0) foreignKeys.splice(idx, 1);
+  };
+  const addFk = ({ table, column, references, onDelete, name, source }) => {
+    const key = name || `${table}_${column}_fkey`;
+    dropFk(table, key);
+    foreignKeys.push({ table, column, references, onDelete: (onDelete || 'NO ACTION').toUpperCase().replace(/\s+/g, ' '), name: key, source });
+  };
   const functionPrivileges = [];
   const defaultPrivileges = [];
 
@@ -207,8 +216,12 @@ export function buildModel({ dir = MIGRATIONS_DIR, files = null } = {}) {
         const t = table(createTable[1]);
         t.columns = parseColumnList(createTable[2]);
         t.source.push(file);
-        for (const match of createTable[2].matchAll(/([A-Za-z_][A-Za-z0-9_]*)[^,]*?REFERENCES\s+"?([A-Za-z0-9_.]+?)"?\s*\(/gi)) {
-          foreignKeys.push({ table: bare(createTable[1]), column: match[1], references: bare(match[2]), source: file });
+        for (const match of createTable[2].matchAll(/([A-Za-z_][A-Za-z0-9_]*)[^,]*?REFERENCES\s+"?([A-Za-z0-9_.]+?)"?\s*\([^)]*\)([^,]*)/gi)) {
+          const onDelete = /ON DELETE ([A-Z ]+?)(?=\s*(?:,|$)|\s+NOT|\s+DEFERRABLE)/i.exec(match[3] || '')?.[1];
+          addFk({
+            table: bare(createTable[1]), column: match[1], references: bare(match[2]),
+            onDelete, source: file,
+          });
         }
         continue;
       }
@@ -231,6 +244,10 @@ export function buildModel({ dir = MIGRATIONS_DIR, files = null } = {}) {
       if (alter) {
         const t = table(alter[1]);
         const rest = alter[2].toUpperCase();
+        for (const match of alter[2].matchAll(/ENABLE ALWAYS TRIGGER "?([A-Za-z0-9_]+)"?/gi)) {
+          const trigger = triggers.find((entry) => entry.name === match[1]);
+          if (trigger) trigger.always = true;
+        }
         if (/ENABLE ROW LEVEL SECURITY/.test(rest)) t.rlsEnabled = true;
         if (/FORCE ROW LEVEL SECURITY/.test(rest)) t.forceRls = true;
         if (/NO FORCE ROW LEVEL SECURITY/.test(rest)) t.forceRls = false;
@@ -238,8 +255,23 @@ export function buildModel({ dir = MIGRATIONS_DIR, files = null } = {}) {
         if (/OWNER TO/.test(rest)) t.owner = quoted(/OWNER TO ("?[A-Za-z0-9_]+"?)/i.exec(alter[2])?.[1] ?? '');
         // ADD COLUMN is how later migrations extend a table; without this the
         // model would report stale columns.
-        for (const match of alter[2].matchAll(/ADD COLUMN (?:IF NOT EXISTS )?"?([A-Za-z0-9_]+)"?[^,;]*?REFERENCES\s+"?([A-Za-z0-9_.]+?)"?\s*\(/gi)) {
-          foreignKeys.push({ table: bare(alter[1]), column: match[1], references: bare(match[2]), source: file });
+        for (const match of alter[2].matchAll(/ADD COLUMN (?:IF NOT EXISTS )?"?([A-Za-z0-9_]+)"?([^,;]*?)REFERENCES\s+"?([A-Za-z0-9_.]+?)"?\s*\([^)]*\)([^,;]*)/gi)) {
+          addFk({
+            table: bare(alter[1]), column: match[1], references: bare(match[3]),
+            onDelete: /ON DELETE ([A-Z ]+?)(?=\s*(?:,|;|$)|\s+NOT|\s+DEFERRABLE)/i.exec(match[4] || '')?.[1], source: file,
+          });
+        }
+
+        // DROP CONSTRAINT / ADD CONSTRAINT ... FOREIGN KEY — how a later migration
+        // changes a referential action without restating the table.
+        for (const match of alter[2].matchAll(/DROP CONSTRAINT (?:IF EXISTS )?"?([A-Za-z0-9_]+)"?/gi)) {
+          dropFk(bare(alter[1]), match[1]);
+        }
+        for (const match of alter[2].matchAll(/ADD CONSTRAINT "?([A-Za-z0-9_]+)"? FOREIGN KEY \("?([A-Za-z0-9_]+)"?\)\s*REFERENCES\s+"?([A-Za-z0-9_.]+?)"?\s*\([^)]*\)([^,;]*)/gi)) {
+          addFk({
+            table: bare(alter[1]), name: match[1], column: match[2], references: bare(match[3]),
+            onDelete: /ON DELETE ([A-Z ]+?)(?=\s*(?:,|;|$)|\s+NOT|\s+DEFERRABLE)/i.exec(match[4] || '')?.[1], source: file,
+          });
         }
         for (const match of alter[2].matchAll(/ADD COLUMN (?:IF NOT EXISTS )?"?([A-Za-z0-9_]+)"?[\s\S]*?(?=, ADD COLUMN|$)/gi)) {
           const name = match[1];
@@ -258,6 +290,10 @@ export function buildModel({ dir = MIGRATIONS_DIR, files = null } = {}) {
         const roles = /\bTO\s+([A-Za-z0-9_," ]+?)(?:\s+USING|\s+WITH CHECK|$)/i.exec(rest);
         const using = /\bUSING\s*\(([\s\S]*?)\)(?:\s+WITH CHECK|$)/i.exec(rest);
         const check = /\bWITH CHECK\s*\(([\s\S]*)\)\s*$/i.exec(rest);
+        // A later CREATE POLICY with the same name replaces the earlier one (the
+        // migration drops it first; otherwise the DDL would fail in production).
+        const previous = policies.findIndex((entry) => entry.name === policy[1] && entry.table === bare(policy[2]));
+        if (previous >= 0) policies.splice(previous, 1);
         policies.push({
           name: policy[1],
           table: bare(policy[2]),

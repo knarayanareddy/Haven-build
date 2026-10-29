@@ -54,33 +54,49 @@ export function classifyTests(dir = TESTS_DIR) {
   });
 }
 
-/** Classifies one test source. Exported so it can be unit-tested. */
+/**
+ * Classifies one test source. Exported so it can be unit-tested.
+ *
+ * The question is "does this file's verdict depend on something other than the
+ * characters in a source file?". Three ways to qualify:
+ *
+ *   executed   — it imports and drives a production module (dynamic import of
+ *                `supabase/`, `apps/` or `packages/`, directly or through
+ *                `linkSharedModules`/`transpileModuleFile`), or drives a process;
+ *   modelled   — it asks `support/sql-model.mjs` or `support/ast-model.mjs` a
+ *                question (which policies exist, what a function's body does),
+ *                so the assertion is about the deployed schema, not a substring;
+ *   none       — anything that only reads files and matches strings is static.
+ *
+ * A file may *also* read a migration to check an index while driving the real
+ * limiter; the execution is what makes it behavioural, so a `readFileSync` alone
+ * no longer disqualifies it. `sourceReads` is reported either way so a reviewer
+ * can see how much of a behavioural suite is still text matching.
+ */
 export function classify(source) {
   const assertions = (source.match(/\bassert\.\w+\(/g) ?? []).length;
-  const executesCode =
-    // dynamic import of a module under test
-    /(?:await\s+)?import\(\s*[`'"]/.test(source)
-    // static import of anything outside tests/ — the auditors (rls, function
-    // coverage, docs truth) are imported and *called*, which is behaviour
-    || /from\s+['"](?:\.\.\/)+(?:scripts|supabase|apps|packages)\//.test(source)
-    || /\blinkSharedModules\b/.test(source)
-    || /\btranspileModuleFile\b/.test(source)
-    // A test that drives a real process (the browser/e2e suites) is behavioural
-    // by definition; it is not matching strings in source files.
-    || /\b(?:spawn|spawnSync|execFile|execFileSync)\(/.test(source);
-
   const readsSource = /\breadFileSync\(/.test(source);
 
-  // A suite that queries the parsed schema/AST model asserts on structure it never
-  // read as text: `model.policiesFor('profiles')` is a question about the deployed
-  // schema, not a substring search. It only qualifies if the test does not also
-  // read files itself, which is how a text-matching test would sneak back in.
-  const usesModel = /from\s+['"]\.\/support\/[a-z-]*model\.mjs['"]/.test(source) && !readsSource;
-  if (usesModel) return { kind: 'behavioural', reason: 'queries the parsed schema/AST model', assertions };
+  const usesSupportLoader = /from\s+['"]\.\/support\/shared-loader\.mjs['"]/.test(source)
+    || /\blinkSharedModules\b|\btranspileModuleFile\b/.test(source)
+    || /await\s+import\(\s*`\$\{?(?:shared|dir|tmp)/.test(source);
+  const importsProduction = /await\s+import\(\s*['"`][^'"`]*\.\.\/\.\.\/(?:supabase|apps|packages)\//.test(source)
+    || /from\s+['"](?:\.\.\/)+(?:scripts|supabase|apps|packages)\//.test(source)
+    || /await\s+import\(\s*(?:new\s+URL\()?[^)]*\b(?:supabase|apps|packages)\//.test(source);
+  const drivesProcess = /\b(?:spawn|spawnSync|execFile|execFileSync)\(/.test(source);
 
-  if (executesCode) return { kind: 'behavioural', reason: 'executes the module under test', assertions };
-  if (readsSource) return { kind: 'static', reason: 'reads source text and matches strings', assertions };
-  return { kind: 'static', reason: 'no executed module and no file read (nothing verifies behaviour)', assertions };
+  const usesModel = /from\s+['"]\.\/support\/[a-z-]*model\.mjs['"]/.test(source);
+
+  if (usesSupportLoader || importsProduction || drivesProcess) {
+    return { kind: 'behavioural', reason: 'executes the module under test', assertions, sourceReads: readsSource };
+  }
+  if (usesModel) {
+    return { kind: 'behavioural', reason: 'queries the parsed schema/AST model', assertions, sourceReads: readsSource };
+  }
+  if (readsSource) {
+    return { kind: 'static', reason: 'reads source text and matches strings', assertions, sourceReads: true };
+  }
+  return { kind: 'static', reason: 'no executed module and no file read (nothing verifies behaviour)', assertions, sourceReads: false };
 }
 
 export function loadAllowlist(path = ALLOWLIST_PATH) {

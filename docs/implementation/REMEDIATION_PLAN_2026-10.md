@@ -664,3 +664,77 @@ The remaining 35, in the order they should be converted:
 `minimal-closure` (23 assertions) and `banking-stream-buffering` (3 assertions, no file
 read at all) should be deleted rather than converted: the first duplicates coverage
 that now lives in four behavioural suites, the second asserts nothing.
+
+---
+
+## 11. Fifth pass — the second wave of static suites (2026-10-29)
+
+§10 left 35 files. This pass split them with a sharper instrument and converted eight
+more.
+
+### 11.1 The classifier was wrong in both directions
+
+`audit-test-substance.mjs` treated any file containing `readFileSync` as static. That
+mislabelled suites which drive a real module *and* read one migration — e.g.
+`rate-limit-s3-closure.test.mjs`, which exercises the real limiter and separately
+checks that the ingress-buffer index exists. It is behavioural, and it was suppressing
+the number of files that are *actually* static.
+
+The rule is now: a file is behavioural if it executes a production module (through
+`linkSharedModules` / `transpileModuleFile` / a direct import of `supabase/`, `apps/`
+or `packages/`), drives a process, or queries the schema/AST model. Reading source is
+only disqualifying when that is all the file does. `sourceReads` is reported for every
+file, so a reviewer can still see how much of a "behavioural" suite is text matching.
+
+Measured after the correction and the conversions: **57 files · 30 behavioural ·
+27 static-only (allowlisted)**.
+
+### 11.2 Converted or deleted
+
+| Deleted | Replaced by | Why |
+|---|---|---|
+| `vnext-rls-audit` (55 assertions), `rls-erased-profile-visibility`, `rls-pool-saturation`, `fk-cascade-integrity`, `soft-purge-completeness`, `postgis-retention`, `transaction-intercept`, `s3-lifecycle`, `screen-schema` | `tests/edge/db-schema-contract.test.mjs` (12 tests) | every question is now answered by `sql-model.mjs`, which replays all 46 migrations |
+
+New model capability that the conversions forced: `ALTER TABLE … ADD/DROP CONSTRAINT
+… FOREIGN KEY` (with the referential action), same-name `CREATE POLICY` replacement,
+`ALTER FUNCTION … SET`, and `ENABLE ALWAYS TRIGGER`. Without those the model would
+report the schema as it was written rather than as it ends up — which is exactly the
+error the deleted suites made.
+
+### 11.3 Defect found by the conversion: clinical records cascaded away with the login
+
+`20260615000000_fix_fk_cascade_integrity.sql` states the policy — CASCADE is "BANNED
+for any medical administration records (MAR), vital signs, incident reports" and
+RESTRICT is "MANDATORY for all clinical records" — and converts seven constraints.
+It never checked the rest. `fall_events`, `medication_reminders`, `vital_signs`,
+`incidents`, `carer_handover_notes` and `voice_interactions` all still carried
+`elder_id … REFERENCES profiles(id) ON DELETE CASCADE`, and `profiles.id` itself is
+`ON DELETE CASCADE` from `auth.users`. Removing a login — or `auth.admin.deleteUser`,
+a routine support action — silently destroyed the elder's MAR, fall history and
+handover notes. WGBO requires 20 years.
+
+`fk-cascade-integrity` was green throughout: it grepped for the two `ADD CONSTRAINT`
+statements the fix migration writes, and never computed the effective set.
+
+Fixed in `20261029000005_clinical_fk_restrict.sql` (8 constraints → RESTRICT). No
+application path hard-deletes a profile — `soft_purge_profile()` tombstones it — so
+this changes no working flow and makes the documented policy something Postgres
+enforces. `db-schema-contract` fails if any clinical foreign key to `profiles` is
+ever CASCADE or SET NULL again.
+
+### 11.4 What is left, and what each one needs
+
+The 26 allowlisted files fall into four groups. Each entry in
+`scripts/ci/test-substance-allowlist.json` names the specific harness it needs:
+
+| Group | Files | Blocked on |
+|---|---|---|
+| Edge-function handlers | `export-elder-data`, `fhir-staging-r1`, `medium-fixes-c1c4`, `pre-pentest-round4`, `regulatory-escalation-r9`, `device-auto-revoke-r7`, `device-health-spoofing`, `voice-mar-repeatback`, `voice-negative-list`, `voice-stt-hijacking-s6`, `fn-fall-escalation-isolation`, `crisis-query-safety`, `post-erasure-injection-r6`, `vital-threshold-s2` | a `loadEdgeFunction()` harness: transpile `supabase/functions/<name>/index.ts` into the shared temp dir, rewrite `../_shared/*.ts`, stub `Deno.serve` and capture the handler. The pattern already exists for `_shared` and for `fn-pending-confirmation`'s ordering suite. |
+| Database behaviour | `gdpr-erasure-deep-redaction`, `pgvector-embedding-s1`, `pre-pentest-round5-database`, `minimal-closure`, `data-lifecycle-diff`, `deadlock-elimination-load-perf`, `fhir-staging-r1` | a live Postgres in CI (`supabase start`) — the model proves the DDL, not the execution |
+| Client services | `sqlite-offline-queue`, `carer-indexeddb-queue` | a SQLite/IndexedDB fake to drive the real queue modules |
+| React and Next | `floating-voice-rerender`, `family-dashboard-auth` | `@testing-library/react-native`; a request harness for the Next middleware |
+
+Two are not conversion candidates at all: `banking-stream-buffering` asserts nothing
+about the product (a fake engine and three counters — delete it), and
+`unawaited-async-closure` is a static-analysis rule that belongs in ESLint, where it
+would run on every change instead of one file.
