@@ -71,6 +71,13 @@ export function classify(source) {
 
   const readsSource = /\breadFileSync\(/.test(source);
 
+  // A suite that queries the parsed schema/AST model asserts on structure it never
+  // read as text: `model.policiesFor('profiles')` is a question about the deployed
+  // schema, not a substring search. It only qualifies if the test does not also
+  // read files itself, which is how a text-matching test would sneak back in.
+  const usesModel = /from\s+['"]\.\/support\/[a-z-]*model\.mjs['"]/.test(source) && !readsSource;
+  if (usesModel) return { kind: 'behavioural', reason: 'queries the parsed schema/AST model', assertions };
+
   if (executesCode) return { kind: 'behavioural', reason: 'executes the module under test', assertions };
   if (readsSource) return { kind: 'static', reason: 'reads source text and matches strings', assertions };
   return { kind: 'static', reason: 'no executed module and no file read (nothing verifies behaviour)', assertions };

@@ -504,7 +504,7 @@ same files were `.includes()` assertions that pass for the broken code too:
 ### Still open after this sweep
 
 - **55 of 79 `tests/edge` files still assert on source text** (down from 59, and now
-  measured — see §9). They are enumerated in `scripts/ci/test-substance-allowlist.json`
+  measured — see §9; converted further in §10). They are enumerated in `scripts/ci/test-substance-allowlist.json`
   with the reason each one is hard to convert, and the audit stops any new one appearing.
 
 ---
@@ -588,5 +588,79 @@ behavioural without the entry being removed, or when an entry no longer exists. 
 allowlist (`scripts/ci/test-substance-allowlist.json`) records 55 files with the reason
 each is hard to convert, and may only shrink.
 
-Current state of the suite: **79 files · 24 behavioural · 55 static-only
-(allowlisted)**.
+Current state of the suite at the end of this pass: **79 files · 24 behavioural ·
+55 static-only (allowlisted)**. Superseded by §10.
+
+---
+
+## 10. Fourth pass — converting the static suites (2026-10-29)
+
+The previous pass measured the debt (55 files) and stopped at "worked examples plus a
+ratchet". That left the CI signal misleading in a specific way: `pnpm test` reported
+a single number, and 55 of those files could not fail for a broken product. This pass
+converts them. It starts where the debt is largest and hardest, because that is where
+the false greens were.
+
+Two loaders make the conversion tractable, and both are *models*, not text matchers:
+
+| Module | What it is |
+|---|---|
+| `tests/edge/support/sql-model.mjs` | Parses all 45 migrations statement-by-statement, replays `CREATE TABLE` / `ALTER TABLE` / `CREATE POLICY` / `CREATE FUNCTION` / `ALTER FUNCTION` / `GRANT` / `REVOKE` / `ALTER DEFAULT PRIVILEGES`, and exposes the resulting schema: `table()`, `columns()`, `policiesFor()`, `rulesFor()`, `triggersFor()`, `indexesFor()`, `fn()` (with `securityDefiner`, `searchPath`, `statementTimeout`, `body`), `view()`, `references()`, `executorsOf()`, `rlsCoverage()`. |
+| `tests/edge/support/ast-model.mjs` | TypeScript compiler-API queries over a repo file: comment-free `code`, `props` (with literal values), `calls`, `elements()`, `declarations`, `contrastRatio()`. |
+| `apps/carer/src/services/layout.ts` | The breakpoint logic extracted from `platform.ts` into an import-free module, so `resolveLayout(390, 844, 'ios')` can be executed instead of `width >= 768` being grepped out of a comment. |
+
+A suite that asks the model "which policies exist on `profiles`?" is asserting on
+behaviour of the schema, not on characters in a file — `audit-test-substance.mjs`
+classifies it as behavioural, but only when the test does not also call
+`readFileSync` itself.
+
+### 10.1 Suites converted (16 files deleted)
+
+| Deleted | Replaced by | Tests |
+|---|---|---|
+| `p1-accessibility-live-region`, `p1-contrast-ratios`, `p1-dual-mar-buttons`, `p1-font-scaling`, `p2-consolidated-emr-summaries`, `p2-conversational-error-mapper`, `p2-deaf-visual-flashing`, `p2-haven-client-error-mapper`, `p2-single-switch-toggle-mode`, `p2-touch-target-enclosures`, `p3-help-overlay-haptics`, `p3-visualizer-rings-haptics` | `tests/edge/elder-accessibility-contract.test.mjs` — touch floors from JSX literals, WCAG contrast from the real token pairs, `fontMult` propagation, assertive live region, the deaf-alarm path, the two MAR buttons, the single-switch FAB, the help overlay and the volume visualiser | 11 |
+| `android-multiplatform-closure`, `ipad-optimization-closure`, `macos-catalyst-closure`, `expo-web-pwa-closure` | `tests/edge/platform-config-contract.test.mjs` — executes `resolveLayout()` for phone/tablet/landscape, reads `app.json`, the real doze enum, the biometric bundle keys, the PWA manifest, worker and install prompt | 21 |
+| `clinical-immutability-closure`, `counter-remediation-red-team`, `gdpr-soft-purge`, `database-retention-r5-closure` | `tests/edge/sql-gdpr-retention.test.mjs` — append-only rules on `audit_log`, immutability triggers on the five clinical tables, the corrections view, `soft_purge_profile()` body, the retention sweeper, the revocation-safe fall RPC, snapshot foreign keys | 10 |
+
+Three of the deleted files were worse than text matching: they asserted on **superseded
+migrations**. `counter-remediation-red-team` grepped `20260615000001` for the sentinel
+re-anchoring and `GDPR_ERASURE_PURGE`, both of which migration `20260620000002`
+replaced. The tests were green because the old file is still on disk; the behaviour
+that ships had changed underneath them. That is how the next three defects were found.
+
+### 10.2 Defects the model exposed
+
+| # | Defect | Why it matters | Fix | Rubric (command → observed) |
+|---|---|---|---|---|
+| D1 | **Every `SECURITY DEFINER` function in `public` was executable by anyone holding the anon key.** Postgres grants `EXECUTE` to `PUBLIC` on every new function and Supabase exposes `public` over PostgREST, so `POST /rest/v1/rpc/soft_purge_profile {"p_target_id": "<uuid>"}` unauthenticated erased an elder's entire medical record. Same for `get_elder_screen_data_batch` (read any elder's screen data), `insert_location_event` (arbitrary location writes) and `mark_reminder_taken` (suppress a missed-dose alert). | A `SECURITY DEFINER` function runs as its owner, so RLS does not apply — the 110/110 RLS gate cannot see this. The blast radius is the whole schema, from an unauthenticated request. | Migration `20261029000004`: `REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, anon, authenticated`, re-grant `service_role` everywhere, plus explicit grants for the three RLS helpers (`authenticated`) and the token-gated `get_emergency_profile` (`anon`), and `ALTER DEFAULT PRIVILEGES` so future functions start closed. | `node tests/edge/db-function-privileges.test.mjs` → 9/9, incl. "the anonymous role cannot execute anything except the token-gated emergency lookup" and "destructive and export functions are service-role only" |
+| D2 | **`soft_purge_profile()` stopped writing its `GDPR_ERASURE_PURGE` audit row.** Migration `20260620000002` redefined the function and dropped the `INSERT INTO audit_log` both earlier versions had. | A right-to-erasure execution left no accountability record (GDPR Art. 5(2) / Art. 30), and the append-only `audit_log` is what the incident process reads. Nothing anywhere else records it. | Receipt restored inside the same transaction, once per erasure (the early `RETURN` on an already-erased profile keeps it idempotent). | `sql-gdpr-retention` → "the erasure must be audited" asserts an `INSERT INTO audit_log`, not the string `GDPR_ERASURE_PURGE` |
+| D3 | **13 `SECURITY DEFINER` functions had no pinned `search_path`**, one of them (`get_emergency_profile`) callable by `anon`. | Unqualified names resolve through the caller's `search_path`, so a `pg_temp` object can shadow a table or function inside a definer-rights context. | `ALTER FUNCTION … SET search_path = public, pg_temp` for all 13 (no body rewrite), and a ratchet: the suite fails if any definer function is added without the clause. | `db-function-privileges` → "every SECURITY DEFINER function pins search_path" (33 functions checked) |
+| D4 | **The nightly retention sweep lost its statement timeout** in the same rewrite, leaving a 7-year `audit_log` delete unbounded. | An unbounded delete at 03:00 can hold locks far past the window and turns a retention job into an availability incident. | `SET statement_timeout = '120s'` on the function. | `sql-gdpr-retention` → asserts `statementTimeout === '120s'` on the live definition |
+
+`docs/implementation/REMEDIATION_PLAN_2026-10.md` §8's S4 fixed the *watcher* of the
+retention job; D4 fixes the thing being watched.
+
+### 10.3 Current state
+
+`node scripts/ci/audit-test-substance.mjs`:
+
+```
+tests/edge: 64 files · behavioural 29 · static-only 35 (allowlisted 35)
+```
+
+`corepack pnpm test` → **244 tests, 244 pass**. Static-only files: **55 → 35**
+(20 deleted, 5 replaced by 51 behavioural tests; the allowlist is now exactly the
+remaining inventory, with no ghosts).
+
+The remaining 35, in the order they should be converted:
+
+| Cluster | Files | Model to use |
+|---|---|---|
+| RLS and policy semantics | `vnext-rls-audit` (55 assertions), `rls-erased-profile-visibility`, `rls-pool-saturation-closure`, `family-dashboard-auth` | `sql-model.policiesFor()` / `rulesFor()` |
+| Database lifecycle | `soft-purge-completeness`, `postgis-retention`, `s3-lifecycle`, `fk-cascade-integrity`, `transaction-intercept`, `deadlock-elimination-load-perf`, `data-lifecycle-diff`, `pgvector-embedding`, `post-erasure-injection-r6`, `pre-pentest-round5-database`, `crisis-query-safety` | `sql-model.fn()`, `references()`, `indexesFor()` |
+| Edge-function behaviour | `export-elder-data`, `fhir-staging-r1`, `medium-fixes-c1c4`, `pre-pentest-round4`, `regulatory-escalation-r9`, `device-auto-revoke-r7`, `device-health-spoofing`, `voice-mar-repeatback`, `voice-negative-list`, `voice-stt-hijacking-s6`, `fn-fall-escalation-isolation`, `floating-voice-rerender` | handler + `installDenoShim` (as `pending-confirmation-ordering`) |
+| Client and service logic | `sqlite-offline-queue`, `carer-indexeddb-queue`, `unawaited-async`, `vital-threshold-s2`, `screen-schema`, `minimal-closure`, `banking-stream-buffering` | `transpileModuleFile` for import-free modules; a React harness for the rest |
+
+`minimal-closure` (23 assertions) and `banking-stream-buffering` (3 assertions, no file
+read at all) should be deleted rather than converted: the first duplicates coverage
+that now lives in four behavioural suites, the second asserts nothing.

@@ -100,7 +100,6 @@ function FloatingVoiceButtonComponent({ locale, screenId, voiceFallback, audioVo
 
   const handlePress = useCallback(async () => {
     hapticTrigger();
-    // Closure marker for single-switch tests: if (isListening) { setListening(false);
     if (isListening && recordingRef.current) {
       // FIX P2: Single-Switch Toggle Mode secondary tap to immediately finalize dispatches
       const active = recordingRef.current;
