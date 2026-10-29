@@ -55,7 +55,7 @@ Deno.serve(async (req) => {
     }
 
     await recordMetric("fn-family-message-send", started, "success");
-    return json({ success: true, message_id: msg.id, sender_id: userId, sender_role: senderRole });
+    return json({ success: true, message_id: msg.id, sender_id: userId, sender_role: senderRole }, 200, req);
   } catch (e) {
     await recordMetric("fn-family-message-send", started, "error");
     return errorResponse(e, req);

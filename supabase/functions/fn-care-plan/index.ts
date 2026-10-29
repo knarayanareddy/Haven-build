@@ -21,7 +21,7 @@ Deno.serve(async (req) => {
       if (itemsError) throw itemsError;
     }
     await recordMetric("fn-care-plan", started, "success");
-    return json({ success: true, care_plan_id: plan.id });
+    return json({ success: true, care_plan_id: plan.id }, 200, req);
   } catch (e) {
     await recordMetric("fn-care-plan", started, "error");
     return errorResponse(e, req);

@@ -13,7 +13,7 @@ Deno.serve(async (req) => {
     const { data, error } = await userClient(req).rpc('measure_function_slo', { p_fn_name: body.fn_name, p_p95_budget_ms: body.p95_budget_ms });
     if (error) throw error;
     await recordMetric('fn-slo-measure', started, 'success');
-    return json({ success: true, slo: data });
+    return json({ success: true, slo: data }, 200, req);
   } catch (e) {
     await recordMetric('fn-slo-measure', started, 'error');
     return errorResponse(e, req);

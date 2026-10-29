@@ -67,7 +67,7 @@ Deno.serve(async (req) => {
       });
       await db.from("medication_ocr_jobs").update({ status: "needs_review" }).eq("id", job.id);
       await recordMetric("fn-medication-ocr", started, "success");
-      return json({ success: true, job_id: job.id, review_required: true, review_pending: true, extracted: parsed, uploaded_by_id: userId });
+      return json({ success: true, job_id: job.id, review_required: true, review_pending: true, extracted: parsed, uploaded_by_id: userId }, 200, req);
     }
 
     // Feature flag off → legacy behaviour: write medication + reminders directly.
@@ -92,7 +92,7 @@ Deno.serve(async (req) => {
     if (reminderError) throw reminderError;
     await db.from("medication_ocr_jobs").update({ status: "completed", created_medication_id: med.id }).eq("id", job.id);
     await recordMetric("fn-medication-ocr", started, "success");
-    return json({ success: true, job_id: job.id, medication_id: med.id, review_required: false, extracted: parsed, uploaded_by_id: userId });
+    return json({ success: true, job_id: job.id, medication_id: med.id, review_required: false, extracted: parsed, uploaded_by_id: userId }, 200, req);
   } catch (e) {
     await recordMetric("fn-medication-ocr", started, "error");
     return errorResponse(e, req);

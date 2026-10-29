@@ -25,7 +25,7 @@ Deno.serve(async (req) => {
       if (updateError) throw updateError;
     }
     await recordMetric('fn-driving-event', started, 'success');
-    return json({ success: true, driving_event_id: event.id, family_notified: share && score >= 70 });
+    return json({ success: true, driving_event_id: event.id, family_notified: share && score >= 70 }, 200, req);
   } catch (e) {
     await recordMetric('fn-driving-event', started, 'error');
     return errorResponse(e, req);

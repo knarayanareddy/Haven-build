@@ -23,7 +23,7 @@ Deno.serve(async (req) => {
     }
     if (rows.length) await db.from("medication_reminders").upsert(rows, { onConflict: "medication_id,elder_id,scheduled_time" });
     await recordMetric("fn-daily-reminder-scheduler", started, "success");
-    return json({ success: true, reminders_scheduled: rows.length });
+    return json({ success: true, reminders_scheduled: rows.length }, 200, req);
   } catch (e) {
     await recordMetric("fn-daily-reminder-scheduler", started, "error");
     return errorResponse(e, req);

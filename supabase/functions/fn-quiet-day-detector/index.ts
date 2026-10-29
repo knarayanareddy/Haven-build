@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
     }
 
     await recordMetric("fn-quiet-day-detector", started, "success");
-    return json({ ok: true, elders_flagged: flagged.length });
+    return json({ ok: true, elders_flagged: flagged.length }, 200, req);
   } catch (e) {
     await recordMetric("fn-quiet-day-detector", started, "error");
     return errorResponse(e, req);

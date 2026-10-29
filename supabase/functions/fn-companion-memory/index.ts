@@ -29,7 +29,7 @@ Deno.serve(async (req) => {
           .eq("id", matches[0].id);
         if (error) throw error;
         await recordMetric("fn-companion-memory", started, "success");
-        return json({ memories_created: 0, memories_updated: 1, memories_skipped: 0, memory_id: matches[0].id });
+        return json({ memories_created: 0, memories_updated: 1, memories_skipped: 0, memory_id: matches[0].id }, 200, req);
       }
     } else {
       const { data: existing, error } = await db
@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
         const { error: updateError } = await db.from("companion_memory").update({ last_referenced: new Date().toISOString() }).eq("id", duplicate.id);
         if (updateError) throw updateError;
         await recordMetric("fn-companion-memory", started, "success");
-        return json({ memories_created: 0, memories_updated: 1, memories_skipped: 0, memory_id: duplicate.id });
+        return json({ memories_created: 0, memories_updated: 1, memories_skipped: 0, memory_id: duplicate.id }, 200, req);
       }
     }
 
@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
       .single();
     if (error) throw error;
     await recordMetric("fn-companion-memory", started, "success");
-    return json({ memories_created: 1, memories_updated: 0, memories_skipped: 0, memory_id: row.id });
+    return json({ memories_created: 1, memories_updated: 0, memories_skipped: 0, memory_id: row.id }, 200, req);
   } catch (e) {
     await recordMetric("fn-companion-memory", started, "error");
     return errorResponse(e, req);

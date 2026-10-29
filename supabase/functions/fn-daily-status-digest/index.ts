@@ -93,7 +93,7 @@ Deno.serve(async (req) => {
     }
 
     await recordMetric("fn-daily-status-digest", started, "success");
-    return json({ ok: true, digests_generated: digests.length });
+    return json({ ok: true, digests_generated: digests.length }, 200, req);
   } catch (e) {
     await recordMetric("fn-daily-status-digest", started, "error");
     return errorResponse(e, req);

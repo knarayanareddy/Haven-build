@@ -16,7 +16,7 @@ Deno.serve(async (req) => {
     const { data, error } = await userClient(req).from('legacy_accounts').insert({ elder_id: userId, service_name: body.service_name, service_url: body.service_url, account_identifier_hint: body.account_identifier_hint, encrypted_secret_path: secretPath, intended_recipient_id: body.intended_recipient_id, action_on_death: body.action_on_death ?? 'no_action', notes_nl: body.notes_nl, notes_en: body.notes_en, last_reviewed_at: new Date().toISOString() }).select().single();
     if (error) throw error;
     await recordMetric('fn-legacy-vault', started, 'success');
-    return json({ success: true, legacy_account_id: data.id });
+    return json({ success: true, legacy_account_id: data.id }, 200, req);
   } catch (e) {
     await recordMetric('fn-legacy-vault', started, 'error');
     return errorResponse(e, req);

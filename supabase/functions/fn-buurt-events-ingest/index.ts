@@ -35,7 +35,7 @@ Deno.serve(async (req) => {
       inserted++;
     }
     await recordMetric("fn-buurt-events-ingest", started, "success");
-    return json({ success: true, events_inserted: inserted });
+    return json({ success: true, events_inserted: inserted }, 200, req);
   } catch (e) {
     await recordMetric("fn-buurt-events-ingest", started, "error");
     return errorResponse(e, req);

@@ -35,7 +35,7 @@ Deno.serve(async (req) => {
       await Promise.all((family ?? []).map((f: { family_member_id: string }) => dispatchNotification({ recipient_id: f.family_member_id, elder_id: userId, notification_type: risk === 'zwart' ? 'scam_zwart' : 'scam_rood', title_nl: 'Verdachte webpagina', title_en: 'Suspicious web page', body_nl: 'HAVEN zag een verdachte webpagina. Bel rustig even mee.', body_en: 'HAVEN saw a suspicious web page. Please calmly check in.', data: { browser_event_id: event.id } })));
     }
     await recordMetric('fn-browser-shield', started, 'success');
-    return json({ success: true, browser_event_id: event.id, risk_level: risk, risk_score: riskScore, detected_patterns: patterns });
+    return json({ success: true, browser_event_id: event.id, risk_level: risk, risk_score: riskScore, detected_patterns: patterns }, 200, req);
   } catch (e) {
     await recordMetric('fn-browser-shield', started, 'error');
     return errorResponse(e, req);

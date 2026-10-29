@@ -20,7 +20,7 @@ Deno.serve(async (req) => {
       .limit(Math.min(Number(body.limit ?? 50), 200));
     if (error) throw error;
     await recordMetric("fn-audit-query", started, "success");
-    return json({ success: true, audit_events: data });
+    return json({ success: true, audit_events: data }, 200, req);
   } catch (e) {
     await recordMetric("fn-audit-query", started, "error");
     return errorResponse(e, req);

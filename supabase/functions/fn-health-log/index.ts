@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
       throw new Error("Unsupported health log kind");
     }
     await recordMetric("fn-health-log", started, "success");
-    return json({ success: true, kind: body.kind, record: result });
+    return json({ success: true, kind: body.kind, record: result }, 200, req);
   } catch (e) {
     await recordMetric("fn-health-log", started, "error");
     return errorResponse(e, req);

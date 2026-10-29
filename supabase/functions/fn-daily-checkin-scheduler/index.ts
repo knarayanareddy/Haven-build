@@ -49,7 +49,7 @@ Deno.serve(async (req) => {
     }
 
     await recordMetric("fn-daily-checkin-scheduler", started, "success");
-    return json({ ok: true, scheduled: scheduled.length });
+    return json({ ok: true, scheduled: scheduled.length }, 200, req);
   } catch (e) {
     await recordMetric("fn-daily-checkin-scheduler", started, "error");
     return errorResponse(e, req);

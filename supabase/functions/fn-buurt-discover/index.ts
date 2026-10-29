@@ -38,7 +38,7 @@ Deno.serve(async (req) => {
       shared_interest_matches: [...counts.entries()].map(([tag_key, v]) => ({ tag_key, label_nl: v.label_nl, label_en: v.label_en, nearby_count: v.count })),
       suggested_events: events ?? [],
       walk_buddy_available: (nearby?.length ?? 0) > 1,
-    });
+    }, 200, req);
   } catch (e) {
     await recordMetric("fn-buurt-discover", started, "error");
     return errorResponse(e, req);

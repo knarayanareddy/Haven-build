@@ -20,7 +20,7 @@ Deno.serve(async (req) => {
       const { data, error } = await userClient(req).from("appointments").insert({ elder_id: userId, title_nl: body.title_nl, title_en: body.title_en ?? body.title_nl, provider_name: body.provider_name, provider_phone: body.provider_phone, location_label: body.location_label, starts_at: body.starts_at, ends_at: body.ends_at, is_medical: Boolean(body.is_medical), created_by_id: userId }).select().single();
       if (error) throw error;
       await recordMetric("fn-telehealth-transport", started, "success");
-      return json({ success: true, appointment_id: data.id });
+      return json({ success: true, appointment_id: data.id }, 200, req);
     }
 
     if (action === "request_transport") {
@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
       const { data: family } = await admin().from("family_relationships").select("family_member_id").eq("elder_id", body.elder_id).eq("elder_consented", true).eq("is_active", true);
       await Promise.all((family ?? []).map((f: { family_member_id: string }) => dispatchNotification({ recipient_id: f.family_member_id, elder_id: String(body.elder_id), notification_type: "systeem", title_nl: "Vervoer gevraagd", title_en: "Transport requested", body_nl: "Er is hulp met vervoer gevraagd voor een afspraak.", body_en: "Help with transport was requested for an appointment.", data: { transport_request_id: data.id } })));
       await recordMetric("fn-telehealth-transport", started, "success");
-      return json({ success: true, transport_request_id: data.id, requested_by_id: userId });
+      return json({ success: true, transport_request_id: data.id, requested_by_id: userId }, 200, req);
     }
 
     if (action === "start_telehealth") {
@@ -41,7 +41,7 @@ Deno.serve(async (req) => {
       const { data, error } = await userClient(req).from("telehealth_sessions").insert({ elder_id: userId, initiated_by_id: userId, provider_type: body.provider_type, provider_name: body.provider_name, provider_phone: body.provider_phone, medication_brief_read: Boolean(body.medication_brief_read), notes_nl: body.notes_nl, notes_en: body.notes_en }).select().single();
       if (error) throw error;
       await recordMetric("fn-telehealth-transport", started, "success");
-      return json({ success: true, telehealth_session_id: data.id });
+      return json({ success: true, telehealth_session_id: data.id }, 200, req);
     }
     throw new Error("Unsupported telehealth or transport action");
   } catch (e) {

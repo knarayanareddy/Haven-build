@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
     if (msgError) throw msgError;
     await dispatchNotification({ recipient_id: String(body.elder_id), elder_id: String(body.elder_id), notification_type: 'familiebericht', title_nl: 'Videogroet van kleinkind', title_en: 'Grandchild video hello', body_nl: 'Er staat een lieve groet klaar in HAVEN.', body_en: 'A loving hello is ready in HAVEN.', data: { message_id: msg.id, grandchild_profile_id: child.id } });
     await recordMetric('fn-grandchild-message-send', started, 'success');
-    return json({ success: true, grandchild_profile_id: child.id, message_id: msg.id });
+    return json({ success: true, grandchild_profile_id: child.id, message_id: msg.id }, 200, req);
   } catch (e) {
     await recordMetric('fn-grandchild-message-send', started, 'error');
     return errorResponse(e, req);

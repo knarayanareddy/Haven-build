@@ -17,7 +17,7 @@ Deno.serve(async (req) => {
       escalated++;
     }
     await recordMetric("fn-medication-escalation", started, "success");
-    return json({ success: true, escalated });
+    return json({ success: true, escalated }, 200, req);
   } catch (e) {
     await recordMetric("fn-medication-escalation", started, "error");
     return errorResponse(e, req);

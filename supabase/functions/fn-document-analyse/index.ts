@@ -67,7 +67,7 @@ Deno.serve(async (req: Request) => {
       await Promise.all((family ?? []).map((f) => dispatchNotification({ recipient_id: f.family_member_id, elder_id: userId, notification_type: "systeem", title_nl: "Belangrijk document", title_en: "Important document", body_nl: "Er is een gevoelig document opgeslagen. Vraag rustig of u kunt helpen.", body_en: "A sensitive document was stored. Calmly ask if you can help.", data: { document_id: doc.id } })));
     }
     await recordMetric("fn-document-analyse", started, "success");
-    return json({ success: true, document_id: doc.id, analysis_job_id: job.id, redaction_required: bsnDetected, status: job.status });
+    return json({ success: true, document_id: doc.id, analysis_job_id: job.id, redaction_required: bsnDetected, status: job.status }, 200, req);
   } catch (error) {
     const isBsnErr = (error as { isBsnViolation?: boolean }).isBsnViolation;
     const status = (error as { status?: number }).status ?? 400;

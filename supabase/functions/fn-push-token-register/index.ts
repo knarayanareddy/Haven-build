@@ -19,7 +19,7 @@ Deno.serve(async (req) => {
       .single();
     if (error) throw error;
     await recordMetric("fn-push-token-register", started, "success");
-    return json({ success: true, push_token_id: data.id });
+    return json({ success: true, push_token_id: data.id }, 200, req);
   } catch (e) {
     await recordMetric("fn-push-token-register", started, "error");
     return errorResponse(e, req);

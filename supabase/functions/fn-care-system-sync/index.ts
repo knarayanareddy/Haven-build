@@ -14,7 +14,7 @@ Deno.serve(async (req) => {
     const { count: incidents } = await db.from('incidents').select('id', { count: 'exact', head: true }).eq('elder_id', body.elder_id);
     await db.from('external_care_sync_jobs').update({ status: 'completed', records_pushed: (visits ?? 0) + (incidents ?? 0), completed_at: new Date().toISOString() }).eq('id', job.id);
     await recordMetric('fn-care-system-sync', started, 'success');
-    return json({ success: true, sync_job_id: job.id, records_pushed: (visits ?? 0) + (incidents ?? 0) });
+    return json({ success: true, sync_job_id: job.id, records_pushed: (visits ?? 0) + (incidents ?? 0) }, 200, req);
   } catch (e) {
     await recordMetric('fn-care-system-sync', started, 'error');
     return errorResponse(e, req);

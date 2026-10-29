@@ -23,7 +23,7 @@ Deno.serve(async (req) => {
     }
     await db.from('community_event_sources').update({ last_ingested_at: new Date().toISOString() }).eq('id', source.id);
     await recordMetric('fn-community-events-ingest', started, 'success');
-    return json({ success: true, events_inserted: inserted });
+    return json({ success: true, events_inserted: inserted }, 200, req);
   } catch (e) {
     await recordMetric('fn-community-events-ingest', started, 'error');
     return errorResponse(e, req);

@@ -291,7 +291,7 @@ Deno.serve(async (req: Request) => {
     }
 
     await recordMetric("fn-device-health-monitor", started, "success");
-    return json({ ok: true, events_written: eventsWritten.length, family_notified: familyNotified.length, escalations: escalations.length });
+    return json({ ok: true, events_written: eventsWritten.length, family_notified: familyNotified.length, escalations: escalations.length }, 200, req);
   } catch (e) {
     await recordMetric("fn-device-health-monitor", started, "error");
     return errorResponse(e, req);

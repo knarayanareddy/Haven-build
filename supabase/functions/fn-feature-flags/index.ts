@@ -23,7 +23,7 @@ Deno.serve(async (req) => {
       entries[f.flag_key] = Boolean(data);
     }
     await recordMetric("fn-feature-flags", started, "success");
-    return json({ success: true, flags: entries });
+    return json({ success: true, flags: entries }, 200, req);
   } catch (e) {
     await recordMetric("fn-feature-flags", started, "error");
     return errorResponse(e, req);

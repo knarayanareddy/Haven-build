@@ -13,7 +13,7 @@ Deno.serve(async (req) => {
     const { data, error } = await userClient(req).from("data_breach_incidents").insert({ detected_by_id: body.detected_by_id ?? adminUserId, severity: body.severity, summary: body.summary, affected_data_categories: body.affected_data_categories ?? [], affected_subject_count: body.affected_subject_count, containment_action: body.containment_action, ap_notification_required: body.ap_notification_required, users_notification_required: body.users_notification_required, dpo_profile_id: body.dpo_profile_id }).select().single();
     if (error) throw error;
     await recordMetric("fn-breach-incident", started, "success");
-    return json({ success: true, breach_incident_id: data.id, status: data.status });
+    return json({ success: true, breach_incident_id: data.id, status: data.status }, 200, req);
   } catch (e) {
     await recordMetric("fn-breach-incident", started, "error");
     return errorResponse(e, req);

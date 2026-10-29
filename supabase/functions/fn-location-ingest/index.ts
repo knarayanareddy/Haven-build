@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
     }
 
     await recordMetric("fn-location-ingest", started, "success");
-    return json({ success: true, location_event_id: eventId, precise_location_ttl_hours: outside ? 24 : 0 });
+    return json({ success: true, location_event_id: eventId, precise_location_ttl_hours: outside ? 24 : 0 }, 200, req);
   } catch (e) {
     await recordMetric("fn-location-ingest", started, "error");
     return errorResponse(e, req);

@@ -13,7 +13,7 @@ Deno.serve(async (req) => {
     const { data, error } = await userClient(req).from('slo_alerts').insert({ alert_key: body.alert_key, severity: body.severity, title: body.title, details: body.details ?? {}, status: body.status ?? 'open' }).select().single();
     if (error) throw error;
     await recordMetric('fn-observability-alert', started, 'success');
-    return json({ success: true, slo_alert_id: data.id });
+    return json({ success: true, slo_alert_id: data.id }, 200, req);
   } catch (e) {
     await recordMetric('fn-observability-alert', started, 'error');
     return errorResponse(e, req);

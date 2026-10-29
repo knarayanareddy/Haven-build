@@ -21,7 +21,7 @@ Deno.serve(async (req) => {
     const { data, error } = await db.from("notification_preferences").select("*").eq("profile_id", userId);
     if (error) throw error;
     await recordMetric("fn-notification-preferences", started, "success");
-    return json({ success: true, preferences: data });
+    return json({ success: true, preferences: data }, 200, req);
   } catch (e) {
     await recordMetric("fn-notification-preferences", started, "error");
     return errorResponse(e, req);

@@ -19,7 +19,7 @@ Deno.serve(async (req) => {
     if (error) throw error;
     const ready = (data ?? []).length > 0 && (data ?? []).every((check) => check.status === "passed" || check.status === "waived");
     await recordMetric("fn-release-check", started, "success");
-    return json({ success: true, release_version: body.release_version, ready_for_release: ready, checks: data });
+    return json({ success: true, release_version: body.release_version, ready_for_release: ready, checks: data }, 200, req);
   } catch (e) {
     await recordMetric("fn-release-check", started, "error");
     return errorResponse(e, req);

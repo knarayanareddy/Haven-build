@@ -15,19 +15,19 @@ Deno.serve(async (req) => {
       const { data, error } = await db.from("vendor_register").upsert({ vendor_name: body.vendor_name, purpose: body.purpose, data_shared: body.data_shared, storage_region: body.storage_region, dpa_status: body.dpa_status ?? "draft", scc_required: Boolean(body.scc_required), bsn_transmitted: false, notes: body.notes }, { onConflict: "vendor_name" }).select().single();
       if (error) throw error;
       await recordMetric("fn-compliance-register", started, "success");
-      return json({ success: true, vendor: data });
+      return json({ success: true, vendor: data }, 200, req);
     }
     if (body.kind === "dpia") {
       requireFields(body, ["assessment_key", "title", "scope"]);
       const { data, error } = await db.from("dpia_assessments").upsert({ assessment_key: body.assessment_key, title: body.title, scope: body.scope, status: body.status ?? "draft", residual_risk: body.residual_risk ?? "unassessed", document_path: body.document_path, notes: body.notes }, { onConflict: "assessment_key" }).select().single();
       if (error) throw error;
       await recordMetric("fn-compliance-register", started, "success");
-      return json({ success: true, dpia: data });
+      return json({ success: true, dpia: data }, 200, req);
     }
     const { data, error } = await db.from("vendor_register").select("vendor_name,purpose,dpa_status,scc_required,review_due_date").is("deleted_at", null).order("vendor_name");
     if (error) throw error;
     await recordMetric("fn-compliance-register", started, "success");
-    return json({ success: true, vendors: data });
+    return json({ success: true, vendors: data }, 200, req);
   } catch (e) {
     await recordMetric("fn-compliance-register", started, "error");
     return errorResponse(e, req);

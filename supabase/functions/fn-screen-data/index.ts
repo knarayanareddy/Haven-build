@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
         scam_events: queries[2].data ?? [],
         neighbourhood_profile: queries[3].data ?? null,
       },
-    });
+    }, 200, req);
   } catch (e) {
     await recordMetric("fn-screen-data", started, "error");
     return errorResponse(e, req);

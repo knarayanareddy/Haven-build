@@ -28,7 +28,7 @@ Deno.serve(async (req) => {
     const { error: memoryError } = await db.from("companion_memory").insert({ elder_id: userId, memory_type: "life_event", content_nl: String(transcriptNl ?? "").slice(0, 500), content_en: String(transcriptEn ?? "").slice(0, 500), importance_score: 8, source: "life_story", source_id: story.id });
     if (memoryError) throw memoryError;
     await recordMetric("fn-life-story-process", started, "success");
-    return json({ success: true, story_id: story.id, status: story.status });
+    return json({ success: true, story_id: story.id, status: story.status }, 200, req);
   } catch (e) {
     await recordMetric("fn-life-story-process", started, "error");
     return errorResponse(e, req);
