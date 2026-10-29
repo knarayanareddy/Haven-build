@@ -156,17 +156,15 @@ export async function executeRegulatoryEscalation(
       // COMPENSATING CONTROL — DNS pre-resolution reduces TOCTOU window
       // but does not fully eliminate DNS rebinding risk.
       // Full mitigation requires egress proxy (scheduled infrastructure milestone)
-      const mockDns = (db as unknown as { __mockDns?: Record<string, string[]> }).__mockDns;
+      // No test hook here any more: the previous version read a `__mockDns`
+      // property off the Supabase client, so the resolver branch was only ever
+      // exercised when a mock happened to set it. Tests stub `Deno.resolveDns`
+      // instead, which is the same call production makes.
       let resolvedIps: string[] = [];
-      if (mockDns && mockDns[host]) {
-        resolvedIps = mockDns[host];
-      } else {
-        try {
-          // Resolve A and AAAA records via Deno DNS OS APIs
-          resolvedIps = await Deno.resolveDns(host, "A");
-        } catch {
-          resolvedIps = [];
-        }
+      try {
+        resolvedIps = await Deno.resolveDns(host, "A");
+      } catch {
+        resolvedIps = [];
       }
 
       const hasInternalIp = resolvedIps.some((ip) => {

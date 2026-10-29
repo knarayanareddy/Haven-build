@@ -112,10 +112,20 @@ cd apps/elder && eas update --rollback --branch production
 
 ### Common Defect 2: RBAC Relational Sharding Authorization Contention
 * **Symptom:** Edge functions accessing `assertElderOrFamilyCan` directly across 81 micro-VMs induce a 15–30s DB sharding exploit lag window during massive active Power of Attorney delegate relationship updates.
-* **Operational Fix:** Fulfilling our Horizontal RBAC closures (`_shared/authz.ts`), verify that `fn-consent-update` programmatically invokes `invalidateRelationshipCache(delegate_id, elder_id)` upon delegate alterations, instantly flushing local V8 memory Map caches (`delegateCache`) across active worker enclaves. E.g. execute exactly:
+* **Operational Fix:** There is nothing to flush. `_shared/authz.ts` no longer memoises the delegate lookup (a per-isolate `delegateCache` was removed on 2026-10-29: a module-scoped Map cannot be invalidated across isolates, so it only delayed revocations). `fn-consent-update` writes `family_relationships.is_active = false` and every isolate observes it on its next request. To confirm or force a revocation:
   ```sql
-  SELECT invalidate_relationship_cache_rpc('00000000-0000-0000-0000-000000000001');
+  -- what the record actually says right now
+  SELECT id, elder_id, family_member_id, is_active, elder_consented
+    FROM family_relationships
+   WHERE elder_id = '<elder-uuid>';
+
+  -- force it
+  UPDATE family_relationships
+     SET is_active = false, elder_consented = false, elder_consented_at = NULL
+   WHERE elder_id = '<elder-uuid>'
+     AND family_member_id = '<delegate-uuid>';
   ```
+  **Note:** earlier revisions of this runbook told on-call to run `SELECT invalidate_relationship_cache_rpc(...)`. No such function has ever existed in `supabase/migrations`; it would have failed with `function does not exist` in the middle of an incident.
 
 ### Common Defect 3: PostGIS Relational Spatial Purge Deadlocks
 * **Symptom:** Periodic emergency spatial cleanups (`ST_DWithin` threshold NULL sweeps) executing massive multi-million row update statements induce table Compute compute locks.

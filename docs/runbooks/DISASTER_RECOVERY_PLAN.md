@@ -89,7 +89,13 @@ To non-repudiably prove that backups function correctly before disaster strikes:
      ```bash
      supabase projects api-keys rotate --project-ref haven-prod-99x1 --key-type service_role
      ```
-  2. **Wipe Absolute Multi-Isolate Relationship Cache Maps:** In `_shared/authz.ts`, broadcast an explicit invalidation command to instantly clear all 81 distributed local in-memory RBAC Maps (`delegateCache.clear()`).
+  2. **Revoke Delegate Access at the Source:** There is no cache to flush. `_shared/authz.ts` reads `family_relationships` on every check, so set the authoritative state directly and every isolate observes it on its next request:
+     ```sql
+     UPDATE family_relationships
+        SET is_active = false, elder_consented = false, elder_consented_at = NULL
+      WHERE elder_id = '<elder-uuid>';
+     ```
+     (An earlier version of this step said to "broadcast an invalidation command to clear all 81 local `delegateCache` Maps". That cache was removed on 2026-10-29: it lived inside a single isolate, so the command could not have reached the others.)
   3. **Assert Canonical Modification Rejection Rules:** Confirm that Migration `20260615000016` actively enforced our highly rigorous `CREATE RULE` modification rejection object over `audit_log`, completely proving that the compromised credential holder definitively failed to mutate, append, or obscure structural `security_violations` ledgers.
 
 ---

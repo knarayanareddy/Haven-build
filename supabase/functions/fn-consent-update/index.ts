@@ -1,6 +1,6 @@
 import { rateLimit } from "../_shared/ratelimit.ts";
 import { admin, corsHeaders, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
-import { assertSelf, getJwtUserId, invalidateRelationshipCache } from "../_shared/authz.ts";
+import { assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { captureException } from "../_shared/sentry.ts";
 
@@ -61,7 +61,6 @@ Deno.serve(async (req: Request) => {
 
     // Mutate corresponding operational family relationships if consent is retracted
     if (body.relationship_id && body.relationship_kind === "family") {
-      const { data: relRow } = await db.from("family_relationships").select("family_member_id").eq("id", body.relationship_id).maybeSingle();
       const { error: relError } = await db.from("family_relationships")
         .update({ elder_consented: Boolean(body.granted), elder_consented_at: body.granted ? new Date().toISOString() : null, is_active: Boolean(body.granted) })
         .eq("id", body.relationship_id)
@@ -69,10 +68,10 @@ Deno.serve(async (req: Request) => {
 
       if (relError) throw relError;
 
-      // FIX B3: After updating family_relationships.is_active = false, call invalidateRelationshipCache(delegate_id, elder_id).
-      if (body.granted === false && (relRow?.family_member_id || body.delegate_id)) {
-        invalidateRelationshipCache(String(relRow?.family_member_id || body.delegate_id), userId);
-      }
+      // No cache to invalidate: _shared/authz.ts reads family_relationships on
+      // every check, so this write is what revokes the delegate, immediately and
+      // in every isolate. (It used to call invalidateRelationshipCache(), which
+      // only cleared the entry in the isolate that served this request.)
     }
 
     await recordMetric("fn-consent-update", started, "success");
