@@ -233,7 +233,9 @@ function ensureFetchShim() {
   globalThis.fetch = async (input, init) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     activeFetch?.calls.push({ url, init });
-    if (activeFetch?.fetchImpl) return activeFetch.fetchImpl(url, init, realFetch);
+    // Always a promise: production code chains `.finally()` on fetch (the escalation
+    // timeout clears itself that way), which a bare Response does not have.
+    if (activeFetch?.fetchImpl) return Promise.resolve(activeFetch.fetchImpl(url, init, realFetch));
     return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
   };
 }
@@ -270,6 +272,14 @@ export async function loadEdgeFunction(name, { db, env = {}, fetchImpl } = {}) {
     stdout: { write: () => Promise.resolve(0) },
     stderr: { write: () => Promise.resolve(0) },
     exit: () => undefined,
+    // Deno.resolveDns is real (it backs the SSRF pre-resolution guard); a test sets
+    // globalThis.__HAVEN_DNS_STUB__ to answer it, or leaves it undefined to fail.
+    resolveDns: (name) => {
+      const stub = globalThis.__HAVEN_DNS_STUB__;
+      if (typeof stub === 'function') return Promise.resolve(stub(name));
+      if (Array.isArray(stub)) return Promise.resolve([...stub]);
+      return Promise.reject(new Error('dns not stubbed'));
+    },
     // deno-lint-ignore no-explicit-any
     version: { deno: 'test-shim' },
   };
@@ -306,10 +316,16 @@ export async function loadEdgeFunction(name, { db, env = {}, fetchImpl } = {}) {
   };
 }
 
-/** Loads a `_shared/*.ts` module (already transpiled) for direct unit-level testing. */
-export async function loadSharedModule(name) {
+/**
+ * Loads a `_shared/*.ts` module for direct unit-level testing.
+ *
+ * `env` is applied to the Deno shim first — without it a module that reads
+ * configuration at import time (regulatory_escalation reads its webhook URL) would
+ * see the defaults and the test would exercise the unconfigured path by accident.
+ */
+export async function loadSharedModule(name, { env = {} } = {}) {
   const outDir = await linkSharedModules();
-  installGlobalShim();
+  installGlobalShim(env);
   const module = await import(`${outDir}/${name}.mjs?shared=${(shimCounter += 1)}`);
   return module;
 }
@@ -329,6 +345,12 @@ export function installGlobalShim(env = {}) {
     stdout: { write: () => Promise.resolve(0) },
     stderr: { write: () => Promise.resolve(0) },
     exit: () => undefined,
+    resolveDns: (name) => {
+      const stub = globalThis.__HAVEN_DNS_STUB__;
+      if (typeof stub === 'function') return Promise.resolve(stub(name));
+      if (Array.isArray(stub)) return Promise.resolve([...stub]);
+      return Promise.reject(new Error('dns not stubbed'));
+    },
     version: { deno: 'test-shim' },
   };
   globalThis.EdgeRuntime = { waitUntil: (promise) => Promise.resolve(promise) };
