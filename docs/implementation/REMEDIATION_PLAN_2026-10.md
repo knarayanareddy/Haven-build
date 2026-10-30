@@ -853,11 +853,29 @@ all rejected by the "no longer reported" rule.
 ### 12.3 Still open: the live-migration job
 
 `migrations on a real Postgres` has failed on every commit since `ec0ca40`, including
-`main`. It is `supabase db start` followed by `supabase db reset --debug`; the job log
-lives on `productionresultssa0.blob.core.windows.net`, which this sandbox cannot
-reach, so the failing statement is still unknown. Reconstructing the Supabase
-environment locally is not a valid substitute — there are **zero `CREATE EXTENSION`
-statements** anywhere in `supabase/`, so a bare Postgres fails the first migration on
-`vector(1536)` and `geometry(point,4326)`, which is an artefact of the harness rather
-than a finding. The next attempt should make the job self-diagnosing (per-file
-`psql -v ON_ERROR_STOP=1`) so its first failure names the file and statement.
+`main`. What is known:
+
+* the command is real — `supabase db start` exists (`Starts local Postgres
+  database`) and `supabase db reset` follows it, so this is not a typo-level failure;
+* the sandbox cannot reproduce it: no Docker daemon, and the job log lives on
+  `productionresultssa0.blob.core.windows.net`, which is outside the allowlist;
+* assembling a bare Postgres instead is not a substitute — there are **zero
+  `CREATE EXTENSION` statements** in `supabase/`, so it dies on `vector(1536)`
+  (migration 1, line 190) and `geometry(point,4326)` (line 483), which is an artefact
+  of the harness, not a finding. `config.toml` asks for Postgres 17 and the Supabase
+  image supplies vector, PostGIS, pg_cron, vault, `auth` and `storage`.
+
+What changed here is that the failure is now readable rather than silent. The job used
+to run both commands in one step, and nothing survived the run:
+
+* **split into named steps** — `supabase start`, then `supabase db reset --debug`, so
+  the log says which one failed;
+* **a diagnostics step on failure** that dumps `supabase status`, `docker ps -a`, the
+  last 200 lines of every `supabase*` container's log, and copies
+  `/var/log/postgresql` out of the database container;
+* **`actions/upload-artifact`** for that log, so a red run can be downloaded instead
+  of depending on the web log — which is the thing that blocked this investigation.
+
+The workflow edit is unverified locally for the same reason the original was: no
+Docker. It is a strictly-better instrument rather than a fix, and it should be read as
+"the next red run will name the statement".
