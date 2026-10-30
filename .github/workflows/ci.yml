@@ -122,13 +122,112 @@ jobs:
 
       # Applies every migration from scratch in order. This is where a forward
       # reference or a missing DOWN object actually surfaces.
-      - name: supabase db start + reset
+      #
+      # This job failed on every commit from ec0ca40 until now, and the failure was
+      # undiagnosable: the two commands shared one step, so the output said which
+      # exit code failed but not which command, and nothing was kept once the run
+      # aged out. Split into named steps, capture the CLI's own logs, and upload
+      # them on failure so the next red run can be read.
+      # The runner has 2 vCPU / 16 GB and the default stack is ten containers with
+      # health checks. Only postgres, gotrue, kong, postgrest and storage-api are
+      # needed to apply migrations and to run the live RLS tests (`supabase status -o
+      # env` for API_URL/ANON_KEY, then supabase-js). Studio, imgproxy, logflare,
+      # vector, supavisor, edge-runtime, realtime and postgres-meta are excluded:
+      # they are the images that take longest to pull and are most likely to fail a
+      # health check, and nothing here uses them.
+      - name: Start the local Supabase stack
         run: |
-          supabase db start
-          supabase db reset --debug
+          set -o pipefail
+          supabase start \
+            -x studio,imgproxy,logflare,vector,supavisor,edge-runtime,realtime,postgres-meta \
+            2>&1 | tee /tmp/supabase-start.log
+
+      - name: Apply every migration from scratch
+        run: supabase db reset --debug
+
+      - name: Diagnose the failed stack
+        if: failure()
+        run: |
+          {
+            echo '::group::supabase status'
+            supabase status || true
+            echo '::endgroup::'
+            echo '::group::containers'
+            docker ps -a || true
+            echo '::endgroup::'
+            echo '::group::container logs'
+            for container in $(docker ps -aq --filter 'name=supabase' || true); do
+              echo "── $container"
+              docker logs "$container" 2>&1 | tail -200 || true
+            done
+            echo '::endgroup::'
+          } | tee /tmp/supabase-diagnostics.log
+          # PostgreSQL logs are written into the volume, not stdout.
+          mkdir -p /tmp/supabase-logs
+          docker cp "$(docker ps -aq --filter 'name=supabase_db_' | head -1):/var/log/postgresql" /tmp/supabase-logs/ 2>/dev/null || true
+
+          # The step log and the artifact both live behind a signed blob URL, which
+          # makes a red run hard to read from a restricted network. A check-run
+          # annotation is plain API, so put the reason there too.
+          # The CLI's own message is the one that matters; container state is the
+          # context. Both go to the annotation, truncated.
+          reason="$(
+            {
+              [ -s /tmp/supabase-start.log ] && tail -c 700 /tmp/supabase-start.log
+              grep -iE 'error|fail|cannot|no space|denied|timeout|unhealthy' /tmp/supabase-diagnostics.log 2>/dev/null | head -4
+            } | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g' | cut -c1-1200
+          )"
+          echo "::error title=Supabase stack did not start::${reason:-empty log; the CLI exited without output}"
+
+      - name: Upload the diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-failure-diagnostics
+          path: |
+            /tmp/supabase-diagnostics.log
+            /tmp/supabase-logs/**
+            supabase/.temp/**
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Export the local stack credentials
+        if: success()
+        run: |
+          # The live tests need SUPABASE_URL / anon key and signed-in JWTs. Derive them
+          # from the stack that is already running instead of relying on supabase
+          # status' key names, which differ between CLI releases.
+          supabase status -o env > /tmp/supabase-env.txt
+          set -a
+          . /tmp/supabase-env.txt
+          set +a
+          {
+            echo "SUPABASE_URL=${API_URL}"
+            echo "SUPABASE_ANON_KEY=${ANON_KEY:-$PUBLISHABLE_KEY}"
+          } >> "$GITHUB_ENV"
 
       - name: Live RLS integration tests
-        run: corepack pnpm run test:supabase:local
+        run: |
+          set -o pipefail
+          # verify:supabase:local is the wired path (it is what supabase-integration.yml
+          # and validate-suite.mjs expect): it mints the signed-in test JWTs from the
+          # stack's JWT secret and then runs the live tests. test:supabase:local skips
+          # the minting, which is why the live step could never have passed here.
+          # HAVEN_SKIP_LOCAL_START keeps it from restarting the containers this job
+          # deliberately excludes and redoing the reset.
+          HAVEN_SKIP_LOCAL_START=1 corepack pnpm run verify:supabase:local 2>&1 | tee /tmp/live-rls.log
+
+      # Same reason as the stack diagnostics: the step log sits behind a signed blob
+      # URL, so the reason goes into a check annotation the API can read.
+      - name: Report the live-test failure
+        if: failure()
+        run: |
+          # Skip the `supabase db lint` JSON that check-local-supabase.sh prints: every
+          # line of it contains the word "error" and it buried the assertion last time.
+          reason="$(grep -iE 'not ok|AssertionError|Error:|failed' /tmp/live-rls.log 2>/dev/null \
+            | grep -v '^::' | grep -v '"level"' | head -6 \
+            | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g' | cut -c1-1200)"
+          echo "::error title=Live RLS tests failed::${reason:-no matching line; see the step log}"
 
   summary:
     name: summary

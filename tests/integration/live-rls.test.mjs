@@ -90,7 +90,12 @@ assert.ok([200, 206].includes(familyPrefs.status), 'family preference query shou
 assert.equal(Array.isArray(familyPrefs.body) ? familyPrefs.body.length : 0, 0, 'family must not see elder notification preferences');
 
 const elderExport = await rpc(elderJwt, 'export_elder_data', { p_elder_id: elderId });
-assert.ok([200, 206].includes(elderExport.status), 'elder can export own data');
+// Carry the PostgREST error into the message: against a live stack the interesting
+// part is Postgres' own complaint, and a bare status code hides it.
+assert.ok(
+  [200, 206].includes(elderExport.status),
+  `elder can export own data (status ${elderExport.status}: ${JSON.stringify(elderExport.body).slice(0, 400)})`,
+);
 assert.equal(typeof elderExport.body, 'object');
 assert.equal(elderExport.body.profile?.id, elderId, 'export contains elder profile');
 assert.ok(Object.prototype.hasOwnProperty.call(elderExport.body, 'documents'), 'export includes documents');

@@ -1,0 +1,18 @@
+{
+  "$comment": "High/critical dependency advisories that are accepted, with the reason they are not reachable and the date the waiver must be re-justified. scripts/ci/audit-dependencies.mjs fails on an advisory that is not listed here, on an entry that no longer applies, and on an entry past its expires date. This list may only shrink.",
+  "reviewed": "2026-10-30",
+  "entries": {
+    "image-size|GHSA-5p2g-fcmc-qvqq": {
+      "reason": "Build-time only: image-size is reached solely through metro (the React Native bundler) when Expo assembles apps/carer and apps/elder. It parses the repository's own static image assets, never user uploads, and never runs in the Next.js server or in a shipped app binary. metro pins image-size@^1.2.1 and image-size 2.x made imageSize() asynchronous, so a major override would break the bundler. Revisit when metro ships an ^2 range.",
+      "expires": "2027-01-31"
+    },
+    "image-size|GHSA-w3rx-r6r6-pgpr": {
+      "reason": "Same package and same build-time reasoning as GHSA-5p2g-fcmc-qvqq; a separate advisory against the ICNS parser.",
+      "expires": "2027-01-31"
+    },
+    "zod|GHSA-mrhx-c7xc-m3w5": {
+      "reason": "Build-time only: zod 3.x is reached solely through @expo/cli, which validates expo config at build time. The advisory is memory exhaustion while validating oversized constrained collections; the collection sizes come from this repository's own app.json, not from user input. @expo/cli declares zod ^3 and zod 4 changes the error/parse API, so pushing 4.x into the CLI is a bundler break, not a fix. Revisit when @expo/cli supports zod 4.",
+      "expires": "2027-01-31"
+    }
+  }
+}

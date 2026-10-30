@@ -12,7 +12,7 @@
     "@haven/contracts": "workspace:*",
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.45.4",
-    "next": "16.2.9",
+    "next": "16.4.3",
     "react": "19.2.7",
     "react-dom": "19.2.7"
   }

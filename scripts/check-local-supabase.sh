@@ -22,8 +22,13 @@ if [ -f supabase/.temp/storage-version ]; then
   fi
 fi
 
-supabase start
-supabase db reset
+# The CI database job brings the stack up (with a reduced service set) and applies
+# every migration itself, so re-running both here would start the excluded containers
+# and redo the reset. Set HAVEN_SKIP_LOCAL_START=1 to run only the lint step.
+if [ "${HAVEN_SKIP_LOCAL_START:-}" != "1" ]; then
+  supabase start
+  supabase db reset
+fi
 lint_output="$(supabase db lint --level warning)"
 printf '%s\n' "$lint_output"
 LINT_OUTPUT="$lint_output" node <<'NODE'

@@ -40,15 +40,21 @@ jobs:
       - run: corepack enable
       - run: corepack pnpm install --frozen-lockfile
 
-      - name: 1) Run all 31 test suites
+      - name: 1) Run the whole test suite
         run: corepack pnpm test
 
       - name: 2) Run accessibility lint
         run: |
           corepack pnpm exec eslint . --rule 'jsx-a11y/alt-text: error' --max-warnings=0
 
-      - name: 3) Run security scan
-        run: corepack pnpm audit --audit-level=high
+      # A blanket `pnpm audit --audit-level=high` reported 65 high/critical
+      # advisories, almost all of them build-time DoS in Metro and the Expo CLI,
+      # and had never passed — so staging and production were permanently skipped.
+      # The script asks the same advisory database a narrower question, fails on
+      # anything high/critical that is not explicitly waived with a reason and an
+      # expiry date, and fails if a waiver stops applying.
+      - name: 3) Run dependency advisory gate
+        run: node scripts/ci/audit-dependencies.mjs
 
       - name: 4) Check for floating Deno import versions
         run: |

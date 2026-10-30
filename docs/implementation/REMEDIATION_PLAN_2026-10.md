@@ -738,3 +738,213 @@ Two are not conversion candidates at all: `banking-stream-buffering` asserts not
 about the product (a fake engine and three counters — delete it), and
 `unawaited-async-closure` is a static-analysis rule that belongs in ESLint, where it
 would run on every change instead of one file.
+
+---
+
+## 12. Sixth pass — the deploy gate that never passed (2026-10-30)
+
+After PR #4 merged, `main` went red in two places. Both were pre-existing, and both
+are the same failure mode this document keeps finding: a gate whose result nobody
+reads, because it has never been green.
+
+### 12.1 `next` 16.2.9 → 16.4.3
+
+`apps/family` pinned `next: 16.2.9`. The advisory database reports **20 advisories**
+for that version, five of them critical:
+
+| Range | Patched | Severity | Advisory |
+|---|---|---|---|
+| `>=16.0.0 <16.3.3` | 16.3.3 | critical | unauthenticated RCE on Windows-hosted servers |
+| `>=16.0.0 <16.3.3` | 16.3.3 | critical | unauthenticated RCE in Image Optimization (AVIF) |
+| `>=16.2.0 <16.3.6` | 16.3.6 | critical | RCE in `next/og` `ImageResponse` |
+| `>=16.0.0 <=16.4.0` | **16.4.1** | critical | unauthenticated RCE in Image Optimization (SVG) |
+| `>=16.0.0 <=16.4.0` | **16.4.1** | critical | unauthenticated RCE in `use cache` with typed arrays |
+| `>=16.0.0 <16.3.8` | 16.3.8 | high | SSRF in Image Optimization |
+
+16.3.6 — the version named in the earlier hand-off — still leaves two criticals and a
+high open. The upper bound matters: `<=16.4.0` is the range **16.4.1** fixes.
+`next@16.4.3` is the current `latest` and reports **zero** advisories of any severity.
+
+`typecheck:family` and `build:family` are green on 16.4.3 (13 routes including the
+`/auth/callback` and `/dashboard/*` handlers). Rubric:
+
+```
+corepack pnpm run typecheck:family   # exit 0
+corepack pnpm run build:family       # exit 0, 6/6 static pages, 13 routes
+advisory lookup for next@16.4.3      # 0 advisories (20 on 16.2.9)
+```
+
+### 12.2 The deploy gate: 65 → 3, and the 3 are named
+
+`deploy.yml` gated `staging-deployment` and `production-deployment` on
+`pnpm audit --audit-level=high`. That command reported **65 high/critical advisories
+across 16 modules**, so `pr-checks-parity` always failed and no deployment ever ran.
+Two problems, one of which hid the other:
+
+1. It could not tell a vulnerable *runtime* package from a vulnerable *build tool*.
+   Tracing every hit through `pnpm why`: `@xmldom/xmldom`, `js-yaml`,
+   `brace-expansion`, `postcss`, `browserslist`, `shell-quote`, `nanoid`,
+   `image-size` and `zod` are reached **only** through `@expo/cli`, `metro` and
+   ESLint. None of them is on a request path, and none ships in the family
+   dashboard or an app binary.
+2. `pnpm audit` builds the whole graph in memory and was **OOM-killed** in this
+   sandbox at 3 GB, which is also why its JSON output was unusable for tooling.
+
+Fixed by making the question answerable rather than by lowering the bar:
+
+- **`pnpm.overrides`** in the root `package.json` pins 14 transitive packages to the
+  lowest advisory-free version that stays inside the major line its consumer
+  declares: `@xmldom/xmldom` 0.9.12, `shell-quote` 1.12.0, `brace-expansion`
+  1.1.21 / 5.0.12, `js-yaml` 3.15.2 / 4.3.2, `nanoid` 3.3.20, `postcss` 8.5.32,
+  `browserslist` 4.29.5, `compression` 1.8.2, `decode-uri-component` 0.5.1, `joi`
+  17.13.9, `node-forge` 1.4.2, `source-map-js` 1.2.2.
+- **`scripts/ci/audit-dependencies.mjs`** reads `pnpm-lock.yaml` (766 entries, no
+  OOM), posts the exact `name@version` set to the npm bulk advisory endpoint, and
+  fails on any high/critical **not** covered by `scripts/ci/dependency-waivers.json`.
+- **`scripts/ci/dependency-waivers.json`** is a ratchet identical to the test-
+  substance allowlist: every entry needs a `reason` and an `expires` date; an
+  expired waiver fails; a waiver that stops applying fails ("remove the entry").
+  `deploy.yml` step 3 now runs the script; `pnpm audit` is gone from the pipeline.
+
+Result: **3 high, 0 critical**, each waived with a reason and a 2027-01-31 expiry —
+`image-size` (two advisories, build-time only through `metro`, and 2.x made
+`imageSize()` async so a major override breaks the bundler) and `zod` 3.x
+(build-time only through `@expo/cli`, which declares `^3`; zod 4 changes the parse
+API). Nothing else in the graph is above moderate.
+
+#### The override that would have broken iOS builds
+
+Taking "the latest advisory-free version" was not sufficient. `@xmldom/xmldom`
+0.8.13 → 0.9.12 crosses a breaking change: **0.9 requires an explicit mimeType** on
+`DOMParser.parseFromString`, where 0.8 defaulted to `text/xml`. Running the consumers
+found it:
+
+```
+TypeError: DOMParser.parseFromString: the provided mimeType "undefined" is not valid.
+    at @expo/plist/build/parse.js:69
+```
+
+`@expo/plist` passes no mimeType in **every** published version (checked 0.7.0,
+0.8.1, 0.9.0, 0.10.0, 0.10.1 — all declare `@xmldom/xmldom ^0.8.8`), and it is what
+`@expo/config-plugins` uses to read and rewrite `Info.plist` during `expo prebuild`.
+So the override alone would have broken iOS config plugins at build time, somewhere
+CI does not look. Two consequences:
+
+* every 0.8.x release is vulnerable, so there is no in-range fix — the choice is an
+  out-of-range pin or the advisories;
+* the pin is kept, and `patches/@expo__plist@0.7.0.patch` passes `'text/xml'` in the
+  one call site. `pnpm.patchedDependencies` pins the patch to that exact version, so
+  an `@expo/plist` bump makes the patch fail loudly instead of silently disappearing.
+
+`tests/edge/dependency-gate.test.mjs` now runs both consumers on every test run —
+`@expo/plist` parse/build round-trip and `plist@3.1.1` (which declares `^0.9.10`) —
+and asserts each override resolves to exactly its pinned version. `expo config --type
+public` also evaluates the carer config through `@expo/cli`, the consumer of the
+`zod` pin. `pnpm install --frozen-lockfile` is clean, so CI resolves this tree.
+
+`tests/edge/dependency-gate.test.mjs` (11 tests) drives the classifier with fabricated
+advisories: an unwaived high fails, an expired waiver fails, a waiver without a
+reason fails, a stale waiver fails, a waiver suppresses one advisory and not the
+package, and the deploy pipeline must call the script rather than `pnpm audit`.
+and it asserts the overrides still work in their real consumers. The test found its
+own first bug — three hand-written, plausible-looking GHSA ids in the waiver file,
+all rejected by the "no longer reported" rule.
+
+### 12.3 Still open: the live-migration job
+
+`migrations on a real Postgres` has failed on every commit since `ec0ca40`, including
+`main`. What is known:
+
+* the command is real — `supabase db start` exists (`Starts local Postgres
+  database`) and `supabase db reset` follows it, so this is not a typo-level failure;
+* the sandbox cannot reproduce it: no Docker daemon, and the job log lives on
+  `productionresultssa0.blob.core.windows.net`, which is outside the allowlist;
+* assembling a bare Postgres instead is not a substitute — there are **zero
+  `CREATE EXTENSION` statements** in `supabase/`, so it dies on `vector(1536)`
+  (migration 1, line 190) and `geometry(point,4326)` (line 483), which is an artefact
+  of the harness, not a finding. `config.toml` asks for Postgres 17 and the Supabase
+  image supplies vector, PostGIS, pg_cron, vault, `auth` and `storage`.
+
+What changed here is that the failure is now readable rather than silent. The job used
+to run both commands in one step, and nothing survived the run:
+
+* **split into named steps** — `supabase start`, then `supabase db reset --debug`, so
+  the log says which one failed;
+* **a diagnostics step on failure** that dumps `supabase status`, `docker ps -a`, the
+  last 200 lines of every `supabase*` container's log, and copies
+  `/var/log/postgresql` out of the database container;
+* **`actions/upload-artifact`** for that log, so a red run can be downloaded instead
+  of depending on the web log — which is the thing that blocked this investigation.
+
+The workflow edit is unverified locally for the same reason the original was: no
+Docker. It is an instrument rather than a fix — and it worked: on the next run the
+check annotation carried the statement.
+
+#### What it found: a defect I introduced in PR #4
+
+```
+ERROR: function public.ratelimit_check(text, timestamp with time zone, integer)
+       does not exist (SQLSTATE 42883)
+At statement: 2
+ALTER FUNCTION public.ratelimit_check(TEXT, TIMESTAMPTZ, INTEGER) SET search_path = public, pg_temp;
+```
+
+`20261029000002` drops `ratelimit_check()` in favour of `consume_rate_limit()`. My
+`20261029000004` then tried to pin its `search_path`. `ALTER FUNCTION` on a missing
+function raises 42883 and aborts the migration transaction, so **every migration after
+it never ran** — the database job was red because of this, not because of the SQL that
+preceded it.
+
+Why the model missed it: `sql-model.mjs` never processed `DROP FUNCTION`, so the
+function was still in its map when the ALTER was replayed. It now records an ordered
+`create`/`drop`/`alter` event list and exposes `functionsBefore(file)`, and
+`db-function-privileges.test.mjs` replays those events to assert that no migration
+alters a function that is missing at that point. It named the exact statement on its
+first run, and confirmed the remaining twelve ALTER targets do exist.
+
+The migration now alters twelve functions instead of thirteen, with a comment saying
+why — and the lesson belongs next to the model: a schema model that only knows the
+final state cannot see an error that is about ordering.
+
+#### Behind it, two more layers — each only visible once the previous one was gone
+
+Fixing the `ALTER` let `supabase db reset` finish, which moved the failure to the live
+RLS step. It reported `SUPABASE_URL is required`; then, once the job exported the
+stack's own credentials, `HAVEN_TEST_ELDER_JWT is required`. Both were wiring, not
+product: the job called `test:supabase:local`, which is
+`check-local-supabase.sh && node tests/integration/live-rls.test.mjs` and therefore
+never mints the signed-in JWTs, while `verify:supabase:local` does and is the entry
+point `supabase-integration.yml` already used. The status parser also only accepted the
+older `ANON_KEY`/`SERVICE_ROLE_KEY` spellings that current CLIs renamed. The job now
+calls the wired script with `HAVEN_SKIP_LOCAL_START=1` and exports the URL and anon key
+itself.
+
+The suite then ran against a real stack and failed on product: `403 permission denied
+for function export_elder_data` (SQLSTATE 42501). The deny-by-default sweep I added in
+PR #4 revokes `EXECUTE` from `authenticated` on every function in `public`, which also
+removed grants earlier migrations made on purpose. `export_elder_data()` is how a
+person exercises their right of access with their own session and it raises 403 unless
+`p_elder_id = auth.uid()`; `family_dashboard_summary()` is `SECURITY INVOKER` and
+raises unless `family_can()` approves a domain. Both are correct grants.
+
+Restoring them by memory would have been careless, because the same sweep had closed
+two real holes: `mark_reminder_taken()` and `record_app_event()` are `SECURITY DEFINER`
+and take the elder/profile id straight from the caller with no verification, while
+being granted to `authenticated`. A signed-in user could confirm anyone's medication or
+forge analytics rows. So the migration now states the rule it follows — *anything
+granted to a client role must re-derive the caller inside the function* — grants back
+the six that satisfy it, and leaves those two closed with a comment saying why.
+
+Three tests hold the line: the client contract must stay callable; export must compare
+`p_elder_id` against `auth.uid()` and reject with 403; and no `SECURITY DEFINER`
+function may be callable by `authenticated`/`anon` without deriving the caller, which
+names both holes if the revoke is ever undone.
+
+#### Where §12.3 stands
+
+`supabase db reset` now applies all 46 migrations from scratch on every push, and the
+live RLS suite passes against that database. The job was red for three separate
+reasons, and only the first was about SQL that existed before this work: my `ALTER
+FUNCTION`, my over-broad revoke, and wiring that had never been exercised. That is the
+answer to the question §12.3 opened with — the cause was not "unknown", it was never
+observed, because the job could not start the stack to observe it.
