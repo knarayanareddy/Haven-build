@@ -77,8 +77,12 @@ export function classify(source) {
   const assertions = (source.match(/\bassert\.\w+\(/g) ?? []).length;
   const readsSource = /\breadFileSync\(/.test(source);
 
-  const usesSupportLoader = /from\s+['"]\.\/support\/shared-loader\.mjs['"]/.test(source)
-    || /\blinkSharedModules\b|\btranspileModuleFile\b/.test(source)
+  // Any module under tests/edge/support that loads production code counts: the
+  // handler harness transpiles `supabase/functions/<fn>/index.ts` and the shared
+  // loader transpiles `_shared/*.ts`, so importing either means the verdict comes
+  // from running the handler, not from reading it.
+  const usesSupportLoader = /from\s+['"]\.\/support\/(?:shared-loader|edge-function-harness)\.mjs['"]/.test(source)
+    || /\blinkSharedModules\b|\btranspileModuleFile\b|\bloadEdgeFunction\b|\bloadSharedModule\b/.test(source)
     || /await\s+import\(\s*`\$\{?(?:shared|dir|tmp)/.test(source);
   const importsProduction = /await\s+import\(\s*['"`][^'"`]*\.\.\/\.\.\/(?:supabase|apps|packages)\//.test(source)
     || /from\s+['"](?:\.\.\/)+(?:scripts|supabase|apps|packages)\//.test(source)
