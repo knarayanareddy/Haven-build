@@ -128,8 +128,17 @@ jobs:
       # exit code failed but not which command, and nothing was kept once the run
       # aged out. Split into named steps, capture the CLI's own logs, and upload
       # them on failure so the next red run can be read.
+      # The runner has 2 vCPU / 16 GB and the default stack is ten containers with
+      # health checks. Only postgres, gotrue, kong, postgrest and storage-api are
+      # needed to apply migrations and to run the live RLS tests (`supabase status -o
+      # env` for API_URL/ANON_KEY, then supabase-js). Studio, imgproxy, logflare,
+      # vector, supavisor, edge-runtime, realtime and postgres-meta are excluded:
+      # they are the images that take longest to pull and are most likely to fail a
+      # health check, and nothing here uses them.
       - name: Start the local Supabase stack
-        run: supabase start
+        run: |
+          supabase start \
+            -x studio,imgproxy,logflare,vector,supavisor,edge-runtime,realtime,postgres-meta
 
       - name: Apply every migration from scratch
         run: supabase db reset --debug
