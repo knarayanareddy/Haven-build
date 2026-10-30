@@ -905,3 +905,46 @@ first run, and confirmed the remaining twelve ALTER targets do exist.
 The migration now alters twelve functions instead of thirteen, with a comment saying
 why — and the lesson belongs next to the model: a schema model that only knows the
 final state cannot see an error that is about ordering.
+
+#### Behind it, two more layers — each only visible once the previous one was gone
+
+Fixing the `ALTER` let `supabase db reset` finish, which moved the failure to the live
+RLS step. It reported `SUPABASE_URL is required`; then, once the job exported the
+stack's own credentials, `HAVEN_TEST_ELDER_JWT is required`. Both were wiring, not
+product: the job called `test:supabase:local`, which is
+`check-local-supabase.sh && node tests/integration/live-rls.test.mjs` and therefore
+never mints the signed-in JWTs, while `verify:supabase:local` does and is the entry
+point `supabase-integration.yml` already used. The status parser also only accepted the
+older `ANON_KEY`/`SERVICE_ROLE_KEY` spellings that current CLIs renamed. The job now
+calls the wired script with `HAVEN_SKIP_LOCAL_START=1` and exports the URL and anon key
+itself.
+
+The suite then ran against a real stack and failed on product: `403 permission denied
+for function export_elder_data` (SQLSTATE 42501). The deny-by-default sweep I added in
+PR #4 revokes `EXECUTE` from `authenticated` on every function in `public`, which also
+removed grants earlier migrations made on purpose. `export_elder_data()` is how a
+person exercises their right of access with their own session and it raises 403 unless
+`p_elder_id = auth.uid()`; `family_dashboard_summary()` is `SECURITY INVOKER` and
+raises unless `family_can()` approves a domain. Both are correct grants.
+
+Restoring them by memory would have been careless, because the same sweep had closed
+two real holes: `mark_reminder_taken()` and `record_app_event()` are `SECURITY DEFINER`
+and take the elder/profile id straight from the caller with no verification, while
+being granted to `authenticated`. A signed-in user could confirm anyone's medication or
+forge analytics rows. So the migration now states the rule it follows — *anything
+granted to a client role must re-derive the caller inside the function* — grants back
+the six that satisfy it, and leaves those two closed with a comment saying why.
+
+Three tests hold the line: the client contract must stay callable; export must compare
+`p_elder_id` against `auth.uid()` and reject with 403; and no `SECURITY DEFINER`
+function may be callable by `authenticated`/`anon` without deriving the caller, which
+names both holes if the revoke is ever undone.
+
+#### Where §12.3 stands
+
+`supabase db reset` now applies all 46 migrations from scratch on every push, and the
+live RLS suite passes against that database. The job was red for three separate
+reasons, and only the first was about SQL that existed before this work: my `ALTER
+FUNCTION`, my over-broad revoke, and wiring that had never been exercised. That is the
+answer to the question §12.3 opened with — the cause was not "unknown", it was never
+observed, because the job could not start the stack to observe it.
