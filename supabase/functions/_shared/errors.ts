@@ -209,11 +209,15 @@ export function toHttpError(error: unknown): HttpError {
     if (name === 'AuthzError') status = 403;
     else if (name === 'RateLimitBreachError') status = 429;
     else if ((error as { isBsnViolation?: boolean })?.isBsnViolation === true) status = 422;
-    else if (/^422\b/.test(rawMessage)) status = 422;
-    else if (/^403\b/.test(rawMessage)) status = 403;
-    else if (/^404\b/.test(rawMessage)) status = 404;
-    else if (/^429\b/.test(rawMessage)) status = 429;
-    else if (/^401\b/.test(rawMessage)) status = 401;
+    else {
+      // Handlers across this repository announce their status in the message
+      // ("409 Conflict: …", "400: Malformed …"). This used to be a hand-written list of
+      // four digits — 403, 404, 422, 429 and 401 — so `throw new Error("400: …")` became
+      // a 500 and a contraindication's "409 Conflict" became a 500 too. Any leading
+      // status this API actually uses is honoured now.
+      const announced = /^(\d{3})\b/.exec(rawMessage);
+      if (announced && CODE_BY_STATUS[Number(announced[1])]) status = Number(announced[1]);
+    }
   }
 
   if (status === null) {

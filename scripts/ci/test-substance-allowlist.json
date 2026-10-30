@@ -1,12 +1,11 @@
 {
   "$comment": "Files in tests/edge that assert on source text instead of behaviour. scripts/ci/audit-test-substance.mjs fails when a new static-only file appears, when an entry becomes behavioural (it must then be removed), or when an entry no longer exists. This list may only shrink.",
   "reviewed": "2026-10-30",
-  "count": 5,
+  "count": 4,
   "allowlisted": {
     "tests/edge/carer-indexeddb-queue-closure.test.mjs": "re-implements an IndexedDB queue in the test; needs fake-indexeddb to drive apps/carer's real queue",
     "tests/edge/data-lifecycle-diff.test.mjs": "set-difference over readFileSync regexes of export/erasure code; the schema half is now in db-schema-contract, the handler half needs the export/erasure harnesses",
     "tests/edge/deadlock-elimination-load-perf.test.mjs": "asserts WAL/lock behaviour from a simulated timer loop; the snapshot-column half is in db-schema-contract, the load claim cannot be tested without Postgres",
-    "tests/edge/fhir-staging-r1-closure.test.mjs": "asserts migration text and handler strings for FHIR staging; needs a Postgres-backed test",
     "tests/edge/floating-voice-rerender-closure.test.mjs": "asserts memo()/segment strings in a React component; needs @testing-library/react-native"
   }
 }
