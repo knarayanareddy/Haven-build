@@ -106,10 +106,11 @@ $$;
 -- ─── 3. Pin search_path on every SECURITY DEFINER function ───────────────────
 -- A SECURITY DEFINER function that resolves unqualified names through the
 -- caller's search_path can be hijacked with a shadowing object in pg_temp. These
--- thirteen were defined without the clause; ALTER FUNCTION sets it without
--- re-declaring a body.
+-- twelve were defined without the clause; ALTER FUNCTION sets it without
+-- re-declaring a body. (ratelimit_check() is deliberately absent: 20261029000002
+-- drops it in favour of consume_rate_limit(), and ALTER on a dropped function
+-- aborts the whole migration — which is exactly what the CI database job caught.)
 
-ALTER FUNCTION public.ratelimit_check(TEXT, TIMESTAMPTZ, INTEGER) SET search_path = public, pg_temp;
 ALTER FUNCTION public.privileged_correct_clinical_record(TEXT, UUID, JSONB, TEXT) SET search_path = public, pg_temp;
 ALTER FUNCTION public.get_active_medication_reminders(UUID) SET search_path = public, pg_temp;
 ALTER FUNCTION public.run_pii_backfill_scan() SET search_path = public, pg_temp;

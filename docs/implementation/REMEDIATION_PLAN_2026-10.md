@@ -877,5 +877,31 @@ to run both commands in one step, and nothing survived the run:
   of depending on the web log — which is the thing that blocked this investigation.
 
 The workflow edit is unverified locally for the same reason the original was: no
-Docker. It is a strictly-better instrument rather than a fix, and it should be read as
-"the next red run will name the statement".
+Docker. It is an instrument rather than a fix — and it worked: on the next run the
+check annotation carried the statement.
+
+#### What it found: a defect I introduced in PR #4
+
+```
+ERROR: function public.ratelimit_check(text, timestamp with time zone, integer)
+       does not exist (SQLSTATE 42883)
+At statement: 2
+ALTER FUNCTION public.ratelimit_check(TEXT, TIMESTAMPTZ, INTEGER) SET search_path = public, pg_temp;
+```
+
+`20261029000002` drops `ratelimit_check()` in favour of `consume_rate_limit()`. My
+`20261029000004` then tried to pin its `search_path`. `ALTER FUNCTION` on a missing
+function raises 42883 and aborts the migration transaction, so **every migration after
+it never ran** — the database job was red because of this, not because of the SQL that
+preceded it.
+
+Why the model missed it: `sql-model.mjs` never processed `DROP FUNCTION`, so the
+function was still in its map when the ALTER was replayed. It now records an ordered
+`create`/`drop`/`alter` event list and exposes `functionsBefore(file)`, and
+`db-function-privileges.test.mjs` replays those events to assert that no migration
+alters a function that is missing at that point. It named the exact statement on its
+first run, and confirmed the remaining twelve ALTER targets do exist.
+
+The migration now alters twelve functions instead of thirteen, with a comment saying
+why — and the lesson belongs next to the model: a schema model that only knows the
+final state cannot see an error that is about ordering.

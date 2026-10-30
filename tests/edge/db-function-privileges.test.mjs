@@ -101,6 +101,26 @@ test('future functions default to no PUBLIC EXECUTE', () => {
   assert.equal(rule.schema, 'public');
 });
 
+test('no migration alters a function that does not exist at that point', () => {
+  // `supabase db reset` died on
+  //   ERROR: function public.ratelimit_check(text, timestamptz, integer) does not
+  //   exist (SQLSTATE 42883)
+  // because 20261029000004 altered a function that 20261029000002 had dropped in
+  // favour of consume_rate_limit(). ALTER on a missing function aborts the whole
+  // migration transaction, so nothing after it ever ran — and the model said the
+  // function existed, because it never processed DROP FUNCTION.
+  const alive = new Set();
+  const offenders = [];
+  for (const event of model.functionEvents) {
+    if (event.action === 'create') alive.add(event.name);
+    else if (event.action === 'drop') alive.delete(event.name);
+    else if (event.action === 'alter' && !alive.has(event.name)) {
+      offenders.push(`${event.file}: ALTER FUNCTION ${event.name}`);
+    }
+  }
+  assert.deepEqual(offenders, [], `ALTER FUNCTION on a missing function:\n${offenders.join('\n')}`);
+});
+
 test('every SECURITY DEFINER function pins search_path', () => {
   const offenders = [...model.functions.values()]
     .filter((fn) => fn.securityDefiner && !fn.searchPath)

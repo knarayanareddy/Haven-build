@@ -188,6 +188,11 @@ export function buildModel({ dir = MIGRATIONS_DIR, files = null } = {}) {
   };
   const functionPrivileges = [];
   const defaultPrivileges = [];
+  // Ordered create/drop/alter events, so a test can ask what existed at a point in
+  // the migration history. A model that only tracks the final schema cannot see an
+  // `ALTER FUNCTION` aimed at a function a later migration already dropped — which
+  // is how 20261029000004 broke the live migration run.
+  const functionEvents = [];
 
   const table = (name) => {
     const key = bare(name);
@@ -229,6 +234,7 @@ export function buildModel({ dir = MIGRATIONS_DIR, files = null } = {}) {
       // ALTER FUNCTION ... SET <config> — attribute changes that do not restate the body
       const alterFn = /^ALTER FUNCTION (?:[A-Za-z0-9_]+\.)??([A-Za-z0-9_]+)"?(?:\([\s\S]*?\))?\s*SET\s+([A-Za-z_]+)\s*(?:=|TO)\s*([^;]+)$/i.exec(text);
       if (alterFn) {
+        functionEvents.push({ file, action: 'alter', name: alterFn[1] });
         const target = functions.get(alterFn[1]);
         if (target) {
           const key = alterFn[2].toLowerCase();
@@ -338,6 +344,15 @@ export function buildModel({ dir = MIGRATIONS_DIR, files = null } = {}) {
         continue;
       }
 
+      // DROP FUNCTION removes the definition, so a later ALTER FUNCTION on the same
+      // name would fail — the operator error SQLSTATE 42883.
+      const dropFn = /^DROP FUNCTION (?:IF EXISTS )?(?:[A-Za-z0-9_]+\.)?"?([A-Za-z0-9_]+)"?/i.exec(text);
+      if (dropFn) {
+        functionEvents.push({ file, action: 'drop', name: dropFn[1] });
+        functions.delete(dropFn[1]);
+        continue;
+      }
+
       // functions
       const fn = /^CREATE (?:OR REPLACE )?FUNCTION (?:[A-Za-z0-9_]+\.)?"?([A-Za-z0-9_]+)"?\s*\(([\s\S]*?)\)\s*RETURNS ([\s\S]*)$/i.exec(text);
       if (fn) {
@@ -347,6 +362,7 @@ export function buildModel({ dir = MIGRATIONS_DIR, files = null } = {}) {
         const header = text.split(/\$\$/)[0];
         const searchPath = /\bSET search_path\s*(?:=|TO)\s*([^;]+?)\s+AS\b/i.exec(header)?.[1]?.trim() ?? null;
         const statementTimeout = /\bSET statement_timeout\s*(?:=|TO)\s*'?([0-9a-z]+)'?/i.exec(header)?.[1]?.trim() ?? null;
+        functionEvents.push({ file, action: 'create', name: fn[1] });
         functions.set(fn[1], {
           name: fn[1], securityDefiner, searchPath, statementTimeout, returns: norm(fn[3]),
           args: fn[2].trim(),
@@ -412,6 +428,17 @@ export function buildModel({ dir = MIGRATIONS_DIR, files = null } = {}) {
     foreignKeys,
     functionPrivileges,
     defaultPrivileges,
+    functionEvents,
+    /** Names that exist immediately before `file` is applied. */
+    functionsBefore(file) {
+      const alive = new Set();
+      for (const event of functionEvents) {
+        if (event.file === file) break;
+        if (event.action === 'create') alive.add(event.name);
+        else if (event.action === 'drop') alive.delete(event.name);
+      }
+      return alive;
+    },
     /**
      * Roles that may EXECUTE `name`, replaying schema-wide sweeps and
      * single-function grants in migration order.
