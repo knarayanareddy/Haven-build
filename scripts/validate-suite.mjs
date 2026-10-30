@@ -121,7 +121,7 @@ const required = [
   'scripts/check-local-supabase.sh',
   'scripts/export-scam-rules.mjs',
   'tests/integration/live-rls.test.mjs',
-  'tests/edge/data-lifecycle-diff.test.mjs',
+  'tests/edge/db-lifecycle-coverage.test.mjs',
   'tests/edge/authz-behavioral.test.mjs',
   '.github/workflows/supabase-integration.yml',
   'docs/api/openapi.yaml',
