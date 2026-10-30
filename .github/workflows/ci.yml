@@ -164,6 +164,13 @@ jobs:
           mkdir -p /tmp/supabase-logs
           docker cp "$(docker ps -aq --filter 'name=supabase_db_' | head -1):/var/log/postgresql" /tmp/supabase-logs/ 2>/dev/null || true
 
+          # The step log and the artifact both live behind a signed blob URL, which
+          # makes a red run hard to read from a restricted network. A check-run
+          # annotation is plain API, so put the reason there too.
+          reason="$(grep -iE 'error|fail|cannot|no space|denied|timeout|unhealthy' /tmp/supabase-diagnostics.log \
+            | grep -v '^::' | head -6 | sed 's/%/%25/g; s/\r/%0D/g' | paste -sd ' ' - | cut -c1-900)"
+          echo "::error title=Supabase stack did not start::${reason:-no diagnostic line matched; see the step log}"
+
       - name: Upload the diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
