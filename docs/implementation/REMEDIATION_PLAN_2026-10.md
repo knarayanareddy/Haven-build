@@ -738,3 +738,126 @@ Two are not conversion candidates at all: `banking-stream-buffering` asserts not
 about the product (a fake engine and three counters — delete it), and
 `unawaited-async-closure` is a static-analysis rule that belongs in ESLint, where it
 would run on every change instead of one file.
+
+---
+
+## 12. Sixth pass — the deploy gate that never passed (2026-10-30)
+
+After PR #4 merged, `main` went red in two places. Both were pre-existing, and both
+are the same failure mode this document keeps finding: a gate whose result nobody
+reads, because it has never been green.
+
+### 12.1 `next` 16.2.9 → 16.4.3
+
+`apps/family` pinned `next: 16.2.9`. The advisory database reports **20 advisories**
+for that version, five of them critical:
+
+| Range | Patched | Severity | Advisory |
+|---|---|---|---|
+| `>=16.0.0 <16.3.3` | 16.3.3 | critical | unauthenticated RCE on Windows-hosted servers |
+| `>=16.0.0 <16.3.3` | 16.3.3 | critical | unauthenticated RCE in Image Optimization (AVIF) |
+| `>=16.2.0 <16.3.6` | 16.3.6 | critical | RCE in `next/og` `ImageResponse` |
+| `>=16.0.0 <=16.4.0` | **16.4.1** | critical | unauthenticated RCE in Image Optimization (SVG) |
+| `>=16.0.0 <=16.4.0` | **16.4.1** | critical | unauthenticated RCE in `use cache` with typed arrays |
+| `>=16.0.0 <16.3.8` | 16.3.8 | high | SSRF in Image Optimization |
+
+16.3.6 — the version named in the earlier hand-off — still leaves two criticals and a
+high open. The upper bound matters: `<=16.4.0` is the range **16.4.1** fixes.
+`next@16.4.3` is the current `latest` and reports **zero** advisories of any severity.
+
+`typecheck:family` and `build:family` are green on 16.4.3 (13 routes including the
+`/auth/callback` and `/dashboard/*` handlers). Rubric:
+
+```
+corepack pnpm run typecheck:family   # exit 0
+corepack pnpm run build:family       # exit 0, 6/6 static pages, 13 routes
+advisory lookup for next@16.4.3      # 0 advisories (20 on 16.2.9)
+```
+
+### 12.2 The deploy gate: 65 → 3, and the 3 are named
+
+`deploy.yml` gated `staging-deployment` and `production-deployment` on
+`pnpm audit --audit-level=high`. That command reported **65 high/critical advisories
+across 16 modules**, so `pr-checks-parity` always failed and no deployment ever ran.
+Two problems, one of which hid the other:
+
+1. It could not tell a vulnerable *runtime* package from a vulnerable *build tool*.
+   Tracing every hit through `pnpm why`: `@xmldom/xmldom`, `js-yaml`,
+   `brace-expansion`, `postcss`, `browserslist`, `shell-quote`, `nanoid`,
+   `image-size` and `zod` are reached **only** through `@expo/cli`, `metro` and
+   ESLint. None of them is on a request path, and none ships in the family
+   dashboard or an app binary.
+2. `pnpm audit` builds the whole graph in memory and was **OOM-killed** in this
+   sandbox at 3 GB, which is also why its JSON output was unusable for tooling.
+
+Fixed by making the question answerable rather than by lowering the bar:
+
+- **`pnpm.overrides`** in the root `package.json` pins 14 transitive packages to the
+  lowest advisory-free version that stays inside the major line its consumer
+  declares: `@xmldom/xmldom` 0.9.12, `shell-quote` 1.12.0, `brace-expansion`
+  1.1.21 / 5.0.12, `js-yaml` 3.15.2 / 4.3.2, `nanoid` 3.3.20, `postcss` 8.5.32,
+  `browserslist` 4.29.5, `compression` 1.8.2, `decode-uri-component` 0.5.1, `joi`
+  17.13.9, `node-forge` 1.4.2, `source-map-js` 1.2.2.
+- **`scripts/ci/audit-dependencies.mjs`** reads `pnpm-lock.yaml` (766 entries, no
+  OOM), posts the exact `name@version` set to the npm bulk advisory endpoint, and
+  fails on any high/critical **not** covered by `scripts/ci/dependency-waivers.json`.
+- **`scripts/ci/dependency-waivers.json`** is a ratchet identical to the test-
+  substance allowlist: every entry needs a `reason` and an `expires` date; an
+  expired waiver fails; a waiver that stops applying fails ("remove the entry").
+  `deploy.yml` step 3 now runs the script; `pnpm audit` is gone from the pipeline.
+
+Result: **3 high, 0 critical**, each waived with a reason and a 2027-01-31 expiry —
+`image-size` (two advisories, build-time only through `metro`, and 2.x made
+`imageSize()` async so a major override breaks the bundler) and `zod` 3.x
+(build-time only through `@expo/cli`, which declares `^3`; zod 4 changes the parse
+API). Nothing else in the graph is above moderate.
+
+#### The override that would have broken iOS builds
+
+Taking "the latest advisory-free version" was not sufficient. `@xmldom/xmldom`
+0.8.13 → 0.9.12 crosses a breaking change: **0.9 requires an explicit mimeType** on
+`DOMParser.parseFromString`, where 0.8 defaulted to `text/xml`. Running the consumers
+found it:
+
+```
+TypeError: DOMParser.parseFromString: the provided mimeType "undefined" is not valid.
+    at @expo/plist/build/parse.js:69
+```
+
+`@expo/plist` passes no mimeType in **every** published version (checked 0.7.0,
+0.8.1, 0.9.0, 0.10.0, 0.10.1 — all declare `@xmldom/xmldom ^0.8.8`), and it is what
+`@expo/config-plugins` uses to read and rewrite `Info.plist` during `expo prebuild`.
+So the override alone would have broken iOS config plugins at build time, somewhere
+CI does not look. Two consequences:
+
+* every 0.8.x release is vulnerable, so there is no in-range fix — the choice is an
+  out-of-range pin or the advisories;
+* the pin is kept, and `patches/@expo__plist@0.7.0.patch` passes `'text/xml'` in the
+  one call site. `pnpm.patchedDependencies` pins the patch to that exact version, so
+  an `@expo/plist` bump makes the patch fail loudly instead of silently disappearing.
+
+`tests/edge/dependency-gate.test.mjs` now runs both consumers on every test run —
+`@expo/plist` parse/build round-trip and `plist@3.1.1` (which declares `^0.9.10`) —
+and asserts each override resolves to exactly its pinned version. `expo config --type
+public` also evaluates the carer config through `@expo/cli`, the consumer of the
+`zod` pin. `pnpm install --frozen-lockfile` is clean, so CI resolves this tree.
+
+`tests/edge/dependency-gate.test.mjs` (11 tests) drives the classifier with fabricated
+advisories: an unwaived high fails, an expired waiver fails, a waiver without a
+reason fails, a stale waiver fails, a waiver suppresses one advisory and not the
+package, and the deploy pipeline must call the script rather than `pnpm audit`.
+and it asserts the overrides still work in their real consumers. The test found its
+own first bug — three hand-written, plausible-looking GHSA ids in the waiver file,
+all rejected by the "no longer reported" rule.
+
+### 12.3 Still open: the live-migration job
+
+`migrations on a real Postgres` has failed on every commit since `ec0ca40`, including
+`main`. It is `supabase db start` followed by `supabase db reset --debug`; the job log
+lives on `productionresultssa0.blob.core.windows.net`, which this sandbox cannot
+reach, so the failing statement is still unknown. Reconstructing the Supabase
+environment locally is not a valid substitute — there are **zero `CREATE EXTENSION`
+statements** anywhere in `supabase/`, so a bare Postgres fails the first migration on
+`vector(1536)` and `geometry(point,4326)`, which is an artefact of the harness rather
+than a finding. The next attempt should make the job self-diagnosing (per-file
+`psql -v ON_ERROR_STOP=1`) so its first failure names the file and statement.
