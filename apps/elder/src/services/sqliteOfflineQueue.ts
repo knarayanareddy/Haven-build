@@ -87,7 +87,7 @@ export function completeOfflineAction(idempotencyKey: string) {
 export function markOfflineActionFailed(idempotencyKey: string) {
   initOfflineQueueDb();
   db.runSync(
-    "update offline_actions set retry_count = retry_count + 1, status = case when retry_count >= 5 then 'failed' else 'queued' end where idempotency_key = ?", 
+    "update offline_actions set retry_count = retry_count + 1, status = case when retry_count + 1 >= 5 then 'failed' else 'queued' end where idempotency_key = ?", 
     idempotencyKey
   );
 }

@@ -2,6 +2,9 @@
 
 export function isValid11Proef(digits: string): boolean {
   if (!/^\d{9}$/.test(digits)) return false;
+  // Nine zeros satisfies the modulo-11 arithmetic (0 % 11 === 0) but is not a BSN, and
+  // appears constantly as a placeholder in ids and fixture data.
+  if (/^0{9}$/.test(digits)) return false;
   const d = digits.split("").map(Number);
   // Modulo-11 algorithm: (9×d1 + 8×d2 + 7×d3 + 6×d4 + 5×d5 + 4×d6 + 3×d7 + 2×d8 - 1×d9) % 11 == 0
   const sum = (d[0] * 9) + (d[1] * 8) + (d[2] * 7) + (d[3] * 6) + (d[4] * 5) + (d[5] * 4) + (d[6] * 3) + (d[7] * 2) - (d[8] * 1);
@@ -15,14 +18,17 @@ export function containsBsn(text?: string | null): boolean {
   const clean = text.replace(/[\s\-._/,\u200B-\u200D\uFEFF]/g, "");
   if (clean.length < 9) return false;
 
-  // 2. Sliding window scanning all contiguous 9-digit sequences
-  for (let i = 0; i <= clean.length - 9; i++) {
-    const candidate = clean.slice(i, i + 9);
-    if (/^\d{9}$/.test(candidate)) {
-      if (isValid11Proef(candidate)) return true;
-    }
-  }
-  return false;
+  // 2. Scan each digit run as a whole.
+  //
+  // This used to slide a 9-character window across every position, which meant any run
+  // of 15+ digits contained a sub-window that satisfied the modulo-11 test about one time
+  // in eleven. A UUID ending in zeros produced `000000000`, which passes the arithmetic
+  // outright, so ordinary requests were rejected with 422 for a BSN nobody had sent.
+  //
+  // A run of exactly nine digits is what a BSN looks like on the wire — formatted with
+  // spaces or dashes, it collapses to nine. A BSN glued to other digits is ambiguous,
+  // and guessing at it costs every other caller a rejected request.
+  return clean.split(/\D+/).some((run) => run.length === 9 && isValid11Proef(run));
 }
 
 export function scrubBsnFromLogs(payload: unknown): unknown {
@@ -49,9 +55,29 @@ export function scrubBsnFromLogs(payload: unknown): unknown {
   return payload;
 }
 
+/**
+ * Every scalar a request carries, as a string, without joining them together.
+ *
+ * The previous implementation serialised the whole body and scanned that. Since
+ * containsBsn() strips punctuation and whitespace first, digits from *different fields*
+ * were concatenated: `{"appetite":3,"mood":4}` plus the digits inside a UUID produced
+ * nine-digit windows that passed the 11-proef, so ordinary carer handover notes were
+ * rejected with 422 for containing a BSN nobody had sent. Scanning each value on its own
+ * is both what the rule means and what the caller actually transmits.
+ */
+function scalarStrings(value: unknown, out: string[] = []): string[] {
+  if (typeof value === "string") out.push(value);
+  else if (typeof value === "number" || typeof value === "bigint") out.push(String(value));
+  else if (Array.isArray(value)) for (const item of value) scalarStrings(item, out);
+  else if (value !== null && typeof value === "object") {
+    for (const item of Object.values(value)) scalarStrings(item, out);
+  }
+  return out;
+}
+
 export function assertNoBsnInPayload(body: unknown): void {
-  const serialized = typeof body === "string" ? body : JSON.stringify(body);
-  if (containsBsn(serialized)) {
+  const offending = scalarStrings(body).find((value) => containsBsn(value));
+  if (offending !== undefined) {
     const err = new Error("422: Prohibited Dutch Citizen Service Number (BSN) detected. Storage, transmission, and processing of BSN is strictly prohibited.");
     (err as unknown as { status: number; isBsnViolation: boolean }).status = 422;
     (err as unknown as { status: number; isBsnViolation: boolean }).isBsnViolation = true;

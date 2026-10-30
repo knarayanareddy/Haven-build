@@ -18,6 +18,7 @@
 // not.
 
 import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { linkSharedModules, transpileModuleFile } from './shared-loader.mjs';
 
 const SHARED = new URL('../../../supabase/functions/_shared/', import.meta.url);
@@ -375,6 +376,50 @@ export async function call(handler, req) {
     body = text;
   }
   return { status: response.status, body, headers: response.headers, response };
+}
+
+/**
+ * Transpiles an app module that imports `expo-sqlite`, rewriting that specifier to the
+ * node:sqlite shim so the real queue code can run in this environment.
+ *
+ * @param {string|URL} relativePath path under the repository root, e.g.
+ *   'apps/elder/src/services/sqliteOfflineQueue.ts'
+ * @returns {Promise<string>} importable path of the transpiled module
+ */
+export async function loadAppModule(relativePath) {
+  installGlobalShim();
+  const outDir = await linkSharedModules();
+  // The rewritten specifier is relative to the transpile directory, so the shim has to
+  // exist there too.
+  writeFileSync(
+    join(outDir, 'expo-sqlite-node.mjs'),
+    readFileSync(new URL('./expo-sqlite-node.mjs', import.meta.url), 'utf8'),
+  );
+  const url = new URL(`../../../${relativePath}`, import.meta.url);
+  const path = await transpileModuleFile(url, { outDir });
+  const rewritten = readFileSync(path, 'utf8')
+    .replace(/from\s+['"]expo-sqlite['"]/g, "from './expo-sqlite-node.mjs'")
+    .replace(/from\s+['"]\.\/([A-Za-z0-9_-]+)(?:\.ts)?['"]/g, "from './$1.mjs'");
+  writeFileSync(path, rewritten);
+  // Sibling modules the app module imports (types-only today, but keep it general).
+  for (const match of [...rewritten.matchAll(/from\s+['"]\.\/([A-Za-z0-9_-]+)\.mjs['"]/g)]) {
+    const sibling = new URL(`../../../${relativePath.replace(/[^/]+$/, '')}${match[1]}.ts`, import.meta.url);
+    try {
+      const siblingPath = await transpileModuleFile(sibling, { outDir });
+      const siblingSource = readFileSync(siblingPath, 'utf8')
+        .replace(/from\s+['"]expo-sqlite['"]/g, "from './expo-sqlite-node.mjs'");
+      writeFileSync(siblingPath, siblingSource);
+    } catch {
+      // A type-only sibling compiles to nothing importable; ignore.
+    }
+  }
+  const loaded = await import(`${path}?app=${(shimCounter += 1)}`);
+  // Returned as a plain copy because a module namespace object is frozen, and the test
+  // needs the same sqlite shim instance the module is using (to age a lease, say).
+  return {
+    ...loaded,
+    __sqlite: await import(join(outDir, 'expo-sqlite-node.mjs')),
+  };
 }
 
 export { SHARED, FUNCTIONS };

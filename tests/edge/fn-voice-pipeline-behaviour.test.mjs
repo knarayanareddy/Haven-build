@@ -50,11 +50,11 @@ function seed({ reminders = [{}] } = {}) {
   });
 }
 
-async function speak(db, transcript, { elderId = ELDER } = {}) {
+async function speak(db, transcript, { elderId = ELDER, caller = elderId } = {}) {
   const harness = await loadEdgeFunction('fn-voice-pipeline', { db, env: {} });
   const response = await call(harness.handler, request('fn-voice-pipeline', {
     body: { elder_id: elderId, screen_id: 'HOME', transcript_text: transcript },
-    headers: { authorization: `Bearer test-user:${elderId}` },
+    headers: { authorization: `Bearer test-user:${caller}` },
   }));
   await harness.settle();
   return response;
@@ -144,8 +144,12 @@ test('a family member cannot speak for an elder who has not consented', async ()
     is_active: true,
     notify_on_crisis: true,
   }];
+  // The caller is the family member and the body names the elder they are not
+  // authorised for. (An earlier version of this test passed the same id in both places,
+  // so the caller was simply acting for themselves, and it only "failed" because the
+  // BSN guard happened to reject the payload — a vacuous pass.)
   const stranger = '99999999-9999-4999-8999-999999999999';
-  const result = await speak(db, 'Ik heb mijn pillen ingenomen', { elderId: stranger });
+  const result = await speak(db, 'Ik heb mijn pillen ingenomen', { elderId: ELDER, caller: stranger });
 
   assert.ok(result.status >= 400, `expected a refusal, got ${result.status}`);
   assert.equal(db.store.pending_confirmations.length, 0,
