@@ -11,10 +11,11 @@
 // FloatingVoiceButton.compare is the function React calls to decide whether to re-render —
 // the same one production uses, not a re-implementation.
 //
-// State of the meter: nothing supplies audioVolumePct today. ScreenRenderer renders the
-// button without it and voiceRecorder exposes no metering, so the ring never appears and the
-// throttle is a guard for the day a meter is wired up. The synthetic frame stream below is
-// therefore a specification of the comparator, not a measurement of a live screen.
+// Scope: this file covers the prop path — a parent that owns the audio session and drives
+// audioVolumePct (the macOS toolbar, or a future shared recorder). The button also measures
+// its own recording; that path, from the microphone to the ring, is
+// tests/edge/voice-meter-behaviour.test.mjs. The frame stream below is a specification of
+// the comparator, not a measurement of a live screen.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

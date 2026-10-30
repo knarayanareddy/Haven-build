@@ -1020,7 +1020,7 @@ row had to be true before the row above it could be marked done.
    mutation and exposes `refreshOfflineQueueSize(carerId)`, which the screen uses so the
    badge counts only the signed-in carer — a shared handset holds a colleague's queue too.
 
-### 13.4 One gap this pass does not close
+### 13.4 One gap this pass does not close — **closed in §14**
 
 `audioVolumePct` has no producer. `apps/elder/src/renderer/ScreenRenderer.tsx` renders
 `FloatingVoiceButton` without it and `apps/elder/src/services/voiceRecorder.ts` exposes no
@@ -1059,3 +1059,67 @@ tests/edge: 48 files · behavioural 48 · static-only 0 (allowlisted 0)
 
 Allowlist trajectory across the whole remediation: **55 → 35 → 26 → 22 → 18 → 17 → 15 →
 14 → 10 → 8 → 6 → 5 → 4 → 2 → 0**.
+
+---
+
+## 14. Eighth pass — the listening ring gets a microphone (2026-10-30)
+
+§13.4 recorded a gap rather than covering it: `audioVolumePct` had no producer, so the ring
+on the floating voice button never appeared. This pass closes it.
+
+### 14.1 Rubric
+
+| Step | Done when | Evidence |
+|---|---|---|
+| The measurement exists | the recorder is created with metering enabled and exposes the level while recording | `apps/elder/src/services/voiceRecorder.ts`; 6 tests in `tests/edge/voice-meter-behaviour.test.mjs` |
+| dB becomes a ring | a dBFS reading maps to 0..100, monotonically, with silence and absent readings at zero | `apps/elder/src/services/voiceMeter.ts`; 4 tests |
+| The ring stays cheap | ten readings a second reach `setState` only when the level crosses a ten-percent bucket | `bindRecordingMeter`; 3 tests, one of them a 200 ms loop through the real sampler |
+| The button draws it | press starts the meter, stop and failure detach it, unmount stops polling | `FloatingVoiceButton.tsx`; the glue is `bindRecordingMeter`, tested directly |
+| Nothing regressed | full pipeline green, accessibility contract intact | `pnpm test` exit 0; 446 edge tests |
+
+### 14.2 What was wired, and the one deviation
+
+`startVoiceRecording()` now passes `isMeteringEnabled: true` to the recorder — off by default
+in expo-audio, and without it `getStatus().metering` is `undefined`, which is why the ring
+could never move — and polls `getStatus()` every 100 ms while at least one subscriber exists.
+Sampling starts on the first subscriber and stops on the last, so an idle button does not read
+the recorder for the rest of the session.
+
+The plan was that `ScreenRenderer.tsx` would pass `audioVolumePct` down. It does not, and
+that is deliberate: the recorder is created *inside* the button (it owns the press, the 60-second
+timeout and the submission), so the parent has no level to pass. Threading one down would
+mean lifting the recorder into `ScreenRenderer` or a store, for no behaviour the older adult
+would notice. The prop stays for a parent that owns an audio session — the macOS toolbar path
+— and wins when present. The memo comparator still earns its place: it is what stops a parent
+re-render (the screen renderer re-renders on its clock) from re-rendering the button.
+
+### 14.3 What is verified, and what needs a device
+
+Verified: the mapping, the throttle, the polling loop, unsubscribe and stop, permission
+refusal before any recorder is constructed, a platform without metering support, and a
+recorder torn down by the OS (an incoming call, an iOS media-services reset) reporting
+silence instead of throwing into the render path.
+
+**Not verified: that a real microphone produces a useful dBFS range on a real handset.**
+`METER_FLOOR_DB = -50` is set from the usual -30..-12 dBFS range of conversational speech,
+and it is the single constant to change if the ring looks dead on a device. A test cannot
+answer that question; only a phone can.
+
+### 14.4 Two harness defects this exposed
+
+1. **`loadAppModule()` could not load a module that imports from a parent directory.** It
+   flattened `./sibling` imports into its transpile directory but left `../services/x`
+   untouched, so the button's new import resolved to `/tmp/services/voiceMeter` and failed
+   with `ERR_MODULE_NOT_FOUND`. It now resolves every relative specifier against the original
+   source file, copies the target in, and flattens the import — with a guard that throws if
+   two different modules share a basename rather than silently picking one.
+2. **`elder-accessibility-contract` pinned a variable name.** It required
+   `accessibilityValue` to contain the literal `audioVolumePct`, which made renaming the value
+   an accessibility failure. It now reads the level out of the ring's own `ringScale`
+   expression and requires the accessibility value to report that same level — the invariant a
+   screen-reader user actually depends on.
+
+```
+tests/edge: 49 files · behavioural 49 · static-only 0
+# tests 446 · # pass 446 · # fail 0
+```
