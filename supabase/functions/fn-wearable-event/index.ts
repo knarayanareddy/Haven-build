@@ -1,4 +1,4 @@
-import { corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
 import { assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
@@ -55,6 +55,6 @@ Deno.serve(async (req) => {
     return json({ success: true, wandering_event_id: event.id, family_notified: event.family_notified }, 200, req);
   } catch (e) {
     await recordMetric('fn-wearable-event', started, 'error');
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

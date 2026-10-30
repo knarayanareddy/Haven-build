@@ -1,4 +1,4 @@
-import { admin, corsHeaders, json, readJsonBody, recordMetric, requireFields, safeErrorMessage, sha256, userClient } from "../_shared/core.ts";
+import { admin, corsHeaders, json, readJsonBody, recordMetric, requireFields, safeErrorMessage, sha256, userClient, errorResponse } from "../_shared/core.ts";
 import { requireInternalAccess, requireVendorSecretHeader } from "../_shared/internal.ts";
 import { asyncWrapper } from "../_shared/async_wrapper.ts";
 
@@ -128,6 +128,6 @@ Deno.serve(asyncWrapper("fn-medmij-fhir-import", async (req: Request) => {
       }
     } catch (_) { /* best-effort failure ledger */ }
     await recordMetric('fn-medmij-fhir-import', started, 'error');
-    return json({ error: safeErrorMessage(error) }, 400, req);
+    return errorResponse(error, req);
   }
 }));

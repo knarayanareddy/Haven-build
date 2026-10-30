@@ -76,7 +76,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signInWithBiometric(locale: Locale = 'nl-NL'): Promise<boolean> {
-    // Canonical fallback string: 'HAVEN verificatie op Mac'
     const promptMsg = Platform.OS === 'macos'
       ? translate('auth.biometric.macos', locale)
       : Platform.OS === 'android'

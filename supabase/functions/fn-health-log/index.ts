@@ -1,4 +1,4 @@
-import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, requireFields, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, requireFields, userClient, errorResponse } from "../_shared/core.ts";
 import { assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
@@ -37,9 +37,9 @@ Deno.serve(async (req) => {
       throw new Error("Unsupported health log kind");
     }
     await recordMetric("fn-health-log", started, "success");
-    return json({ success: true, kind: body.kind, record: result });
+    return json({ success: true, kind: body.kind, record: result }, 200, req);
   } catch (e) {
     await recordMetric("fn-health-log", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

@@ -1,4 +1,5 @@
-import { admin, corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { rateLimit } from "../_shared/ratelimit.ts";
+import { admin, corsHeaders, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
 import { assertActorMatches, assertElderOrFamilyCan, assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { withIdempotency } from "../_shared/idempotency.ts";
@@ -7,6 +8,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
   try {
+    await rateLimit(req, "fn-medication-ocr-review");
     const body = await readJsonBody(req) as Record<string, unknown>;
     validateBody(body, { review_id: "uuid", decision: "string" }, { allowUnknown: true });
     const userId = await getJwtUserId(req);
@@ -16,7 +18,8 @@ Deno.serve(async (req) => {
     }
 
     const idem = req.headers.get("idempotency-key") ?? body.idempotency_key;
-    const result = await withIdempotency({
+    type OcrReviewBody = { review_id: unknown; decision: string; created_medication_id?: string | null };
+    const result = await withIdempotency<OcrReviewBody>({
       key: idem,
       functionName: "fn-medication-ocr-review",
       elderId: body.elder_id,
@@ -78,7 +81,8 @@ Deno.serve(async (req) => {
             notes: body.notes ?? null,
             updated_at: new Date().toISOString(),
           }).eq("id", body.review_id);
-          return { body: { review_id: body.review_id, decision: "approved", created_medication_id: med.id } };
+          const approvedBody: OcrReviewBody = { review_id: body.review_id, decision: "approved", created_medication_id: med.id };
+          return { body: approvedBody };
         } else {
           await db.from("medication_ocr_reviews").update({
             reviewer_id: userId,
@@ -86,7 +90,8 @@ Deno.serve(async (req) => {
             notes: body.notes ?? null,
             updated_at: new Date().toISOString(),
           }).eq("id", body.review_id);
-          return { body: { review_id: body.review_id, decision: body.decision } };
+          const rejectedBody: OcrReviewBody = { review_id: body.review_id, decision: String(body.decision) };
+          return { body: rejectedBody };
         }
       },
     });
@@ -95,6 +100,6 @@ Deno.serve(async (req) => {
     return json(result.body, result.status ?? 200, req);
   } catch (e) {
     await recordMetric("fn-medication-ocr-review", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

@@ -1,0 +1,9 @@
+{
+  "nodeModulesDir": "auto",
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitOverride": true,
+    "lib": ["deno.window", "esnext"]
+  },
+  "lint": { "rules": { "exclude": ["no-explicit-any"] } }
+}

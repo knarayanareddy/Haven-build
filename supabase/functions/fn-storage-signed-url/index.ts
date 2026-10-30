@@ -1,3 +1,4 @@
+import { rateLimit } from "../_shared/ratelimit.ts";
 import { corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
 import { assertElderOrFamilyCan, AuthzError, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
@@ -51,6 +52,7 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
   try {
+    await rateLimit(req, "fn-storage-signed-url");
     const body = await readJsonBody(req) as Record<string, unknown>;
     validateBody(body, { bucket: 'string', path: 'string', operation: 'string' }, { allowUnknown: true });
     if (!allowedBuckets.has(String(body.bucket))) throw new AuthzError("Requested bucket is banned", "UNAUTHORIZED_DELEGATE");

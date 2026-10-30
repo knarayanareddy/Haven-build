@@ -1,3 +1,4 @@
+import { settleQuery } from "../_shared/settle.ts";
 import { admin, corsHeaders, dispatchNotification, json } from "../_shared/core.ts";
 import { captureException } from "../_shared/sentry.ts";
 import { asyncWrapper } from "../_shared/async_wrapper.ts";
@@ -38,13 +39,13 @@ Deno.serve(asyncWrapper("fn-fall-escalation", async (req: Request) => {
     await rateLimit(req, "s3_emergency_location_creations");
   } catch (rateErr) {
     const dbAdmin = admin();
-    await dbAdmin.from("security_violations").insert({
+    await settleQuery(dbAdmin.from("security_violations").insert({
       error_code: "429_OBJECT_SPIKE",
       table_name: "tts-cache",
       attempted_action: "UPLOAD_EMERGENCY_LOCATION",
       attempted_sql: "Object creation spike threshold exceeded",
       violation_reason: "Basic monitoring and rate control triggered to prevent S3 bucket cache explosion and billing DoS",
-    }).catch(() => undefined);
+    }), "security_violations");
     
     await captureException(new Error("S3 Object Creation Spike Threshold Exceeded"), { fn: "fn-fall-escalation", context: "s3_creation_spike" });
     const spikeErr = new Error("429_OBJECT_SPIKE: Emergency location object creation spike threshold exceeded");
@@ -75,7 +76,7 @@ Deno.serve(asyncWrapper("fn-fall-escalation", async (req: Request) => {
 
       // FIX A3: When claiming a 'processing' row that was stale, log a 'STALE_CLAIM_RECOVERED' entry to audit_log
       if (ev.status === "processing") {
-        await db.from("audit_log").insert({
+        await settleQuery(db.from("audit_log").insert({
           actor_id: "00000000-0000-0000-0000-000000000001",
           actor_role: "system",
           action: "STALE_CLAIM_RECOVERED",
@@ -83,7 +84,7 @@ Deno.serve(asyncWrapper("fn-fall-escalation", async (req: Request) => {
           record_id: ev.fall_id,
           elder_id: ev.elder_id,
           extra: { reason: "Recovered stale orphaned processing emergency fall claim", timestamp: new Date().toISOString() },
-        }).catch(() => undefined);
+        }), "audit_log");
       }
 
       let preciseLocationUrl: string | null = null;

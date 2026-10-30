@@ -1,4 +1,6 @@
-import { admin, corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { rateLimit } from "../_shared/ratelimit.ts";
+import { settleQuery } from "../_shared/settle.ts";
+import { admin, corsHeaders, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
 import { assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { withIdempotency } from "../_shared/idempotency.ts";
@@ -9,6 +11,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
   try {
+    await rateLimit(req, "fn-consent-pack-decide");
     const body = await readJsonBody(req) as Record<string, unknown>;
     validateBody(body, { elder_id: "uuid", pack_key: "string", decision: "string" }, { allowUnknown: true });
     const userId = await getJwtUserId(req);
@@ -36,7 +39,7 @@ Deno.serve(async (req) => {
 
         // Side effect: if a pack is declined, we also write a consent_records "declined" entry for audit.
         if (body.decision === "declined") {
-          await db.from("consent_records").insert({
+          await settleQuery(db.from("consent_records").insert({
             elder_id: body.elder_id,
             consent_type: `pack:${body.pack_key}`,
             granted: false,
@@ -44,7 +47,7 @@ Deno.serve(async (req) => {
             channel: "elder_app",
             granted_at: new Date().toISOString(),
             withdrawn_at: new Date().toISOString(),
-          }).catch(() => undefined);
+          }), "consent_records");
         }
 
         // Compute what to show next: the next not_shown or deferred pack.
@@ -62,6 +65,6 @@ Deno.serve(async (req) => {
     return json(result.body, result.status ?? 200, req);
   } catch (e) {
     await recordMetric("fn-consent-pack-decide", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

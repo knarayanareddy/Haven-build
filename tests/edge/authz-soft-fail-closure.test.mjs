@@ -1,154 +1,173 @@
+// Behavioural tests for the "soft fail" contract of the authorisation helpers:
+// when the storage subsystem is unavailable or the answer is ambiguous, deny —
+// and leave an audit trail that says why.
+//
+// What this file replaced
+// ───────────────────────
+// The previous version defined `class HardenedAuthzEngine`, a hand-written copy of
+// `assertElderOrFamilyCan` and `logDenyAudit` inside the test file, and asserted
+// the copy denied. `supabase/functions/_shared/authz.ts` was never imported, so the
+// suite was green whether or not the real helpers denied, and whether or not the
+// real code wrote an audit row.
+//
+// Run with: `node tests/edge/authz-soft-fail-closure.test.mjs`
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createRequire } from 'node:module';
 
-test('Authz Soft-Fail Hardening Closure Suite (Finding #3 Complete Acceptance)', async () => {
-  // Pure JavaScript simulated execution engine reflecting _shared/authz.ts rules
-  class HardenedAuthzEngine {
-    constructor() {
-      this.family_relationships = new Map();
-      this.audit_log = [];
-    }
+import { installDenoShim, linkSharedModules } from './support/shared-loader.mjs';
 
-    insertRelationship(rel) {
-      this.family_relationships.set(`${rel.elderId}-${rel.familyMemberId}`, rel);
-    }
+const require = createRequire(import.meta.url);
+const Module = require('node:module');
+const originalResolve = Module._resolveFilename;
+const stubDir = mkdtempSync(join(tmpdir(), 'haven-softfail-'));
+const stubCjs = join(stubDir, 'supabase-stub.cjs');
+writeFileSync(stubCjs, `module.exports.createClient = function () { return globalThis.__HAVEN_SUPABASE_MOCK__; };\n`);
+writeFileSync(join(stubDir, 'supabase-stub.mjs'), `export function createClient() { return globalThis.__HAVEN_SUPABASE_MOCK__; }\n`);
+Module._resolveFilename = function patched(request, parent, ...rest) {
+  if (request === '@supabase/supabase-js') return stubCjs;
+  return originalResolve.call(this, request, parent, ...rest);
+};
 
-    async logDenyAudit(actorId, elderId, resource, reasonCode) {
-      this.audit_log.push({
-        actor_id: actorId ? String(actorId) : '00000000-0000-0000-0000-000000000001',
-        actor_role: 'system',
-        action: 'AUTHZ_DENY_GATE',
-        table_name: resource,
-        elder_id: elderId ? String(elderId) : null,
-        extra: { reason_code: reasonCode, timestamp: new Date().toISOString() }
-      });
-    }
+const ELDER_ID = '00000000-0000-0000-0000-000000000001';
+const DELEGATE_ID = '00000000-0000-0000-0000-000000000002';
 
-    async assertElderOrFamilyCan(userId, elderId, permission) {
-      if (userId === elderId) return true;
+let relationship;
+let familyError;
+let auditRows;
+let auditError;
 
-      // Simulate Storage Subsystem Query
-      const relKey = `${elderId}-${userId}`;
-      let queryResult = null;
-      let dbError = null;
-
-      try {
-        if (permission === 'simulate_db_error') {
-          throw new Error('500 Storage Database Node Unavailable or TCP Timeout');
-        }
-        const rel = this.family_relationships.get(relKey);
-        if (rel && rel.elder_consented === true && rel.is_active === true) {
-          queryResult = rel;
-        }
-      } catch (err) {
-        dbError = err;
-      }
-
-      // DENY on any DB error / uncertainty (timeouts, database errors)
-      if (dbError) {
-        await this.logDenyAudit(userId, elderId, permission, 'SYSTEM_UNCERTAINTY');
-        const err = new Error('403: Relational policy check aborted due to storage subsystem error or timeout.');
-        err.status = 403;
-        err.reasonCode = 'SYSTEM_UNCERTAINTY';
-        throw err;
-      }
-
-      // DENY on missing rows (unknown delegate)
-      if (!queryResult) {
-        await this.logDenyAudit(userId, elderId, permission, 'UNAUTHORIZED_DELEGATE');
-        const err = new Error('403: Caller does not possess verified, active older adult consent delegate credentials.');
-        err.status = 403;
-        err.reasonCode = 'UNAUTHORIZED_DELEGATE';
-        throw err;
-      }
-
-      const field = {
-        medications: 'can_view_medications',
-        messages: 'can_view_messages',
-        documents: 'can_view_documents'
-      }[permission] ?? permission;
-
-      if (!queryResult[field]) {
-        await this.logDenyAudit(userId, elderId, permission, 'MISSING_PERMISSION');
-        const err = new Error(`403: Delegate relationship exists but lacks specific required RBAC capability: ${permission}`);
-        err.status = 403;
-        err.reasonCode = 'MISSING_PERMISSION';
-        throw err;
-      }
-
-      return true;
-    }
-  }
-
-  const engine = new HardenedAuthzEngine();
-  const testElderId = crypto.randomUUID();
-  const testDelegateId = crypto.randomUUID();
-  const unknownTargetId = crypto.randomUUID();
-
-  // Seed valid delegate
-  engine.insertRelationship({
-    elderId: testElderId,
-    familyMemberId: testDelegateId,
+function reset() {
+  relationship = {
+    id: 'rel-1',
+    elder_id: ELDER_ID,
+    family_member_id: DELEGATE_ID,
     elder_consented: true,
     is_active: true,
-    can_view_documents: true
-  });
+    deleted_at: null,
+    can_view_messages: true,
+    can_view_alerts: true,
+    can_view_location_events: false,
+  };
+  familyError = null;
+  auditRows = [];
+  auditError = null;
+}
 
-  // ══════════════════════════════════════════════════════════════════════════════
-  // CLOSURE TEST 1 — Simulated DB error inside authz check -> 403 DENY + audit log row
-  // ══════════════════════════════════════════════════════════════════════════════
-  let caughtDbErr = null;
-  try {
-    await engine.assertElderOrFamilyCan(testDelegateId, testElderId, 'simulate_db_error');
-  } catch (err) {
-    caughtDbErr = err;
-  }
+reset();
 
-  assert.ok(caughtDbErr !== null, 'Simulated storage database error must be actively trapped and throw an exception');
-  assert.equal(caughtDbErr.status, 403, 'Must return explicit 403 Forbidden return status');
-  assert.equal(caughtDbErr.reasonCode, 'SYSTEM_UNCERTAINTY');
+function builder(table) {
+  const filters = [];
+  const proxy = {
+    select: () => proxy,
+    in: () => proxy,
+    is: () => proxy,
+    eq(col, value) { filters.push([col, value]); return proxy; },
+    insert(values) {
+      if (table === 'audit_log') {
+        auditRows.push(values);
+        return Promise.resolve({ data: null, error: auditError });
+      }
+      return Promise.resolve({ data: null, error: null });
+    },
+    maybeSingle: () => Promise.resolve(resolve()),
+    single: () => Promise.resolve(resolve()),
+    then: (onFulfilled, onRejected) => Promise.resolve({ data: [], error: null }).then(onFulfilled, onRejected),
+  };
+  const resolve = () => {
+    if (table !== 'family_relationships') return { data: null, error: null };
+    if (familyError) return { data: null, error: familyError };
+    const row = filters.every(([col, value]) => relationship[col] === value) ? relationship : null;
+    return { data: row, error: null };
+  };
+  return proxy;
+}
 
-  // Verify structured audit log entry matching reason code perfectly
-  const matchingAuditRow = engine.audit_log.find((a) => a.extra.reason_code === 'SYSTEM_UNCERTAINTY');
-  assert.ok(matchingAuditRow !== undefined, 'Must write non-repudiable audit_log entry for SYSTEM_UNCERTAINTY');
-  assert.equal(matchingAuditRow.action, 'AUTHZ_DENY_GATE');
-  assert.equal(matchingAuditRow.table_name, 'simulate_db_error');
-  assert.equal(matchingAuditRow.elder_id, testElderId);
+globalThis.__HAVEN_SUPABASE_MOCK__ = {
+  __supabaseMock: true,
+  auth: { getUser: () => Promise.resolve({ data: { user: null }, error: null }) },
+  from(table) { return builder(table); },
+  storage: { from: () => ({}) },
+  rpc: () => Promise.resolve({ data: null, error: null }),
+};
 
-  // ══════════════════════════════════════════════════════════════════════════════
-  // CLOSURE TEST 2 — Unknown Delegate (No relationship/consent) -> 403 DENY
-  // ══════════════════════════════════════════════════════════════════════════════
-  let caughtUnknownErr = null;
-  try {
-    await engine.assertElderOrFamilyCan(unknownTargetId, testElderId, 'documents');
-  } catch (err) {
-    caughtUnknownErr = err;
-  }
+installDenoShim();
+const shared = await linkSharedModules();
+const authz = await import(`${shared}/authz.mjs`);
 
-  assert.ok(caughtUnknownErr !== null, 'Unknown un-consented delegate must be aggressively blocked');
-  assert.equal(caughtUnknownErr.status, 403, 'Must return exact 403 DENY states');
-  assert.equal(caughtUnknownErr.reasonCode, 'UNAUTHORIZED_DELEGATE');
+const readAudit = () => auditRows.filter((row) => row.action === 'AUTHZ_DENY_GATE');
 
-  const unknownAuditRow = engine.audit_log.find((a) => a.extra.reason_code === 'UNAUTHORIZED_DELEGATE');
-  assert.ok(unknownAuditRow !== undefined, 'Must write audit_log row for UNAUTHORIZED_DELEGATE');
+test('a storage subsystem error denies with SYSTEM_UNCERTAINTY', async () => {
+  reset();
+  familyError = { message: 'connection reset by peer', code: '08006' };
 
-  // ══════════════════════════════════════════════════════════════════════════════
-  // CLOSURE TEST 3 — Regression Unit Test Proving Exactly 0 Paths Return ALLOW
-  // ══════════════════════════════════════════════════════════════════════════════
-  // Prove that a valid delegate successfully returns true when requesting valid capabilities
-  const validRes = await engine.assertElderOrFamilyCan(testDelegateId, testElderId, 'documents');
-  assert.equal(validRes, true, 'Valid consented relationship must be permitted');
+  await assert.rejects(
+    () => authz.assertElderOrFamilyCan(DELEGATE_ID, ELDER_ID, 'messages'),
+    (err) => err.status === 403 && err.reasonCode === 'SYSTEM_UNCERTAINTY',
+  );
+});
 
-  // Prove that when a valid delegate requests an un-consented capability (e.g. medications),
-  // it strictly DENIES with 403 Forbidden rather than falling back to ALLOW
-  let caughtPermErr = null;
-  try {
-    await engine.assertElderOrFamilyCan(testDelegateId, testElderId, 'medications');
-  } catch (err) {
-    caughtPermErr = err;
-  }
+test('a denied request leaves an audit row with the reason code', async () => {
+  reset();
+  familyError = { message: 'timeout', code: '57014' };
 
-  assert.ok(caughtPermErr !== null, 'Un-granted specific RBAC capability must throw an exception');
-  assert.equal(caughtPermErr.status, 403);
-  assert.equal(caughtPermErr.reasonCode, 'MISSING_PERMISSION');
+  await assert.rejects(() => authz.assertElderOrFamilyCan(DELEGATE_ID, ELDER_ID, 'messages'));
+
+  const denied = readAudit();
+  assert.equal(denied.length, 1, 'a denial must be auditable');
+  assert.equal(denied[0].actor_id, DELEGATE_ID);
+  assert.equal(denied[0].table_name, 'messages');
+  assert.equal(denied[0].extra.reason_code, 'SYSTEM_UNCERTAINTY');
+  assert.ok(denied[0].extra.timestamp, 'the row must carry a timestamp');
+});
+
+test('a missing relationship denies with UNAUTHORIZED_DELEGATE', async () => {
+  reset();
+  relationship.family_member_id = '00000000-0000-0000-0000-0000000000ff';
+
+  await assert.rejects(
+    () => authz.assertElderOrFamilyCan(DELEGATE_ID, ELDER_ID, 'messages'),
+    (err) => err.status === 403 && err.reasonCode === 'UNAUTHORIZED_DELEGATE',
+  );
+  assert.equal(readAudit()[0]?.extra.reason_code, 'UNAUTHORIZED_DELEGATE');
+});
+
+test('a missing permission denies with MISSING_PERMISSION', async () => {
+  reset();
+
+  await assert.rejects(
+    () => authz.assertElderOrFamilyCan(DELEGATE_ID, ELDER_ID, 'location'),
+    (err) => err.status === 403 && err.reasonCode === 'MISSING_PERMISSION',
+  );
+  assert.equal(readAudit()[0]?.extra.reason_code, 'MISSING_PERMISSION');
+});
+
+test('a failing audit write cannot turn a deny into an allow', async () => {
+  reset();
+  relationship.family_member_id = '00000000-0000-0000-0000-0000000000ff';
+  auditError = { message: 'audit_log is read-only' };
+
+  await assert.rejects(
+    () => authz.assertElderOrFamilyCan(DELEGATE_ID, ELDER_ID, 'messages'),
+    (err) => err.status === 403,
+    'the decision stands even when the audit trail cannot be written',
+  );
+});
+
+test('the denial is uniform: no reason detail leaks to the caller', async () => {
+  reset();
+  familyError = { message: 'pg_relation "family_relationships" permission denied for service_role', code: '42501' };
+
+  await assert.rejects(
+    () => authz.assertElderOrFamilyCan(DELEGATE_ID, ELDER_ID, 'messages'),
+    (err) => {
+      assert.equal(err.status, 403);
+      assert.doesNotMatch(err.message, /pg_relation|service_role|permission denied/i);
+      return true;
+    },
+  );
 });

@@ -1,4 +1,6 @@
-import { admin, corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { rateLimit } from "../_shared/ratelimit.ts";
+import { settleQuery } from "../_shared/settle.ts";
+import { admin, corsHeaders, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
 import { assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { withIdempotency } from "../_shared/idempotency.ts";
@@ -7,6 +9,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
   try {
+    await rateLimit(req, "fn-voice-profile-revoke");
     const body = await readJsonBody(req) as Record<string, unknown>;
     validateBody(body, { voice_profile_id: "uuid" }, { allowUnknown: true });
     const userId = await getJwtUserId(req);
@@ -30,7 +33,7 @@ Deno.serve(async (req) => {
         await db.from("elder_voice_preferences").update({ voice_profile_id: null, use_familiar_voice: false, updated_at: new Date().toISOString() }).eq("voice_profile_id", body.voice_profile_id);
 
         // Audit row.
-        await db.from("audit_log").insert({
+        await settleQuery(db.from("audit_log").insert({
           actor_id: userId,
           actor_role: "family",
           action: "DELETE",
@@ -38,7 +41,7 @@ Deno.serve(async (req) => {
           record_id: body.voice_profile_id,
           elder_id: profile.owner_profile_id,
           extra: { reason: body.reason ?? "owner_revocation", revoked_at: new Date().toISOString() },
-        }).catch(() => undefined);
+        }), "audit_log");
 
         return { body: { voice_profile_id: body.voice_profile_id, status: "revoked", elder_preferences_severed: true } };
       },
@@ -48,6 +51,6 @@ Deno.serve(async (req) => {
     return json(result.body, result.status ?? 200, req);
   } catch (e) {
     await recordMetric("fn-voice-profile-revoke", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

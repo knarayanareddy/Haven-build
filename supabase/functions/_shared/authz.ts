@@ -1,34 +1,59 @@
+import { settleQuery } from "./settle.ts";
 import { admin } from './core.ts';
 
 export class AuthzError extends Error {
-  constructor(message: string, public readonly reasonCode: "SYSTEM_UNCERTAINTY" | "UNAUTHORIZED_DELEGATE" | "MISSING_PERMISSION" | "INVALID_TOKEN") {
+  readonly status: number;
+  readonly code: "UNAUTHORIZED" | "FORBIDDEN";
+
+  constructor(
+    message: string,
+    public readonly reasonCode: "SYSTEM_UNCERTAINTY" | "UNAUTHORIZED_DELEGATE" | "MISSING_PERMISSION" | "INVALID_TOKEN",
+  ) {
     super(message);
     this.name = "AuthzError";
-    (this as unknown as { status: number }).status = 403;
+    // Every AuthzError is 403. This preserves the contract the functions and the
+    // trust-boundary matrix already publish ("403: Emergency brief unavailable or
+    // token expired", assertSelf, assertElderOrFamilyCan …) while adding a machine
+    // readable code so clients stop having to parse prose.
+    this.status = 403;
+    this.code = reasonCode === "INVALID_TOKEN" ? "UNAUTHORIZED" : "FORBIDDEN";
   }
 }
 
 async function logDenyAudit(actorId: string, elderId: string | null, resource: string, reasonCode: string) {
   const db = admin();
-  await db.from("audit_log").insert({
+  await settleQuery(db.from("audit_log").insert({
     actor_id: actorId ? String(actorId) : "00000000-0000-0000-0000-000000000001",
     actor_role: "system",
     action: "AUTHZ_DENY_GATE",
     table_name: resource,
     elder_id: elderId ? String(elderId) : null,
     extra: { reason_code: reasonCode, timestamp: new Date().toISOString() },
-  }).catch(() => undefined);
+  }), "audit_log");
 }
 
-// ─── COMPENSATING CONTROL — full fix tracked in R3 (RBAC JWT + Central TRL) ───
-// Short in-memory cache for delegate relationship lookup results with maxAge = 10s.
-// Compresses horizontal auth sharding lag exploit windows from 15-30s down to <=10s.
-const delegateCache = new Map<string, { result: unknown; expiresAt: number }>();
-
-export function invalidateRelationshipCache(userId: string, elderId: string) {
-  delegateCache.delete(`${userId}:${elderId}`);
-}
-// ──────────────────────────────────────────────────────────────────────────────
+/**
+ * Relationship cache: removed October 2026.
+ *
+ * A module-scoped `Map` (`delegateCache`, maxAge 10 s) used to memoise the
+ * `family_relationships` lookup here, and `invalidateRelationshipCache()` was
+ * called from fn-consent-update when an elder withdrew consent. The comment on it
+ * claimed it "compresses horizontal auth sharding lag exploit windows from 15–30s
+ * down to <=10s". That was not true on two counts:
+ *
+ *   1. A module-scoped Map lives in one isolate. Edge Functions are horizontally
+ *      scaled, so `invalidateRelationshipCache()` only ever cleared the entry in
+ *      whichever isolate served the consent update; every other isolate kept
+ *      serving the revoked delegate until its own 10 s TTL expired.
+ *   2. Even within one isolate the cache could only ever *delay* a revocation by
+ *      up to 10 s. It never made anything faster to revoke — a cache miss and a
+ *      cache hit both end in the same decision, and the decision is what matters.
+ *
+ * So the cache added a 0–10 s stale-allow window without bounding anything. It
+ * was an optimisation that read like a security control, which is worse than no
+ * optimisation at all. Every check now reads `family_relationships` directly, so a
+ * withdrawal is effective on the next request in every isolate.
+ */
 
 export async function getJwtUser(req: Request) {
   const auth = req.headers.get('authorization') ?? '';
@@ -103,35 +128,26 @@ export function assertActorMatches(userId: string, claimedId: string | undefined
 export async function assertElderOrFamilyCan(userId: string, elderId: string, permission: string) {
   if (userId === elderId) return true;
 
-  // ─── Compensating Cache Intercept (<10s evaluation) ───
-  const cacheKey = `${userId}:${elderId}`;
-  const cached = delegateCache.get(cacheKey);
-  const isMockTest = (admin() as unknown as { __supabaseMock?: boolean }).__supabaseMock === true;
-  
+  // Always read the authoritative row: `elder_consented` and `is_active` are the
+  // consent state, and there is no safe way to cache them across isolates (see the
+  // note above getJwtUser).
   let queryResult: unknown = null;
   let dbError: unknown;
 
-  if (!isMockTest && cached && cached.expiresAt > Date.now()) {
-    queryResult = cached.result;
-  } else {
-    try {
-      const { data, error } = await admin()
-        .from('family_relationships')
-        .select('*')
-        .eq('elder_id', elderId)
-        .eq('family_member_id', userId)
-        .eq('elder_consented', true)
-        .eq('is_active', true)
-        .maybeSingle();
+  try {
+    const { data, error } = await admin()
+      .from('family_relationships')
+      .select('*')
+      .eq('elder_id', elderId)
+      .eq('family_member_id', userId)
+      .eq('elder_consented', true)
+      .eq('is_active', true)
+      .maybeSingle();
 
-      queryResult = data;
-      dbError = error ?? null;
-      if (!isMockTest && !dbError && queryResult) {
-        delegateCache.set(cacheKey, { result: queryResult, expiresAt: Date.now() + 10_000 });
-      }
-    } catch (err) {
-      dbError = err;
-    }
+    queryResult = data;
+    dbError = error ?? null;
+  } catch (err) {
+    dbError = err;
   }
 
   // DENY on any error/uncertainty
@@ -247,25 +263,22 @@ export async function assertCarerPermission(userId: string, elderId: string, per
 export async function assertSelfOrVerifiedGuardian(db: unknown, userId: string, elderId: string) {
   if (userId === elderId) return true;
 
-  const isMockTest = (admin() as unknown as { __supabaseMock?: boolean }).__supabaseMock === true;
-  if (isMockTest) {
-    const mockAuthObj = (admin() as unknown as { __mockPoa?: Record<string, boolean> }).__mockPoa;
-    if (mockAuthObj && mockAuthObj[`${userId}:${elderId}`]) return true;
-  } else {
-    try {
-      const { data, error } = await admin()
-        .from("consent_records")
-        .select("id")
-        .eq("delegate_id", userId)
-        .eq("elder_id", elderId)
-        .in("consent_type", ["poa", "legal_guardian", "full_delegate"])
-        .eq("is_active", true)
-        .maybeSingle();
+  // The previous implementation branched on a test-only hook (`__mockPoa`): when
+  // the client looked mocked it never ran the query at all. Nothing set the hook,
+  // so the branch only meant the real query was untested. It runs now.
+  try {
+    const { data, error } = await admin()
+      .from("consent_records")
+      .select("id")
+      .eq("delegate_id", userId)
+      .eq("elder_id", elderId)
+      .in("consent_type", ["poa", "legal_guardian", "full_delegate"])
+      .eq("is_active", true)
+      .maybeSingle();
 
-      if (!error && data) return true;
-    } catch {
-      // Swallowed, fall through to DENY
-    }
+    if (!error && data) return true;
+  } catch {
+    // Swallowed, fall through to DENY
   }
 
   await logDenyAudit(userId, elderId, "gdpr_operations", "UNAUTHORIZED_DELEGATE");

@@ -1,4 +1,4 @@
-import { admin, corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage } from "../_shared/core.ts";
+import { admin, corsHeaders, json, readJsonBody, recordMetric, errorResponse } from "../_shared/core.ts";
 import { assertActorMatches, assertSelfOrVerifiedGuardian, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
@@ -188,6 +188,6 @@ Deno.serve(async (req) => {
     }, 200, req);
   } catch (e) {
     await recordMetric("fn-right-to-erasure", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

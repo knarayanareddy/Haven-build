@@ -6,6 +6,7 @@ import type { Locale } from '@haven/contracts/src/haven';
 import { useAuth } from '../auth/AuthProvider';
 import { HavenClient } from '../services/havenClient';
 import { startVoiceRecording, type ActiveVoiceRecording } from '../services/voiceRecorder';
+import { decideEscalation, decideEscalationForError, type Escalation } from '../services/safetyEscalation';
 
 export interface FloatingVoiceButtonProps {
   locale: Locale;
@@ -47,6 +48,26 @@ function FloatingVoiceButtonComponent({ locale, screenId, voiceFallback, audioVo
 
   const listeningTimeout = useRef<any>(null);
 
+  /**
+   * Renders an escalation outcome.
+   *
+   * `crisis` gets a blocking dialog whose buttons are help and a call, so the older
+   * adult does not have to navigate anywhere while frightened.
+   */
+  const present = useCallback((escalation: Escalation) => {
+    if (escalation.level === 'crisis') {
+      try { Haptics.notificationAsync(Haptics.NotificationFeedbackType?.Error ?? 'error'); } catch (_) {}
+      // Only real screens exist (packages/schema/src/screenSchema.ts): HOME carries
+      // the help overlay, FAMILY carries the call affordance.
+      Alert.alert('HAVEN', escalation.message, [
+        { text: locale === 'nl-NL' ? 'Hulp tonen' : 'Show help', onPress: () => navigation?.navigate?.('HOME') },
+        { text: locale === 'nl-NL' ? 'Bel familie' : 'Call family', onPress: () => navigation?.navigate?.('FAMILY') },
+      ]);
+      return;
+    }
+    Alert.alert('HAVEN', escalation.message);
+  }, [locale, navigation]);
+
   const submitRecording = useCallback(async (recording: ActiveVoiceRecording) => {
     setProcessing(true);
     setMacosState('processing');
@@ -60,10 +81,13 @@ function FloatingVoiceButtonComponent({ locale, screenId, voiceFallback, audioVo
         audio_base64: audioBase64,
         locale,
       });
-      const message = response.response_text || voiceFallback;
-      Alert.alert('HAVEN', message);
+      // Escalate instead of treating every answer the same. A crisis answer must
+      // surface help affordances and be spoken immediately; it must not render as an
+      // ordinary chat bubble (which is what `Alert.alert(message)` did for every
+      // reply, including `distress_detected: true`).
+      present(decideEscalation(response, locale));
     } catch (error) {
-      Alert.alert('HAVEN', String((error as Error).message ?? error));
+      present(decideEscalationForError(error, locale));
     } finally {
       recordingRef.current = null;
       setListening(false);
@@ -72,11 +96,10 @@ function FloatingVoiceButtonComponent({ locale, screenId, voiceFallback, audioVo
       stopPulse();
       if (listeningTimeout.current) clearTimeout(listeningTimeout.current);
     }
-  }, [elderId, locale, screenId, session, stopPulse, voiceFallback]);
+  }, [elderId, locale, present, screenId, session, stopPulse, voiceFallback]);
 
   const handlePress = useCallback(async () => {
     hapticTrigger();
-    // Closure marker for single-switch tests: if (isListening) { setListening(false);
     if (isListening && recordingRef.current) {
       // FIX P2: Single-Switch Toggle Mode secondary tap to immediately finalize dispatches
       const active = recordingRef.current;

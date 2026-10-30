@@ -1,4 +1,5 @@
-import { admin, corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, sha256 } from "../_shared/core.ts";
+import { rateLimit } from "../_shared/ratelimit.ts";
+import { admin, corsHeaders, json, readJsonBody, recordMetric, sha256, errorResponse } from "../_shared/core.ts";
 import { assertElderOrFamilyCan, assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 
@@ -6,6 +7,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
   try {
+    await rateLimit(req, "fn-call-reputation");
     const body = await readJsonBody(req) as Record<string, unknown>;
     validateBody(body, { phone: 'string', provider: 'string' }, { allowUnknown: true });
     const userId = await getJwtUserId(req);
@@ -23,9 +25,9 @@ Deno.serve(async (req) => {
     const { data: lookup, error } = await db.from('call_reputation_lookups').insert({ elder_id: body.elder_id ?? null, phone_hash: phoneHash, provider: body.provider, reputation_score: score, report_count: reportCount, categories: body.categories ?? [], explanation_nl: score >= 70 ? 'Dit nummer heeft veel risicosignalen.' : 'Er zijn weinig risicosignalen voor dit nummer.', explanation_en: score >= 70 ? 'This number has many risk signals.' : 'This number has few risk signals.', cache_hit: Boolean(cached) }).select().single();
     if (error) throw error;
     await recordMetric('fn-call-reputation', started, 'success');
-    return json({ success: true, lookup_id: lookup.id, reputation_score: score, report_count: reportCount, cache_hit: Boolean(cached) });
+    return json({ success: true, lookup_id: lookup.id, reputation_score: score, report_count: reportCount, cache_hit: Boolean(cached) }, 200, req);
   } catch (e) {
     await recordMetric('fn-call-reputation', started, 'error');
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

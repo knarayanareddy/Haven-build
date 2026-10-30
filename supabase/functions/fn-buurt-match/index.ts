@@ -1,4 +1,4 @@
-import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, safeErrorMessage } from "../_shared/core.ts";
+import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, errorResponse } from "../_shared/core.ts";
 import { assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
@@ -52,7 +52,6 @@ Deno.serve(async (req) => {
 
     // P1-15+P1-19 FIX: Validate connection_id as UUID before using
     if (!body.connection_id || typeof body.connection_id !== 'string') throw new Error('connection_id is required');
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(body.connection_id)) throw new Error('connection_id must be a uuid');
 
     const statusMap: Record<string, string> = {
@@ -76,6 +75,6 @@ Deno.serve(async (req) => {
     return json({ success: true, new_status: conn.status, message_nl: "Uw keuze is opgeslagen.", message_en: "Your choice has been saved." }, 200, req);
   } catch (e) {
     await recordMetric("fn-buurt-match", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

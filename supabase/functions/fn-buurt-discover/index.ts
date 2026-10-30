@@ -1,4 +1,5 @@
-import { admin, corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage } from "../_shared/core.ts";
+import { rateLimit } from "../_shared/ratelimit.ts";
+import { admin, corsHeaders, json, readJsonBody, recordMetric, errorResponse } from "../_shared/core.ts";
 import { assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 
@@ -6,6 +7,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   const started = Date.now();
   try {
+    await rateLimit(req, "fn-buurt-discover");
     const body = await readJsonBody(req) as Record<string, unknown>;
     validateBody(body, { elder_id: 'uuid' }, { allowUnknown: true });
     const userId = await getJwtUserId(req);
@@ -36,9 +38,9 @@ Deno.serve(async (req) => {
       shared_interest_matches: [...counts.entries()].map(([tag_key, v]) => ({ tag_key, label_nl: v.label_nl, label_en: v.label_en, nearby_count: v.count })),
       suggested_events: events ?? [],
       walk_buddy_available: (nearby?.length ?? 0) > 1,
-    });
+    }, 200, req);
   } catch (e) {
     await recordMetric("fn-buurt-discover", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

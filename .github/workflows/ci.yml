@@ -1,0 +1,154 @@
+name: CI
+
+# Single source of truth for "is this commit good?".
+#
+# Before this workflow there were four overlapping pipelines and the PR gate
+# (`pr.yml`) ran `pnpm test`, which:
+#   • chained 48 of the 66 test files with `&&` (adding a file meant nobody ran it);
+#   • never ran typecheck, lint or build — a PR could merge with TS errors;
+#   • never type-checked the Edge Functions at all (no Deno step existed).
+# Everything below fails the PR. Nothing is skipped silently: when a tool is
+# missing the script says so and exits non-zero.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+  NPM_CONFIG_FUND: 'false'
+  NPM_CONFIG_AUDIT: 'false'
+
+jobs:
+  workspace:
+    name: typecheck · lint · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: corepack enable
+      - run: corepack pnpm install --frozen-lockfile
+
+      - name: Typecheck — packages
+        run: corepack pnpm run typecheck:packages
+      - name: Typecheck — elder app
+        run: corepack pnpm run typecheck:elder
+      - name: Typecheck — grandchild app
+        run: corepack pnpm run typecheck:grandchild
+      - name: Typecheck — family app
+        run: corepack pnpm run typecheck:family
+      - name: Typecheck — carer app
+        run: corepack pnpm run typecheck:carer
+
+      - name: Lint (zero warnings)
+        run: corepack pnpm run lint
+
+      - name: Build — family dashboard
+        run: corepack pnpm run build:family
+
+  edge-functions:
+    name: edge typecheck · contract tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: corepack enable
+      - run: corepack pnpm install --frozen-lockfile
+
+      - name: Typecheck every Supabase Edge Function (deno check)
+        run: ./scripts/ci/verify-edge-functions.sh
+
+      - name: Edge Function contract tests
+        run: corepack pnpm run test:edge
+
+      # Half the edge suite still asserts on source text; this keeps that number
+      # from growing and fails when an allowlisted file is converted without the
+      # entry being removed.
+      - name: Test-substance audit
+        run: corepack pnpm run audit:tests
+
+      - name: Every function is rate-limited or exempt
+        run: corepack pnpm run audit:functions
+
+  sql:
+    name: migrations · RLS coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pglast==8.7
+
+      - name: Parse every migration (SQL + plpgsql) and audit RLS coverage
+        run: ./scripts/ci/verify-sql.sh
+
+      - name: Documentation claims match the repository
+        run: corepack pnpm run audit:docs
+
+  database:
+    name: migrations on a real Postgres
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: corepack enable
+      - run: corepack pnpm install --frozen-lockfile
+
+      # Applies every migration from scratch in order. This is where a forward
+      # reference or a missing DOWN object actually surfaces.
+      - name: supabase db start + reset
+        run: |
+          supabase db start
+          supabase db reset --debug
+
+      - name: Live RLS integration tests
+        run: corepack pnpm run test:supabase:local
+
+  summary:
+    name: summary
+    runs-on: ubuntu-latest
+    needs: [workspace, edge-functions, sql, database]
+    if: always()
+    steps:
+      - name: Report
+        run: |
+          {
+            echo "### CI results"
+            echo ""
+            echo "| job | result |"
+            echo "| --- | --- |"
+            echo "| workspace (typecheck · lint · build) | ${{ needs.workspace.result }} |"
+            echo "| edge-functions (deno check · tests) | ${{ needs.edge-functions.result }} |"
+            echo "| sql (migrations · RLS) | ${{ needs.sql.result }} |"
+            echo "| database (live migrations) | ${{ needs.database.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if any job failed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

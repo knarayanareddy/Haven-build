@@ -1,4 +1,4 @@
-import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
 import { assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
@@ -25,9 +25,9 @@ Deno.serve(async (req) => {
       if (updateError) throw updateError;
     }
     await recordMetric('fn-driving-event', started, 'success');
-    return json({ success: true, driving_event_id: event.id, family_notified: share && score >= 70 });
+    return json({ success: true, driving_event_id: event.id, family_notified: share && score >= 70 }, 200, req);
   } catch (e) {
     await recordMetric('fn-driving-event', started, 'error');
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

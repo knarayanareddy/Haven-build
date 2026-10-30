@@ -13,7 +13,6 @@ interface HelpOverlayProps {
 }
 
 export function HelpOverlay({ screenTitle, helpText }: HelpOverlayProps) {
-  // Canonical marker fallback: accessibilityHint={triggerHint}, accessibilityHint={closeHint}
   const [visible, setVisible] = useState(false);
   const { t } = useTranslation();
 

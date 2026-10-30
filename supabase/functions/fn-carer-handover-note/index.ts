@@ -1,4 +1,5 @@
 // ─── Phase 3.3 + 3.4: Photo attachments + medication interaction check at point of care ───
+import { settleQuery } from "../_shared/settle.ts";
 import { admin, corsHeaders, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
 import { assertCarerCan, getJwtUserId } from "../_shared/authz.ts";
 import { assertMaxLength, MAX_STRING_FIELD, validateBody } from "../_shared/validation.ts";
@@ -62,14 +63,14 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
 
     if (targetProfile?.status !== "active") {
-      await dbAdmin.from("audit_log").insert({
+      await settleQuery(dbAdmin.from("audit_log").insert({
         actor_id: userId,
         actor_role: "carer_professional",
         action: "POST_ERASURE_WRITE_REJECTION",
         table_name: "carer_handover_notes",
         elder_id: String(body.elder_id),
         extra: { reason: "Attempted to sync offline capture entries for an already erased or suspended older adult entity", profile_status: targetProfile?.status },
-      }).catch(() => undefined);
+      }), "audit_log");
       const err = new Error("403 Forbidden: Targeted older adult entity has been erased or suspended; write rejected");
       (err as unknown as { status: number }).status = 403;
       throw err;

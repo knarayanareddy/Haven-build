@@ -1,4 +1,4 @@
-import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, safeErrorMessage, userClient } from "../_shared/core.ts";
+import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
 import { assertActorMatches, assertCarerPermission, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
@@ -43,6 +43,6 @@ Deno.serve(async (req: Request) => {
     return json({ success: true, incident_id: data.id }, 200, req);
   } catch (error) {
     await recordMetric("fn-incident-report", started, "error");
-    return json({ error: safeErrorMessage(error) }, 400, req);
+    return errorResponse(error, req);
   }
 });

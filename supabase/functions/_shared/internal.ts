@@ -1,4 +1,5 @@
 import { admin } from './core.ts';
+import { isValidInternalKey, timingSafeEqualString } from './secure_compare.ts';
 
 // ─── P0-2 FIX: NEVER fall back to SUPABASE_SERVICE_ROLE_KEY ───
 // The internal key must be explicitly and independently configured.
@@ -16,29 +17,16 @@ export function requireInternalAccess(req: Request) {
   if (!expected) throw new Error('HAVEN_INTERNAL_KEY is not configured');
   const provided = req.headers.get('x-haven-internal-key') ?? req.headers.get('x-internal-key');
   // P0-2+P0-5 FIX: constant-time comparison to prevent timing attacks on internal key
-  if (!provided || !timingSafeEqual(provided, expected)) {
+  if (!isValidInternalKey(provided, expected)) {
     // Artificially delay to mask timing even on the "not provided" path
     throw new Error('Internal access required');
   }
   return true;
 }
 
-// P1-1 FIX: constant-time string comparison
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) {
-    // Waste time to avoid length disclosure
-    let dummy = 0;
-    const maxLen = Math.max(a.length, b.length);
-    for (let i = 0; i < maxLen; i++) dummy |= a.charCodeAt(i % a.length) ^ b.charCodeAt(i % b.length);
-    void dummy;
-    return false;
-  }
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return result === 0;
-}
+// P1-1 FIX: constant-time string comparison lives in _shared/secure_compare.ts
+// so the rate limiter and webhook verifier cannot drift from this copy.
+const timingSafeEqual = timingSafeEqualString;
 
 export function requireVendorSecretHeader(req: Request, envName: string, headerNames: string[]) {
   const expected = Deno.env.get(envName);

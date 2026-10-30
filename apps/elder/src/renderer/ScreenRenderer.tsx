@@ -256,7 +256,6 @@ function renderToday(ctx: ScreenContext) {
 }
 
 function renderPills(ctx: ScreenContext) {
-  // Canonical marker fallback: accessibilityLabel={`Medicijn: ${med.name}, ${med.dose}`}
   const { locale, medications } = ctx;
   const current = medications.find((m) => m.status !== 'taken');
   if (!current) {

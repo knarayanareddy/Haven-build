@@ -1,8 +1,14 @@
 name: HAVEN Production Checks
+
+# Scope: post-merge / on-demand checks that CI (ci.yml) does not cover —
+# Playwright browser suites, the Supabase repo-layout check, and the shell-based
+# verify-core/verify-browser scripts. The PR gate itself is ci.yml; this workflow
+# no longer duplicates it (it previously ran *in addition to* pr.yml, on a
+# different Node version, so "green" meant different things per pipeline).
 on:
-  pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   static-suite-validation:
@@ -11,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
       - run: corepack enable
       - run: ./scripts/ci/verify-core.sh
 
@@ -21,7 +27,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
       - run: corepack enable
       - run: ./scripts/ci/verify-browser.sh
 

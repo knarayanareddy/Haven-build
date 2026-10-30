@@ -1,4 +1,5 @@
-import { admin, dispatchNotification, json, readJsonBody, userClient } from "../_shared/core.ts";
+import { admin, dispatchNotification, json, readJsonBody, recordMetric, userClient } from "../_shared/core.ts";
+import { settleQuery } from "../_shared/settle.ts";
 import { companionReply, synthesizeSpeechToStorage, transcribeDutchAudio } from "../_shared/ai.ts";
 import { assertElderOrFamilyCan, assertCarerCan, AuthzError, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody, assertMaxLength, MAX_AUDIO_BASE64 } from "../_shared/validation.ts";
@@ -7,7 +8,7 @@ import { rateLimit } from "../_shared/ratelimit.ts";
 import { assertNoBsnInPayload, scrubBsnFromLogs } from "../_shared/bsn_guard.ts";
 import { asyncWrapper } from "../_shared/async_wrapper.ts";
 
-function classify(transcript: string, locale: "en-GB" | "nl-NL" = "nl-NL") {
+function classify(transcript: string, locale: "en-GB" | "en-US" | "nl-NL" = "nl-NL") {
   const t = transcript.toLowerCase();
   const isEn = locale === "en-GB" || locale === "en-US";
 
@@ -61,6 +62,7 @@ async function selectVoiceConfig(adminClient: ReturnType<typeof admin>, elderId:
 }
 
 Deno.serve(asyncWrapper("fn-voice-pipeline", async (req: Request) => {
+  const started = Date.now();
   await rateLimit(req, "fn-voice-pipeline");
   const body = await readJsonBody(req) as Record<string, unknown>;
 
@@ -94,9 +96,56 @@ Deno.serve(asyncWrapper("fn-voice-pipeline", async (req: Request) => {
       const { data: elderProfile } = await dbAdmin.from("profiles").select("locale").eq("id", body.elder_id).maybeSingle();
       const locale = (elderProfile?.locale ?? (body.locale === "nl-NL" ? "nl-NL" : "en-GB")) as "en-GB" | "nl-NL";
       
-      const transcript = body.audio_base64
-        ? await transcribeDutchAudio(String(body.audio_base64), locale)
-        : String(body.transcript_text ?? (locale === "nl-NL" ? "Ik heb mijn pillen ingenomen en ik voel me rustig." : "I took my pills and I feel calm."));
+      // ─── FAIL CLOSED on missing or failed transcription (P1.5) ───
+      // Previously this defaulted to "Ik heb mijn pillen ingenomen en ik voel me
+      // rustig." when no audio was sent, and transcribeDutchAudio() returned
+      // "Ik heb mijn pillen ingenomen." when STT produced nothing. Both fabricate a
+      // medication-taken statement that the classifier below turns into a MAR
+      // confirmation — for a dose the older adult never reported, and with a
+      // positive mood reading nobody said. Neither may ever be synthesised.
+      if (!body.audio_base64 && !body.transcript_text) {
+        throw Object.assign(
+          new Error(locale === "nl-NL"
+            ? "Geen spraak ontvangen. Neem opnieuw op."
+            : "No speech was received. Please record again."),
+          { status: 400, code: "BAD_REQUEST" },
+        );
+      }
+
+      let transcript: string;
+      if (body.audio_base64) {
+        try {
+          transcript = await transcribeDutchAudio(String(body.audio_base64), locale);
+        } catch (transcriptionError) {
+          const unavailableReason = (transcriptionError as { reason?: string }).reason ?? "provider-error";
+          // Record the failure so a silent STT outage is visible, then answer 503
+          // with no intent — never a guessed transcript.
+          await settleQuery(dbAdmin.from("audit_log").insert({
+            actor_id: userId,
+            actor_role: "system",
+            action: "VOICE_TRANSCRIPTION_UNAVAILABLE",
+            table_name: "voice_interactions",
+            elder_id: String(body.elder_id),
+            extra: { reason: unavailableReason, timestamp: new Date().toISOString() },
+          }), "audit_log");
+          await recordMetric("fn-voice-pipeline", started, "fallback");
+          throw Object.assign(
+            new Error(locale === "nl-NL"
+              ? "Ik kon u niet verstaan. Probeer het alstublieft nog een keer."
+              : "I could not hear you clearly. Please try again."),
+            { status: 503, code: "SERVICE_UNAVAILABLE", retryAfterSeconds: 5, cause: transcriptionError },
+          );
+        }
+      } else {
+        transcript = String(body.transcript_text).trim();
+      }
+
+      if (!transcript) {
+        throw Object.assign(
+          new Error(locale === "nl-NL" ? "Geen spraak ontvangen." : "No speech was received."),
+          { status: 422, code: "UNPROCESSABLE_ENTITY" },
+        );
+      }
 
       assertNoBsnInPayload({ transcript });
 

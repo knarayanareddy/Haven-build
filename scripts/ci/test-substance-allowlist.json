@@ -1,0 +1,33 @@
+{
+  "$comment": "Files in tests/edge that assert on source text instead of behaviour. scripts/ci/audit-test-substance.mjs fails when a new static-only file appears, when an entry becomes behavioural (it must then be removed), or when an entry no longer exists. This list may only shrink.",
+  "reviewed": "2026-10-29",
+  "count": 26,
+  "allowlisted": {
+    "tests/edge/banking-stream-buffering.test.mjs": "asserts nothing: a 90-line fake engine with three assertions about its own counters. Delete it — the PSD2 buffer is covered by fn-banking-stream-consumer's real handler once that harness exists.",
+    "tests/edge/carer-indexeddb-queue-closure.test.mjs": "re-implements an IndexedDB queue in the test; needs fake-indexeddb to drive apps/carer's real queue",
+    "tests/edge/crisis-query-safety-closure.test.mjs": "asserts two SQL predicates and two statements in fn-fall-escalation; needs a fall-escalation handler harness",
+    "tests/edge/data-lifecycle-diff.test.mjs": "set-difference over readFileSync regexes of export/erasure code; the schema half is now in db-schema-contract, the handler half needs the export/erasure harnesses",
+    "tests/edge/deadlock-elimination-load-perf.test.mjs": "asserts WAL/lock behaviour from a simulated timer loop; the snapshot-column half is in db-schema-contract, the load claim cannot be tested without Postgres",
+    "tests/edge/device-auto-revoke-r7-closure.test.mjs": "simulates the auto-revoke counter in a local engine; needs the device-telemetry handler harness",
+    "tests/edge/device-health-spoofing-closure.test.mjs": "same simulation pattern for telemetry signing; needs the device-telemetry handler harness",
+    "tests/edge/export-elder-data-closure.test.mjs": "asserts strings in fn-data-export; needs an edge-function harness (loadEdgeFunction) to drive the real handler",
+    "tests/edge/family-dashboard-auth.test.mjs": "asserts cookie/redirect strings in apps/family middleware; needs a request-level harness for the Next.js middleware",
+    "tests/edge/fhir-staging-r1-closure.test.mjs": "asserts migration text and handler strings for FHIR staging; needs a Postgres-backed test",
+    "tests/edge/floating-voice-rerender-closure.test.mjs": "asserts memo()/segment strings in a React component; needs @testing-library/react-native",
+    "tests/edge/fn-fall-escalation-isolation.test.mjs": "asserts Promise.allSettled appears in fn-fall-escalation; belongs in the fall-escalation handler harness",
+    "tests/edge/gdpr-erasure-deep-redaction.test.mjs": "asserts the redaction SQL text; the live body is covered by db-schema-contract, the true end-to-end proof needs Postgres",
+    "tests/edge/medium-fixes-c1c4-closure.test.mjs": "14 mixed assertions across four functions; each needs its own handler harness",
+    "tests/edge/minimal-closure.test.mjs": "asserts SQL strings and a simulated FK engine; the schema half is in db-schema-contract",
+    "tests/edge/pgvector-embedding-s1-closure.test.mjs": "simulates the vector erasure in a local map rather than running soft_purge_profile",
+    "tests/edge/post-erasure-injection-r6-closure.test.mjs": "simulates the post-erasure write rejection; needs the offline-queue handler harness",
+    "tests/edge/pre-pentest-round4-closure.test.mjs": "17 assertions over four Edge Functions; needs handler harnesses",
+    "tests/edge/pre-pentest-round5-database-closure.test.mjs": "schema assertions that belong in db-schema-contract as they are migrated (TRUNCATE revoke, FOR UPDATE and the deletion_requests ordering are already there)",
+    "tests/edge/regulatory-escalation-r9-closure.test.mjs": "asserts SSRF and PSD2 strings in _shared/regulatory_escalation.ts; the module is loadable — convert next",
+    "tests/edge/sqlite-offline-queue-closure.test.mjs": "re-implements the SQLite queue; needs a node:sqlite or better-sqlite3 fake to drive apps/elder/src/services/sqliteOfflineQueue.ts",
+    "tests/edge/unawaited-async-closure.test.mjs": "static analysis by design (`await` present before each call); a reader of source is the correct mechanism here, and it should move into a lint rule",
+    "tests/edge/vital-threshold-s2-closure.test.mjs": "asserts threshold literals in the voice pipeline; needs the pipeline harness",
+    "tests/edge/voice-mar-repeatback-closure.test.mjs": "asserts MAR repeat-back strings; needs the voice pipeline harness",
+    "tests/edge/voice-negative-list-closure.test.mjs": "asserts the negation list text; the list itself is a data fixture that could be unit-tested against the real parser",
+    "tests/edge/voice-stt-hijacking-s6-closure.test.mjs": "asserts STT override strings; needs the voice pipeline harness"
+  }
+}

@@ -1,4 +1,4 @@
-import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, safeErrorMessage, sha256 } from "../_shared/core.ts";
+import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, sha256, errorResponse } from "../_shared/core.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
 import { captureException } from "../_shared/sentry.ts";
 import { requireInternalAccess } from "../_shared/internal.ts";
@@ -291,9 +291,9 @@ Deno.serve(async (req: Request) => {
     }
 
     await recordMetric("fn-device-health-monitor", started, "success");
-    return json({ ok: true, events_written: eventsWritten.length, family_notified: familyNotified.length, escalations: escalations.length });
+    return json({ ok: true, events_written: eventsWritten.length, family_notified: familyNotified.length, escalations: escalations.length }, 200, req);
   } catch (e) {
     await recordMetric("fn-device-health-monitor", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

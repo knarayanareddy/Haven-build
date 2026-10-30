@@ -30,11 +30,20 @@ export function assertNoBsnText(value: unknown) {
   const text = typeof value === 'string' ? value : JSON.stringify(value ?? '');
   // Dutch BSN: exactly 9 digits, often written with dots or spaces
   if (/\b\d{9}\b/.test(text.replace(/[.\-\s]/g, '')) && /\d{9}/.test(text.replace(/[.\-\s]/g, ''))) {
-    throw new Error('BSN-like content is not accepted by HAVEN');
+    throw bsnError('BSN-like content is not accepted by HAVEN');
   }
   if (/burgerservicenummer|burgerservice.?nummer|\bbsn\b/i.test(text)) {
-    throw new Error('BSN-like content is not accepted by HAVEN');
+    throw bsnError('BSN-like content is not accepted by HAVEN');
   }
+}
+
+/** BSN rejection is a policy decision (422), not a malformed request (400). */
+function bsnError(message: string) {
+  const error = new Error(message) as Error & { status: number; code: string; isBsnViolation: boolean };
+  error.status = 422;
+  error.code = 'UNPROCESSABLE_ENTITY';
+  error.isBsnViolation = true;
+  return error;
 }
 
 // P1-3 FIX: String length cap for user-provided text fields
@@ -43,5 +52,10 @@ export const MAX_AUDIO_BASE64 = 10 * 1024 * 1024; // ~10 MB for base64 audio (~7
 
 export function assertMaxLength(value: unknown, maxLen: number, fieldName: string) {
   const str = typeof value === 'string' ? value : JSON.stringify(value ?? '');
-  if (str.length > maxLen) throw new Error(`${fieldName} exceeds maximum length of ${maxLen} characters`);
+  if (str.length > maxLen) {
+    const error = new Error(`${fieldName} exceeds maximum length of ${maxLen} characters`) as Error & { status: number; code: string };
+    error.status = 413;
+    error.code = 'PAYLOAD_TOO_LARGE';
+    throw error;
+  }
 }

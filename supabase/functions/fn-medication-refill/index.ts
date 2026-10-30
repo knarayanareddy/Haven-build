@@ -1,4 +1,4 @@
-import { admin, corsHeaders, dispatchNotification, json, recordMetric, safeErrorMessage } from "../_shared/core.ts";
+import { admin, corsHeaders, dispatchNotification, json, recordMetric, errorResponse } from "../_shared/core.ts";
 import { requireInternalAccess } from "../_shared/internal.ts";
 
 // ─── Phase 2.3: Pharmacy refill email ───
@@ -167,6 +167,6 @@ Deno.serve(async (req) => {
     }, 200, req);
   } catch (e) {
     await recordMetric("fn-medication-refill", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

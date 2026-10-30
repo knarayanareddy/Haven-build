@@ -1,4 +1,4 @@
-import { corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, requireFields, safeErrorMessage } from "../_shared/core.ts";
+import { corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, requireFields, errorResponse } from "../_shared/core.ts";
 import { requireInternalAccess } from "../_shared/internal.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
 
@@ -30,6 +30,6 @@ Deno.serve(async (req) => {
     return json({ success: true, notification_id: note.id }, 200, req);
   } catch (e) {
     await recordMetric("fn-notification-dispatch", started, "error");
-    return json({ error: safeErrorMessage(e) }, 400, req);
+    return errorResponse(e, req);
   }
 });

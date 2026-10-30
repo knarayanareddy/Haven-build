@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.43.0";
+import { toHttpError } from "./errors.ts";
 import { alertLevelFromScore, scoreScamText } from "../../../packages/scam-engine/src/catalog.mjs";
 
 // ─── P0-1 FIX: CORS — dynamic origin validation, not wildcard ───
@@ -72,17 +73,25 @@ export function json(body: unknown, status = 200, req?: Request, customHeaders?:
   Object.assign(extraHeaders, securityHeaders);
   if (customHeaders) Object.assign(extraHeaders, customHeaders);
 
-  let finalStatus = status;
-  const bodyString = typeof body === "string" ? body : JSON.stringify(body);
-  if (bodyString.includes("Rate limit exceeded") || bodyString.includes("429")) {
-    finalStatus = 429;
-    extraHeaders["Retry-After"] = "60";
-  }
-
+  // The status is the caller's decision. This function used to rewrite it to 429
+  // whenever the serialised body contained the text "429", which turned ordinary
+  // successes into rate-limit responses (and confused monitoring). Status now comes
+  // from _shared/errors.ts::toHttpError only.
   return new Response(JSON.stringify(body), {
-    status: finalStatus,
+    status,
     headers: { ...extraHeaders, "content-type": "application/json; charset=utf-8" },
   });
+}
+
+/**
+ * Builds the response for a thrown error using the shared contract, so every
+ * function returns the same status and header set for the same failure.
+ */
+export function errorResponse(error: unknown, req?: Request) {
+  const http = toHttpError(error);
+  const headers: Record<string, string> = { "cache-control": "no-store" };
+  if (http.retryAfterSeconds) headers["Retry-After"] = String(http.retryAfterSeconds);
+  return json({ error: http.message, error_code: http.code }, http.status, req, headers);
 }
 
 // P1-3 FIX: max body size (1 MB default for JSON, configurable)
@@ -172,12 +181,41 @@ export function scoreScam(raw: string) {
   };
 }
 
+/**
+ * Record one request in `perf_metrics` without holding up the response.
+ *
+ * This runs on the response path of every Edge Function. It used to be a bare
+ * `await` of a PostgREST insert, so each request paid a full database round trip
+ * (a second connection, auth check and WAL write) *before* the body left the
+ * isolate — the metric meant to observe latency was adding to it, and a slow
+ * `perf_metrics` table slowed down every user-facing call. The insert is now
+ * handed to `EdgeRuntime.waitUntil`, which keeps the isolate alive until it
+ * settles while the response returns immediately.
+ *
+ * Two behaviour changes beyond timing:
+ *  - The insert result is inspected. supabase-js reports failures in `{ error }`
+ *    instead of throwing, so the old `try/catch` never fired and dropped-metric
+ *    failures were invisible; they now emit the structured `local-log` line.
+ *  - Where `waitUntil` is unavailable (Deno tests, other runtimes) the insert is
+ *    still awaited, so callers keep deterministic behaviour.
+ */
 export async function recordMetric(fn_name: string, started: number, status: "success" | "error" | "fallback" | "slo_breach") {
-  try {
-    await admin().from("perf_metrics").insert({ fn_name, duration_ms: Date.now() - started, status, env: Deno.env.get("HAVEN_ENV") ?? "production" });
-  } catch (_) {
-    console.log(JSON.stringify({ fn_name, status, duration_ms: Date.now() - started, metric: "local-log" }));
+  const duration_ms = Date.now() - started;
+  const write = (async () => {
+    const { error } = await admin().from("perf_metrics").insert({
+      fn_name, duration_ms, status, env: Deno.env.get("HAVEN_ENV") ?? "production",
+    });
+    if (error) throw error;
+  })().catch(() => {
+    console.log(JSON.stringify({ fn_name, status, duration_ms, metric: "local-log" }));
+  });
+
+  const runtime = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+  if (typeof runtime?.waitUntil === "function") {
+    runtime.waitUntil(write);
+    return;
   }
+  await write;
 }
 
 // ─── FINDING 1 & FINDING 2: BCP47 Strict Equality Guard & Pre-Dispatch Content Validation ───

@@ -15,17 +15,52 @@ async function mockJson(path: string, body: unknown) {
   return response.json();
 }
 
+/** Thrown when speech-to-text could not produce a transcript. */
+export class TranscriptUnavailableError extends Error {
+  readonly status = 503;
+  readonly code = 'SERVICE_UNAVAILABLE';
+  constructor(
+    message: string,
+    public readonly reason: 'no-speech-detected' | 'provider-error' | 'not-configured' = 'provider-error',
+  ) {
+    super(message);
+    this.name = 'TranscriptUnavailableError';
+  }
+}
+
 function requireEnv(name: string) {
   const value = Deno.env.get(name);
   if (!value) throw new Error(`${name} is not configured`);
   return value;
 }
 
+/**
+ * Transcribes speech to text.
+ *
+ * FAIL CLOSED. This function used to return `'Ik heb mijn pillen ingenomen.'`
+ * ("I took my pills") whenever transcription produced nothing — in mock mode, and
+ * (through the caller's `??` fallback) whenever the audio field was missing. That
+ * fabricated sentence is exactly what the medication intent classifier matches, so
+ * a failed or absent recording could start a medication-taken confirmation for a
+ * dose the older adult never reported. It now throws `TranscriptUnavailableError`
+ * and the caller returns 503 with no intent.
+ */
 export async function transcribeDutchAudio(audioBase64: string, locale: "en-GB" | "nl-NL" = "nl-NL") {
-  if (mockEnabled()) {
-    const mocked = await mockJson('/transcribe', { audio_base64 });
-    return String(mocked?.text ?? (locale === "nl-NL" ? 'Ik heb mijn pillen ingenomen.' : 'I took my pills.'));
+  if (!audioBase64 || audioBase64.trim().length === 0) {
+    throw new TranscriptUnavailableError('No audio was provided', 'not-configured');
   }
+
+  if (mockEnabled()) {
+    const mocked = await mockJson('/transcribe', { audio_base64: audioBase64 });
+    const mockedText = String(mocked?.text ?? '').trim();
+    // A mock *server* must return an explicit transcript. `HAVEN_AI_MOCK=true`
+    // without a server only proves the wiring; it must not invent clinical content.
+    if (!mockedText) {
+      throw new TranscriptUnavailableError('Mock transcript endpoint returned no text', 'provider-error');
+    }
+    return mockedText;
+  }
+
   const key = requireEnv('OPENAI_API_KEY');
   const bytes = Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0));
   const file = new File([bytes], 'voice.wav', { type: 'audio/wav' });
@@ -40,8 +75,12 @@ export async function transcribeDutchAudio(audioBase64: string, locale: "en-GB" 
     body: form,
   });
   const json = await response.json();
-  if (!response.ok) throw new Error(json.error?.message ?? 'Speech transcription failed');
-  return String(json.text ?? '').trim();
+  if (!response.ok) {
+    throw new TranscriptUnavailableError(json.error?.message ?? 'Speech transcription failed', 'provider-error');
+  }
+  const text = String(json.text ?? '').trim();
+  if (!text) throw new TranscriptUnavailableError('No speech detected in the recording', 'no-speech-detected');
+  return text;
 }
 
 export async function generateEmbedding(input: string) {

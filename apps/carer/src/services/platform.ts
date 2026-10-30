@@ -1,9 +1,11 @@
 import { useWindowDimensions, Platform } from 'react-native';
 
-export function useResponsiveLayout() {
-  const { width, height } = useWindowDimensions();
-  const isIpad = width >= 768;
-  const isLandscape = width > height;
+import { resolveLayout, type ResponsiveLayout } from './layout';
 
-  return { width, height, isIpad, isLandscape, os: Platform.OS };
+export { resolveLayout, TABLET_BREAKPOINT } from './layout';
+export type { ResponsiveLayout } from './layout';
+
+export function useResponsiveLayout(): ResponsiveLayout {
+  const { width, height } = useWindowDimensions();
+  return resolveLayout(width, height, Platform.OS);
 }
