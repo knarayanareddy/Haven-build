@@ -222,8 +222,11 @@ jobs:
       - name: Report the live-test failure
         if: failure()
         run: |
-          reason="$(grep -iE 'not ok|error|fail|assert' /tmp/live-rls.log 2>/dev/null \
-            | grep -v '^::' | head -8 | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g' | cut -c1-1200)"
+          # Skip the `supabase db lint` JSON that check-local-supabase.sh prints: every
+          # line of it contains the word "error" and it buried the assertion last time.
+          reason="$(grep -iE 'not ok|AssertionError|Error:|failed' /tmp/live-rls.log 2>/dev/null \
+            | grep -v '^::' | grep -v '"level"' | head -6 \
+            | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g' | cut -c1-1200)"
           echo "::error title=Live RLS tests failed::${reason:-no matching line; see the step log}"
 
   summary:
