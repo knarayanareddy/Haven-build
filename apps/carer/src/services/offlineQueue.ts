@@ -19,6 +19,16 @@ const STORE_NAME = 'offline_actions';
 const LEGACY_STORAGE_KEY = 'haven.carer.offline.queue.v1';
 const memoryQueue = new Map<string, CarerOfflineItem>();
 
+// The visit list renders "N captures waiting to send" from a synchronous getQueueSize() on a
+// five-second interval. IndexedDB can only be read asynchronously, and the previous version
+// counted `memoryQueue` — which the browser path never writes to — so the badge always read
+// zero. Everything below keeps this mirror current after each mutation.
+let pendingCount = 0;
+
+function isPending(item: CarerOfflineItem): boolean {
+  return item.status === 'queued' || item.status === 'processing';
+}
+
 function hasIndexedDb(): boolean {
   return typeof indexedDB !== 'undefined';
 }
@@ -49,6 +59,27 @@ export function openIndexedDb(): Promise<IDBDatabase> {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+}
+
+async function countInStore(db: IDBDatabase, carerId?: string): Promise<number> {
+  const transaction = db.transaction(STORE_NAME, 'readonly');
+  const request = transaction.objectStore(STORE_NAME).getAll();
+  const all = await new Promise<CarerOfflineItem[]>((resolve, reject) => {
+    request.onsuccess = () => resolve((request.result as CarerOfflineItem[] | undefined) ?? []);
+    request.onerror = () => reject(request.error);
+  });
+  return all.filter((item) => isPending(item) && (carerId === undefined || item.carerId === carerId)).length;
+}
+
+async function recount(db: IDBDatabase, carerId?: string): Promise<number> {
+  const count = await countInStore(db, carerId);
+  if (carerId === undefined) pendingCount = count;
+  return count;
+}
+
+function countInMemory(carerId?: string): number {
+  return [...memoryQueue.values()]
+    .filter((item) => isPending(item) && (carerId === undefined || item.carerId === carerId)).length;
 }
 
 // ─── Migration Shim: Move legacy localStorage entries into IndexedDB ───
@@ -88,6 +119,7 @@ export async function migrateLocalStorageToIndexedDb(currentCarerId: string): Pr
     return new Promise((resolve, reject) => {
       transaction.oncomplete = () => {
         localStorage.removeItem(LEGACY_STORAGE_KEY);
+        void recount(db).catch(() => undefined);
         resolve(migrated);
       };
       transaction.onerror = () => reject(transaction.error);
@@ -128,6 +160,7 @@ export async function enqueueOfflineAction(
 
   if (!hasIndexedDb()) {
     memoryQueue.set(idempotencyKey, offlineItem);
+    pendingCount = countInMemory();
     return offlineItem;
   }
 
@@ -138,7 +171,11 @@ export async function enqueueOfflineAction(
   return new Promise((resolve, reject) => {
     // put() natively dedupes existing identical idempotency_key records
     const request = store.put(offlineItem);
-    request.onsuccess = () => resolve(offlineItem);
+    request.onsuccess = async () => {
+      // Await the recount so `await enqueueOfflineAction(...)` leaves the badge consistent.
+      await recount(db).catch(() => undefined);
+      resolve(offlineItem);
+    };
     request.onerror = () => reject(request.error);
   });
 }
@@ -165,9 +202,10 @@ export async function listOfflineActions(carerId: string, elderId: string): Prom
     const request = index.getAll(range);
 
     request.onsuccess = () => {
-      const items = (request.result as CarerOfflineItem[] ?? []).filter((item) => item.status === 'queued' || item.status === 'processing');
+      const items = (request.result as CarerOfflineItem[] ?? []).filter(isPending);
       // Flawlessly preserve chronological ordering
       items.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      void recount(db).catch(() => undefined);
       resolve(items);
     };
     request.onerror = () => reject(request.error);
@@ -180,6 +218,7 @@ export async function quarantineCorruptEntry(idempotencyKey: string, reason: str
     const item = memoryQueue.get(idempotencyKey);
     if (item) {
       memoryQueue.set(idempotencyKey, { ...item, status: 'quarantined', quarantineReason: reason });
+      pendingCount = countInMemory();
     }
     return;
   }
@@ -198,7 +237,9 @@ export async function quarantineCorruptEntry(idempotencyKey: string, reason: str
         store.put(item);
       }
     };
-    transaction.oncomplete = () => resolve();
+    transaction.oncomplete = () => {
+      recount(db).then(() => resolve(), () => resolve());
+    };
     transaction.onerror = () => reject(transaction.error);
   });
 }
@@ -207,6 +248,7 @@ export async function quarantineCorruptEntry(idempotencyKey: string, reason: str
 export async function completeOfflineAction(idempotencyKey: string): Promise<void> {
   if (!hasIndexedDb()) {
     memoryQueue.delete(idempotencyKey);
+    pendingCount = countInMemory();
     return;
   }
 
@@ -216,7 +258,10 @@ export async function completeOfflineAction(idempotencyKey: string): Promise<voi
 
   return new Promise((resolve, reject) => {
     const request = store.delete(idempotencyKey);
-    request.onsuccess = () => resolve();
+    request.onsuccess = async () => {
+      await recount(db).catch(() => undefined);
+      resolve();
+    };
     request.onerror = () => reject(request.error);
   });
 }
@@ -230,6 +275,32 @@ export async function enqueueOffline(
   return enqueueOfflineAction(carerId, elderId, action, payload);
 }
 
+/**
+ * Captures waiting to be sent, from the mirror maintained by every mutation above.
+ *
+ * Synchronous because the visit list renders it directly. After a cold start it reads zero
+ * until the first mutation or refresh — call refreshOfflineQueueSize() to make it accurate.
+ */
 export function getQueueSize(): number {
-  return [...memoryQueue.values()].filter((item) => item.status === 'queued' || item.status === 'processing').length;
+  return pendingCount;
+}
+
+/**
+ * Recounts from the store and returns the number of captures still waiting.
+ *
+ * Pass the signed-in carer's id to count only her captures: the store lives on the device,
+ * and a shared carer handset holds more than one person's queue.
+ */
+export async function refreshOfflineQueueSize(carerId?: string): Promise<number> {
+  if (!hasIndexedDb()) {
+    const count = countInMemory(carerId);
+    pendingCount = countInMemory();
+    return count;
+  }
+  try {
+    const db = await openIndexedDb();
+    return await recount(db, carerId);
+  } catch {
+    return getQueueSize();
+  }
 }

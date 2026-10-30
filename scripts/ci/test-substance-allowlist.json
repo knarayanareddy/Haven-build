@@ -1,9 +1,8 @@
 {
   "$comment": "Files in tests/edge that assert on source text instead of behaviour. scripts/ci/audit-test-substance.mjs fails when a new static-only file appears, when an entry becomes behavioural (it must then be removed), or when an entry no longer exists. This list may only shrink.",
   "reviewed": "2026-10-30",
-  "count": 2,
+  "count": 1,
   "allowlisted": {
-    "tests/edge/carer-indexeddb-queue-closure.test.mjs": "re-implements an IndexedDB queue in the test; needs fake-indexeddb to drive apps/carer's real queue",
     "tests/edge/floating-voice-rerender-closure.test.mjs": "asserts memo()/segment strings in a React component; needs @testing-library/react-native"
   }
 }
