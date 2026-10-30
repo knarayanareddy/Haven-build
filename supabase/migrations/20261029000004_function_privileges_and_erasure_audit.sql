@@ -135,6 +135,14 @@ REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM authenticated;
 -- Edge Functions use the service-role key.
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO service_role;
 
+-- Everything granted back to a client role is here because it re-derives the
+-- caller inside the function. That is the rule; it is not "grant what used to be
+-- granted". Two functions that a 2026-06 migration had granted to authenticated are
+-- deliberately absent — mark_reminder_taken() and record_app_event() are
+-- SECURITY DEFINER and take the elder/profile id straight from the caller without
+-- checking it, so a signed-in user could confirm anyone's medication or forge
+-- analytics rows. The revoke above closes that; do not restore them.
+
 -- RLS helper functions are evaluated as the *querying* role, so signed-in users
 -- need EXECUTE on them directly. They each re-derive the caller from auth.uid().
 GRANT EXECUTE ON FUNCTION public.family_can(UUID, TEXT) TO authenticated;
@@ -144,6 +152,15 @@ GRANT EXECUTE ON FUNCTION public.is_haven_admin() TO authenticated;
 -- The printed emergency QR/URL is opened without a session; the function is
 -- gated by a single-use hashed token, not by a role.
 GRANT EXECUTE ON FUNCTION public.get_emergency_profile(TEXT) TO anon, authenticated;
+
+-- Right of access, exercised with the person's own session: an elder exports their
+-- own data. The function raises 403 unless p_elder_id = auth.uid() (or the caller is
+-- service_role), so the grant cannot be used to read anyone else's record.
+GRANT EXECUTE ON FUNCTION public.export_elder_data(UUID) TO authenticated;
+
+-- Consent-gated family view. SECURITY INVOKER, and it raises unless family_can()
+-- approves one of the shared domains, so RLS still applies underneath.
+GRANT EXECUTE ON FUNCTION public.family_dashboard_summary(UUID) TO authenticated;
 
 -- Future functions: no implicit PUBLIC grant. A new RPC must be granted
 -- deliberately, in the migration that adds it.

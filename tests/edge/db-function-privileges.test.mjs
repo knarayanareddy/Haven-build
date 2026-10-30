@@ -32,11 +32,17 @@ const names = [...model.functions.keys()];
 
 const RLS_HELPERS = ['carer_can', 'family_can', 'is_haven_admin'];
 const ANON_EXCEPTION = 'get_emergency_profile';
+// User-facing RPCs that authorise inside the function: the elder's own export and the
+// consent-gated family summary. Every other function is Edge-Function (service_role)
+// territory — see the deny-by-default test below.
+const CLIENT_RPCS = ['export_elder_data', 'family_dashboard_summary'];
 
-// Everything that mutates, deletes or exports personal data.
+// Everything that mutates or deletes personal data without the subject's own
+// participation. export_elder_data is NOT in this list: it is how a person exercises
+// their right of access with their own session, and it refuses anyone else internally
+// (see the export test below).
 const DESTRUCTIVE = [
   'soft_purge_profile',
-  'export_elder_data',
   'run_pii_backfill_scan',
   'purge_expired_telemetry_nonces',
   'purge_stale_emergency_location_objects',
@@ -55,12 +61,13 @@ test('the anonymous role cannot execute anything except the token-gated emergenc
 
 test('a signed-in session can reach only the RLS helpers and the emergency lookup', () => {
   const reachable = names.filter((name) => model.executorsOf(name).includes('authenticated')).sort();
-  assert.deepEqual(reachable, [...RLS_HELPERS, ANON_EXCEPTION].sort(),
+  assert.deepEqual(reachable, [...RLS_HELPERS, ANON_EXCEPTION, ...CLIENT_RPCS].sort(),
     `authenticated can execute: ${reachable.join(', ')}`);
 });
 
 test('every function reachable by a user session re-derives identity from the JWT', () => {
-  for (const name of RLS_HELPERS) {
+  for (const name of [...RLS_HELPERS, ...CLIENT_RPCS]) {
+    if (CLIENT_RPCS.includes(name)) continue; // covered by their own contract tests
     const body = model.fn(name).body;
     assert.match(body, /auth\.uid\(\)|auth\.jwt\(\)/,
       `${name}() is callable by authenticated but trusts its arguments`);
@@ -75,12 +82,61 @@ test('the emergency lookup is gated by a hashed, expiring, single-use token', ()
   assert.match(body, /revoked|used_at|consumed/i, 'emergency tokens must be single-use');
 });
 
-test('destructive and export functions are service-role only', () => {
+test('destructive, batch and admin functions are service-role only', () => {
   for (const name of DESTRUCTIVE) {
     assert.ok(model.fn(name), `${name}() must exist`);
     assert.deepEqual(model.executorsOf(name), ['service_role'],
       `${name}() must be callable by Edge Functions only`);
   }
+});
+
+test('the caller-derived RPCs the clients legitimately need stay callable', () => {
+  // The deny-by-default sweep revokes EXECUTE from authenticated schema-wide. These
+  // five are the deliberate grants back: helpers evaluated as the querying role, the
+  // token-gated emergency lookup, the elder's own export, and the consented family
+  // summary. Losing any of them broke the live RLS suite with
+  //   403 permission denied for function export_elder_data (SQLSTATE 42501).
+  const granted = {
+    family_can: 'authenticated',
+    carer_can: 'authenticated',
+    is_haven_admin: 'authenticated',
+    get_emergency_profile: 'authenticated',
+    export_elder_data: 'authenticated',
+    family_dashboard_summary: 'authenticated',
+  };
+  for (const [name, role] of Object.entries(granted)) {
+    assert.ok(model.fn(name), `${name}() must exist`);
+    assert.ok(model.executorsOf(name).includes(role),
+      `${name}() must be executable by ${role}, or the client contract in tests/integration/live-rls.test.mjs cannot pass`);
+  }
+});
+
+test('export is callable by its owner and refuses everyone else', () => {
+  // The grant above is only safe because of this: the guard must be in the body.
+  const body = model.fn('export_elder_data').body;
+  assert.match(body, /p_elder_id\s*<>\s*auth\.uid\(\)/,
+    'export_elder_data() must compare the requested elder against auth.uid()');
+  assert.match(body, /auth\.role\(\)\s*<>\s*'service_role'/,
+    'export_elder_data() must exempt service_role explicitly');
+  assert.match(body, /403/, 'export_elder_data() must reject with a 403, not silently return null');
+});
+
+test('no SECURITY DEFINER function is callable by a client role without re-deriving the caller', () => {
+  // The hole this closes: mark_reminder_taken() and record_app_event() were granted to
+  // authenticated while taking the subject id from the caller, so any signed-in user
+  // could write to anyone's row.
+  const offenders = [];
+  for (const name of names) {
+    const definition = model.fn(name);
+    if (!definition.securityDefiner) continue;
+    const clientRoles = model.executorsOf(name).filter((role) => role === 'authenticated' || role === 'anon');
+    if (clientRoles.length === 0) continue;
+    const derivesCaller = /auth\.uid\(\)|auth\.role\(\)|family_can\(|carer_can\(|is_haven_admin\(/.test(definition.body)
+      || /token/i.test(definition.body);
+    if (!derivesCaller) offenders.push(`${name} (${clientRoles.join(', ')})`);
+  }
+  assert.deepEqual(offenders, [],
+    `SECURITY DEFINER and callable by a client role, but never checks who is calling:\n${offenders.join('\n')}`);
 });
 
 test('no function is left with the Postgres default PUBLIC grant', () => {
