@@ -1,7 +1,7 @@
 {
   "$comment": "Files in tests/edge that assert on source text instead of behaviour. scripts/ci/audit-test-substance.mjs fails when a new static-only file appears, when an entry becomes behavioural (it must then be removed), or when an entry no longer exists. This list may only shrink.",
   "reviewed": "2026-10-30",
-  "count": 10,
+  "count": 8,
   "allowlisted": {
     "tests/edge/carer-indexeddb-queue-closure.test.mjs": "re-implements an IndexedDB queue in the test; needs fake-indexeddb to drive apps/carer's real queue",
     "tests/edge/data-lifecycle-diff.test.mjs": "set-difference over readFileSync regexes of export/erasure code; the schema half is now in db-schema-contract, the handler half needs the export/erasure harnesses",
@@ -9,9 +9,7 @@
     "tests/edge/family-dashboard-auth.test.mjs": "asserts cookie/redirect strings in apps/family middleware; needs a request-level harness for the Next.js middleware",
     "tests/edge/fhir-staging-r1-closure.test.mjs": "asserts migration text and handler strings for FHIR staging; needs a Postgres-backed test",
     "tests/edge/floating-voice-rerender-closure.test.mjs": "asserts memo()/segment strings in a React component; needs @testing-library/react-native",
-    "tests/edge/medium-fixes-c1c4-closure.test.mjs": "14 mixed assertions across four functions; each needs its own handler harness",
     "tests/edge/post-erasure-injection-r6-closure.test.mjs": "simulates the post-erasure write rejection; needs the offline-queue handler harness",
-    "tests/edge/pre-pentest-round4-closure.test.mjs": "17 assertions over four Edge Functions; needs handler harnesses",
     "tests/edge/sqlite-offline-queue-closure.test.mjs": "re-implements the SQLite queue; needs a node:sqlite or better-sqlite3 fake to drive apps/elder/src/services/sqliteOfflineQueue.ts"
   }
 }
