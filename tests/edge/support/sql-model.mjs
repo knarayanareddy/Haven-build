@@ -193,6 +193,9 @@ export function buildModel({ dir = MIGRATIONS_DIR, files = null } = {}) {
   // `ALTER FUNCTION` aimed at a function a later migration already dropped — which
   // is how 20261029000004 broke the live migration run.
   const functionEvents = [];
+  // Event triggers (CREATE EVENT TRIGGER ... ON ddl_command_start) are schema objects
+  // too, and the DDL guard is one of them.
+  const eventTriggers = [];
 
   const table = (name) => {
     const key = bare(name);
@@ -353,6 +356,12 @@ export function buildModel({ dir = MIGRATIONS_DIR, files = null } = {}) {
         continue;
       }
 
+      const eventTrigger = /^CREATE EVENT TRIGGER (?:IF NOT EXISTS )?"?([A-Za-z0-9_]+)"?\s+ON\s+([a-z_]+)[\s\S]*?EXECUTE FUNCTION (?:public\.)?"?([A-Za-z0-9_]+)"?/i.exec(text);
+      if (eventTrigger) {
+        eventTriggers.push({ name: eventTrigger[1], event: eventTrigger[2], func: eventTrigger[3], source: file });
+        continue;
+      }
+
       // functions
       const fn = /^CREATE (?:OR REPLACE )?FUNCTION (?:[A-Za-z0-9_]+\.)?"?([A-Za-z0-9_]+)"?\s*\(([\s\S]*?)\)\s*RETURNS ([\s\S]*)$/i.exec(text);
       if (fn) {
@@ -429,6 +438,7 @@ export function buildModel({ dir = MIGRATIONS_DIR, files = null } = {}) {
     functionPrivileges,
     defaultPrivileges,
     functionEvents,
+    eventTriggers,
     /** Names that exist immediately before `file` is applied. */
     functionsBefore(file) {
       const alive = new Set();
