@@ -209,9 +209,13 @@ jobs:
       - name: Live RLS integration tests
         run: |
           set -o pipefail
-          # The stack is already up and every migration is applied; the "local" script
-          # would start the excluded containers and reset the database again.
-          HAVEN_SKIP_LOCAL_START=1 corepack pnpm run test:supabase:local 2>&1 | tee /tmp/live-rls.log
+          # verify:supabase:local is the wired path (it is what supabase-integration.yml
+          # and validate-suite.mjs expect): it mints the signed-in test JWTs from the
+          # stack's JWT secret and then runs the live tests. test:supabase:local skips
+          # the minting, which is why the live step could never have passed here.
+          # HAVEN_SKIP_LOCAL_START keeps it from restarting the containers this job
+          # deliberately excludes and redoing the reset.
+          HAVEN_SKIP_LOCAL_START=1 corepack pnpm run verify:supabase:local 2>&1 | tee /tmp/live-rls.log
 
       # Same reason as the stack diagnostics: the step log sits behind a signed blob
       # URL, so the reason goes into a check annotation the API can read.

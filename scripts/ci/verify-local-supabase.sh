@@ -17,26 +17,27 @@ fi
 
 ./scripts/check-local-supabase.sh
 
+# Read the stack's own view of itself even when the caller already exported a URL:
+# the JWT secret lives here, and without it the signed-in test JWTs cannot be minted.
+status_env="$(supabase status -o env 2>/dev/null || true)"
+
+# `supabase status -o env` renamed some keys between CLI releases
+# (ANON_KEY -> PUBLISHABLE_KEY, SERVICE_ROLE_KEY -> SECRET_KEY), so accept both
+# rather than depending on whichever version the runner installed.
+status_value() {
+  local key="$1"
+  printf '%s\n' "$status_env" | sed -n "s/^${key}=\"\\{0,1\\}\\([^\" ]*\\)\"\\{0,1\\}\$/\\1/p"
+}
 if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_ANON_KEY:-}" ]; then
-  status_env="$(supabase status -o env 2>/dev/null || true)"
-  # `supabase status -o env` renamed some keys between CLI releases
-  # (ANON_KEY -> PUBLISHABLE_KEY, SERVICE_ROLE_KEY -> SECRET_KEY), so accept both
-  # rather than depending on whichever version the runner installed.
-  status_value() {
-    local key="$1"
-    printf '%s\n' "$status_env" | sed -n "s/^${key}=\"\\{0,1\\}\\([^\" ]*\\)\"\\{0,1\\}\$/\\1/p"
-  }
   export SUPABASE_URL="${SUPABASE_URL:-$(status_value API_URL)}"
   export SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY:-$(status_value ANON_KEY)}"
   if [ -z "${SUPABASE_ANON_KEY:-}" ]; then
     export SUPABASE_ANON_KEY="$(status_value PUBLISHABLE_KEY)"
   fi
-  jwt_secret="$(status_value JWT_SECRET)"
-  if [ -z "$jwt_secret" ]; then
-    jwt_secret="$(status_value SERVICE_ROLE_KEY | cut -d. -f2 | base64 -d 2>/dev/null | sed -n 's/.*"secret":"\([^"]*\)".*/\1/p')"
-  fi
-else
-  jwt_secret=""
+fi
+jwt_secret="$(status_value JWT_SECRET)"
+if [ -z "$jwt_secret" ]; then
+  jwt_secret="$(status_value SERVICE_ROLE_KEY | cut -d. -f2 | base64 -d 2>/dev/null | sed -n 's/.*"secret":"\([^"]*\)".*/\1/p')"
 fi
 
 make_local_jwt() {
