@@ -64,28 +64,39 @@ test('touch targets are at least the 44pt floor everywhere they are defined', ()
   assert.ok(usesToken, 'the primary action button must size itself from touch.minimum');
 });
 
-test('high contrast mode drives a palette with a verified contrast ratio', () => {
-  const isHC = screen.declaration('isHC');
-  assert.ok(isHC, 'the renderer must decide high-contrast mode');
-  assert.match(isHC.initializer, /highContrast/, 'the decision must come from the profile, not a constant');
+test('high contrast mode is decided by the profile and travels in the context', () => {
+  // The palette used to be a module-level `let` that ScreenRenderer assigned to during render.
+  // It is now computed from the profile and passed down. Two facts matter here: the decision
+  // comes from the data, and the screens receive it rather than reaching for a global.
+  const source = screen.text;
 
-  const paper = screen.objectValue('paper');
-  assert.ok(paper, 'the palette must define a paper colour');
-  assert.match(paper, /isHC \?/, 'paper must switch on high-contrast mode');
+  assert.match(source, /computeColors\(context\?\.profile\?\.highContrast === true\)/,
+    'the palette must be computed from the profile flag, not a constant');
+  assert.equal(/^let colors/m.test(source), false,
+    'there must be no module-level palette to assign to');
+  assert.match(source, /renderFor\(schema\.screenId, \{ \.\.\.context, colors \}\)/,
+    'screens must be handed their own palette');
+  assert.match(source, /colors\?: Palette/,
+    'the palette is optional on the context, so a test can pass one');
+});
 
-  const highContrastPaper = /'#[0-9a-fA-F]{3,6}'/.exec(paper.split('?')[1] ?? '')?.[0]?.replace(/'/g, '');
-  assert.ok(highContrastPaper, `high-contrast paper must be a literal colour, got: ${paper}`);
+test('the high-contrast palette replaces colours rather than nudging them', () => {
+  // The numeric ratios live with the behavioural test (tests/edge/mobile-app-hardening.test.mjs),
+  // which loads computeColors and computes WCAG luminance. This one pins the shape that the
+  // accessibility claim depends on: two palettes, and the high-contrast one is not a tint.
+  const source = screen.text;
+  assert.match(source, /export function computeColors\(highContrast: boolean\): Palette/);
+  assert.match(source, /if \(!highContrast\) return \{ \.\.\.baseColors \};/,
+    'the default palette is the shared tokens, unchanged');
 
-  // The high-contrast pair is paper/ink; anything on it must clear WCAG AAA (7:1).
-  const ink = (screen.objectValue('ink') ?? '').match(/'#[0-9a-fA-F]{3,6}'/)?.[0]?.replace(/'/g, '');
-  assert.ok(ink, 'the palette must define an ink colour');
-  const ratio = contrastRatio(highContrastPaper, '#ffffff');
-  assert.ok(ratio >= 7, `high-contrast text ratio ${ratio.toFixed(1)}:1 is below AAA`);
-
-  // And the default palette must still clear AA for body text.
-  const base = tokens.colors;
-  assert.ok(contrastRatio(base.ink, base.paper) >= 4.5,
-    `default ink on paper is ${contrastRatio(base.ink, base.paper).toFixed(1)}:1, below AA`);
+  const highContrastBody = source.slice(source.indexOf('if (!highContrast)'), source.indexOf('export function paletteFor'));
+  for (const pair of [['linen', 'paper'], ['ink', 'graphite'], ['sage', 'sagePale'], ['rose', 'rosePale']]) {
+    for (const token of pair) {
+      assert.ok(highContrastBody.includes(`${token}:`), `high contrast must redefine ${token}`);
+    }
+  }
+  assert.match(highContrastBody, /ink: '#FFFFFF'/, 'text becomes true white');
+  assert.match(highContrastBody, /paper: '#000000'/, 'the surface becomes true black');
 });
 
 test('font scaling multiplies from the stored profile value', () => {

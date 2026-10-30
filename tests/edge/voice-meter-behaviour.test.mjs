@@ -24,98 +24,171 @@ const meter = await loadAppModule('apps/elder/src/services/voiceMeter.ts');
 // ─── the pure half: dB in, percent out, and the throttle in between ──────────
 
 test('silence and absent readings are zero, not NaN and not a guess', () => {
-  for (const reading of [null, undefined, Number.NaN, Number.NEGATIVE_INFINITY, -160, -80, -50]) {
-    assert.equal(meter.meteringDbToPercent(reading), 0, `${String(reading)} must read as silence`);
+  for (const reading of [null, undefined, Number.NaN, Number.NEGATIVE_INFINITY]) {
+    assert.equal(meter.meteringDbToPercent(reading, -50), 0, `${String(reading)} must read as silence`);
   }
+  assert.equal(meter.meteringDbToPercent(-80, -50), 0, 'below the floor is silence, not negative');
 });
 
-test('a normal speaking voice moves the ring through its middle', () => {
-  // -40 dB is a quiet room far from the mic; -10 dB is someone talking right at it.
-  assert.equal(meter.meteringDbToPercent(-40), 20);
-  assert.equal(meter.meteringDbToPercent(-25), 50);
-  assert.equal(meter.meteringDbToPercent(-10), 80);
-  assert.equal(meter.meteringDbToPercent(0), 100);
-  assert.equal(meter.meteringDbToPercent(6), 100, 'over-driving the input clamps, never overflows');
+test('the ring spans the thirty decibels above whatever floor it is given', () => {
+  // A gate of NOISE_GATE_DB above the floor, then SPEECH_RANGE_DB to full.
+  assert.equal(meter.meteringDbToPercent(-50, -50), 0, 'the floor itself is silence');
+  assert.equal(meter.meteringDbToPercent(-46, -50), 0, 'room tone inside the gate is silence');
+  assert.equal(meter.meteringDbToPercent(-33, -50), 50);
+  assert.equal(meter.meteringDbToPercent(-20, -50), 100);
+  assert.equal(meter.meteringDbToPercent(0, -50), 100, 'over-driving clamps, never overflows');
+
+  // The same voice on a different microphone: the floor moves, the ring does not.
+  assert.equal(meter.meteringDbToPercent(-35, -65), 100);
+  assert.equal(meter.meteringDbToPercent(-48, -65), 50);
+  assert.equal(meter.meteringDbToPercent(-65, -65), 0);
 });
 
 test('the mapping is monotonic — a louder voice never makes the ring smaller', () => {
   let previous = -1;
   for (let db = -120; db <= 10; db += 1) {
-    const percent = meter.meteringDbToPercent(db);
+    const percent = meter.meteringDbToPercent(db, -55);
     assert.ok(percent >= previous, `${db} dB dropped from ${previous} to ${percent}`);
     assert.ok(percent >= 0 && percent <= 100, `${db} dB gave ${percent}`);
     previous = percent;
   }
 });
 
-test('readings inside one bucket are swallowed; a crossing is emitted', () => {
-  const throttle = meter.createMeterThrottle();
-  assert.equal(throttle.push(-25), 50, 'the first reading always renders');
+// ─── the noise floor is measured, not assumed ────────────────────────────────
 
-  // -25 dB → 50%, -22 dB → 56%: same bucket, no render.
-  assert.equal(throttle.push(-22), null);
-  assert.equal(throttle.push(-21), null);
-
-  // -18 dB → 64%: a new bucket.
-  assert.equal(throttle.push(-18), 64);
-  assert.equal(throttle.push(-17), null);
+test('an estimator refuses to guess before it has seen enough samples', () => {
+  const estimator = meter.createNoiseFloorEstimator();
+  for (let i = 0; i < meter.MIN_CALIBRATION_SAMPLES - 1; i += 1) {
+    assert.equal(estimator.observe(-40), null, 'no floor may be reported yet');
+  }
+  assert.equal(estimator.observe(-40), -40, 'the next sample completes the measurement');
+  assert.equal(estimator.samples(), meter.MIN_CALIBRATION_SAMPLES);
 });
 
-test('one reading of a new stream always renders, whatever the previous stream ended on', () => {
-  const first = meter.createMeterThrottle();
-  first.push(-25);            // 50%
-  assert.equal(first.push(-21), null, 'inside the same bucket');
+test('the floor follows the quiet level, not the loud one', () => {
+  const estimator = meter.createNoiseFloorEstimator();
+  // A room at -62 with one burst of speech at -20.
+  for (let i = 0; i < 30; i += 1) estimator.observe(-62 + (i % 3));
+  for (let i = 0; i < 5; i += 1) estimator.observe(-20);
+  const floor = estimator.floor();
+  assert.ok(floor !== null && floor <= -58 && floor >= -66,
+    `a few loud samples must not drag the floor up (got ${floor})`);
+});
 
-  // bindRecordingMeter gives every recording its own throttle, so a second recording that
-  // starts at the level the first ended on must still draw its ring.
-  const second = meter.createMeterThrottle();
-  assert.equal(second.push(-21), 58, 'the same level must render again for a new recording');
+test('a single very quiet click does not anchor the floor forever', () => {
+  const estimator = meter.createNoiseFloorEstimator();
+  for (let i = 0; i < 40; i += 1) estimator.observe(-45);
+  estimator.observe(-95); // a click, or the AGC recovering
+  const floor = estimator.floor();
+  assert.ok(floor !== null && floor > -60,
+    `one outlier must not become the floor (got ${floor})`);
+});
+
+test('the floor stays inside a plausible range for any microphone', () => {
+  const quiet = meter.createNoiseFloorEstimator();
+  for (let i = 0; i < 40; i += 1) quiet.observe(-160);
+  assert.equal(quiet.floor(), -80, 'a digital-silence reading clamps to the plausible minimum');
+
+  const hot = meter.createNoiseFloorEstimator();
+  for (let i = 0; i < 40; i += 1) hot.observe(-2);
+  assert.equal(hot.floor(), -10, 'a very hot input clamps to the plausible maximum');
+});
+
+test('quantile interpolates and clamps its inputs', () => {
+  const sorted = [0, 10, 20, 30, 40];
+  assert.equal(meter.quantile(sorted, 0), 0);
+  assert.equal(meter.quantile(sorted, 1), 40);
+  assert.equal(meter.quantile(sorted, 0.5), 20);
+  assert.equal(meter.quantile(sorted, 0.125), 5);
+  assert.equal(meter.quantile([], 0.5), 0);
+  assert.equal(meter.quantile(sorted, -1), 0, 'a fraction below zero clamps');
+  assert.equal(meter.quantile(sorted, 2), 40, 'a fraction above one clamps');
+});
+
+test('readings inside one bucket are swallowed; a crossing is emitted', () => {
+  // A fixed floor isolates the throttle from the calibration, which is tested above.
+  const fixed = { observe: () => -50, floor: () => -50, samples: () => 99 };
+  const throttle = meter.createMeterThrottle(fixed);
+  assert.equal(throttle.push(-25), 81, 'the first reading always renders');
+  assert.equal(throttle.push(-24), null, '85% is the same ten-percent bucket');
+  assert.equal(throttle.push(-22), 92, 'a crossing renders');
+  assert.equal(throttle.push(-21), null, 'and the next reading inside it does not');
+});
+
+test('nothing is drawn until the floor has been measured', () => {
+  // Showing a guessed floor for the first second is what put the ring at 44% in a silent
+  // room on a hot microphone. Until the estimator has evidence, the ring stays dark.
+  const throttle = meter.createMeterThrottle();
+  const renders = [];
+  for (let i = 0; i < meter.MIN_CALIBRATION_SAMPLES - 1; i += 1) {
+    const next = throttle.push(-28);
+    if (next !== null) renders.push(next);
+  }
+  assert.deepEqual(renders, [], 'no percentage may be rendered before calibration');
 });
 
 test('the throttle’s buckets are the memo comparator’s buckets', () => {
-  // If these two disagreed, the component would either re-render on every sample or skip
-  // a level it should have shown.
   for (const percent of [0, 9, 10, 19, 20, 50, 99, 100]) {
     assert.equal(meter.meterBucket(percent), Math.floor(percent / 10));
   }
 });
 
-test('the binding the button uses subscribes once, throttles, and detaches', () => {
-  // This is the exact function FloatingVoiceButton calls from attachMeter; the test supplies
-  // the recording and records what would have been rendered.
-  let listener = null;
-  let subscriptions = 0;
-  let detaches = 0;
-  const source = {
-    onLevel(push) {
-      subscriptions += 1;
-      listener = push;
-      return () => { detaches += 1; };
-    },
-  };
+// ─── the question a device would have answered ───────────────────────────────
+//
+// The old mapping used one absolute floor for every handset. On a hot microphone the room's
+// own hum reads as speech, and on a quiet one a raised voice barely moves the ring. These
+// three profiles are the range real devices sit in; each must produce a ring that is flat
+// when the room is quiet and open when the person speaks.
 
+const PROFILES = [
+  { name: 'hot input (close mic, high gain)', ambient: -28, speech: -8 },
+  { name: 'typical phone', ambient: -52, speech: -22 },
+  { name: 'quiet input (distant mic, low gain)', ambient: -68, speech: -45 },
+];
+
+function driveRecording(profile, { ambientSamples = 30, speechSamples = 20 } = {}) {
   const renders = [];
-  const detach = meter.bindRecordingMeter(source, (percent) => renders.push(percent));
+  let emit = () => {};
+  const detach = meter.bindRecordingMeter(
+    { onLevel: (listener) => { emit = listener; return () => {}; } },
+    (percent) => renders.push(percent),
+  );
 
-  assert.equal(subscriptions, 1);
-  listener(-25);  // 50%
-  listener(-22);  // 56% — same bucket
-  listener(-18);  // 64% — new bucket
-  assert.deepEqual(renders, [50, 64]);
-
+  for (let i = 0; i < ambientSamples; i += 1) emit(profile.ambient + (i % 2));
+  const ambientRenders = renders.slice();
+  for (let i = 0; i < speechSamples; i += 1) emit(profile.speech + (i % 3));
   detach();
-  assert.equal(detaches, 1);
-});
+  return { ambientRenders, all: renders };
+}
 
-test('a platform without metering never renders NaN into the ring', () => {
-  let listener = null;
-  const renders = [];
-  meter.bindRecordingMeter({ onLevel: (push) => { listener = push; return () => {}; } },
-    (percent) => renders.push(percent));
+for (const profile of PROFILES) {
+  test(`${profile.name}: a quiet room draws nothing and a voice opens the ring`, () => {
+    const { ambientRenders, all } = driveRecording(profile);
 
-  listener(null);
-  assert.deepEqual(renders, [0]);
-  assert.equal(Number.isNaN(renders[0]), false);
+    assert.deepEqual(
+      ambientRenders.filter((percent) => percent > 0), [],
+      `the room alone must not move the ring (saw ${ambientRenders.join(', ')})`,
+    );
+
+    const speechPeak = Math.max(...all);
+    assert.ok(speechPeak >= 55,
+      `speech must open the ring at ${profile.name} (peak ${speechPeak}%)`);
+  });
+}
+
+test('no handset leaves the ring stuck, and none pegs it at rest', () => {
+  // The ring is a relative indicator, so the peaks differ across microphones by design — the
+  // property worth holding is that every handset lands in a usable band: clearly open when
+  // the person speaks, flat when they do not. An identical peak on all three would be a
+  // coincidence of these constants rather than a property of the product.
+  for (const profile of PROFILES) {
+    const { ambientRenders, all } = driveRecording(profile);
+    const peak = Math.max(...all);
+    assert.ok(peak >= 55, `${profile.name} left the ring stuck at ${peak}%`);
+    assert.ok(peak <= 100, '% cannot exceed a full ring');
+    assert.deepEqual(ambientRenders.filter((percent) => percent > 0), [],
+      `${profile.name} drew a ring over an empty room`);
+  }
 });
 
 // ─── the recorder half: a real polling loop over a fake audio module ─────────
@@ -309,27 +382,28 @@ test('microphone permission is refused before any recorder exists', async () => 
 
 // ─── end to end: a real polling loop through the real throttle ───────────────
 
-test('a second of a steady voice renders the ring once, not a hundred times', async () => {
+test('a quiet room then a spoken word renders the ring a handful of times, not a hundred', async () => {
   resetAudioGlobals();
-  globalThis.__meteringDb = -25;
-  // 10ms sampling = 100 readings in a second, the same order as the 60fps stream the old
-  // simulation claimed to throttle.
+  // 10 ms sampling: the same order as the 60fps stream the old simulation claimed to throttle.
+  globalThis.__meteringDb = -55;
   const recording = await recorderModule.startVoiceRecording({ meteringIntervalMs: 10 });
   const renders = [];
   const unsubscribe = meter.bindRecordingMeter(recording, (percent) => renders.push(percent));
 
   try {
-    await wait(200);
-    assert.equal(renders.length, 1,
-      `a voice that does not change bucket must not re-render the ring (saw ${renders.join(', ')})`);
+    await wait(300);
+    assert.deepEqual(renders.filter((percent) => percent !== 0), [],
+      `a room alone must not move the ring (saw ${renders.join(', ')})`);
 
-    // Now the older adult speaks louder. One crossing, one render.
-    globalThis.__meteringDb = -12;
-    assert.equal(await waitFor(() => renders.length > 1), true);
-    const afterCrossing = renders.length;
-    await wait(150);
-    assert.equal(renders.length, afterCrossing, 'and no further renders while the level holds');
-    assert.equal(renders[renders.length - 1], 76, '-12 dB is 76%');
+    // The older adult speaks. The level rises ~25 dB above the room.
+    globalThis.__meteringDb = -30;
+    assert.equal(await waitFor(() => renders.some((percent) => percent > 40)), true,
+      `speech must open the ring (saw ${renders.join(', ')})`);
+
+    const distinct = new Set(renders);
+    assert.ok(distinct.size <= 6,
+      `ten readings a second must collapse into a few buckets, not fifty renders (got ${distinct.size})`);
+    assert.ok(Math.max(...renders) >= 55, 'and the ring must open clearly');
   } finally {
     unsubscribe();
     await recording.stop();

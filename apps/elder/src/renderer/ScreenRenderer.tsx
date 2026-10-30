@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { productionScreens, ScreenSchema, ScreenId } from '@haven/schema/src/screenSchema';
@@ -10,7 +10,37 @@ import { translate, useTranslation } from '@haven/i18n';
 import { FloatingVoiceButton } from '../components/FloatingVoiceButton';
 import { HelpOverlay } from '../components/HelpOverlay';
 
-let colors: Record<string, string> = { ...baseColors };
+export type Palette = Record<string, string>;
+
+/**
+ * The palette for one render.
+ *
+ * High-contrast mode replaces the shared tokens with true black and white pairs rather than
+ * nudging their contrast, because "a bit more contrast" is not what the setting promises.
+ */
+export function computeColors(highContrast: boolean): Palette {
+  if (!highContrast) return { ...baseColors };
+  return {
+    ...baseColors,
+    linen: '#000000', paper: '#000000', ink: '#FFFFFF', graphite: '#FFFFFF',
+    pewter: '#DDDDDD', mist: '#888888', sage: '#FFFFFF', sagePale: '#000000',
+    amber: '#FFFFFF', amberPale: '#000000', rose: '#FFFFFF', rosePale: '#000000',
+    slate: '#FFFFFF', slatePale: '#000000', terracotta: '#FFFFFF', terracottaPale: '#000000',
+  };
+}
+
+/**
+ * The palette this screen draws with.
+ *
+ * The colours used to live in a module-level `let` that ScreenRenderer assigned to on every
+ * render. That is a side effect during render: React may render a component more than once, or
+ * discard a render it never commits, and the module keeps whichever palette was written last —
+ * so a high-contrast profile could leak its colours into the next screen. Through the context,
+ * a screen can only draw with the palette computed for its own profile.
+ */
+export function paletteFor(ctx: ScreenContext): Palette {
+  return ctx.colors ?? computeColors(ctx.profile?.highContrast === true);
+}
 
 export interface ElderProfile {
   id: string;
@@ -92,6 +122,8 @@ export interface ScreenContext {
   buurt: BuurtRow;
   visits: VisitLogRow[];
   onPrimaryAction: (id: string) => void;
+  /** Computed by ScreenRenderer from profile.highContrast; screens never assign it. */
+  colors?: Palette;
   documents?: Array<{ id: string; label: string }>;
   pendingConsentPack?: {
     title_nl: string;
@@ -148,53 +180,67 @@ export function screenTitleFor(id: ScreenId, locale: Locale) {
   return t(locale, map[id]);
 }
 
-function tile(label: string, hint: string, color: 'safe' | 'amber' | 'rose' | 'paper', onPress: () => void, badge?: string) {
-  const bg = color === 'safe' ? colors.sagePale : color === 'amber' ? colors.amberPale : color === 'rose' ? colors.rosePale : colors.paper;
-  return (
-    <TouchableOpacity onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={{ minHeight: touch.minimum * 2, borderRadius: 22, backgroundColor: bg, padding: 18, gap: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-      <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 22, fontWeight: '900', color: colors.ink }}>{label}</Text>
-        <Text style={{ fontSize: 16, color: colors.pewter, fontWeight: '700' }}>{hint}</Text>
-      </View>
-      {badge ? (
-        <View style={{ minWidth: 28, height: 28, borderRadius: 14, backgroundColor: colors.slate, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6 }}>
-          <Text style={{ color: 'white', fontWeight: '900' }}>{badge}</Text>
-        </View>
-      ) : null}
-    </TouchableOpacity>
-  );
-}
-
-function actionButton(label: string, variant: 'primary' | 'secondary' | 'safe' | 'danger' | 'ghost', actionId: string, onPrimaryAction: (id: string) => void, accessibilityLabel: string) {
-  const bg = variant === 'primary' ? colors.slate : variant === 'safe' ? colors.sage : variant === 'danger' ? colors.rose : variant === 'ghost' ? 'transparent' : colors.paper;
-  const fg = variant === 'secondary' ? colors.slate : variant === 'ghost' ? colors.slate : 'white';
-  return (
-    <TouchableOpacity
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      onPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        onPrimaryAction(actionId);
-      }}
-      style={{ minHeight: touch.minimum, borderRadius: 20, backgroundColor: bg, borderWidth: variant === 'ghost' ? 2 : 0, borderColor: colors.mist, paddingHorizontal: 18, justifyContent: 'center', alignItems: 'center', marginVertical: 6 }}
-    >
-      <Text style={{ color: fg, fontSize: 22, fontWeight: '900' }}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
 function pillTime(time: string, locale: Locale) {
   if (locale === 'nl-NL') return `om ${time}`;
   return `at ${time}`;
 }
 
-function statusBadge(status: MedicationRow['status'], locale: Locale) {
-  if (status === 'taken') return { text: t(locale, 'taken'), color: colors.sage };
-  if (status === 'snoozed') return { text: locale === 'nl-NL' ? 'uitgesteld' : 'snoozed', color: colors.amber };
-  return { text: t(locale, 'planned'), color: colors.pewter };
+/**
+ * The primitives every screen draws with, bound to one palette.
+ *
+ * `tile`, `actionButton` and `statusBadge` used to read a module-level `colors` binding. Making
+ * them a factory is what lets the palette be a parameter without rewriting forty call sites:
+ * each screen destructures the three helpers it uses and the closures it gets already know the
+ * colours of its own profile.
+ */
+function primitivesFor(colors: Palette) {
+  const tile = (label: string, hint: string, color: 'safe' | 'amber' | 'rose' | 'paper', onPress: () => void, badge?: string) => {
+    const bg = color === 'safe' ? colors.sagePale : color === 'amber' ? colors.amberPale : color === 'rose' ? colors.rosePale : colors.paper;
+    return (
+      <TouchableOpacity onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={{ minHeight: touch.minimum * 2, borderRadius: 22, backgroundColor: bg, padding: 18, gap: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 22, fontWeight: '900', color: colors.ink }}>{label}</Text>
+          <Text style={{ fontSize: 16, color: colors.pewter, fontWeight: '700' }}>{hint}</Text>
+        </View>
+        {badge ? (
+          <View style={{ minWidth: 28, height: 28, borderRadius: 14, backgroundColor: colors.slate, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6 }}>
+            <Text style={{ color: 'white', fontWeight: '900' }}>{badge}</Text>
+          </View>
+        ) : null}
+      </TouchableOpacity>
+    );
+  };
+
+  const actionButton = (label: string, variant: 'primary' | 'secondary' | 'safe' | 'danger' | 'ghost', actionId: string, onPrimaryAction: (id: string) => void, accessibilityLabel: string) => {
+    const bg = variant === 'primary' ? colors.slate : variant === 'safe' ? colors.sage : variant === 'danger' ? colors.rose : variant === 'ghost' ? 'transparent' : colors.paper;
+    const fg = variant === 'secondary' ? colors.slate : variant === 'ghost' ? colors.slate : 'white';
+    return (
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          onPrimaryAction(actionId);
+        }}
+        style={{ minHeight: touch.minimum, borderRadius: 20, backgroundColor: bg, borderWidth: variant === 'ghost' ? 2 : 0, borderColor: colors.mist, paddingHorizontal: 18, justifyContent: 'center', alignItems: 'center', marginVertical: 6 }}
+      >
+        <Text style={{ color: fg, fontSize: 22, fontWeight: '900' }}>{label}</Text>
+      </TouchableOpacity>
+    );
+  };
+
+  const statusBadge = (status: MedicationRow['status'], locale: Locale) => {
+    if (status === 'taken') return { text: t(locale, 'taken'), color: colors.sage };
+    if (status === 'snoozed') return { text: locale === 'nl-NL' ? 'uitgesteld' : 'snoozed', color: colors.amber };
+    return { text: t(locale, 'planned'), color: colors.pewter };
+  };
+
+  return { tile, actionButton, statusBadge };
 }
 
 function renderHome(ctx: ScreenContext) {
+  const colors = paletteFor(ctx);
+  const { tile } = primitivesFor(colors);
   const { locale, profile, medications, messages, scamEvents, family } = ctx;
   const pending = medications.filter((m) => m.status !== 'taken').length;
   const unread = messages.filter((m) => m.unread).length;
@@ -225,6 +271,7 @@ function expandDosageUnit(doseStr: string, locale: Locale): string {
 }
 
 function renderToday(ctx: ScreenContext) {
+  const colors = paletteFor(ctx);
   const { locale, tasks, medications } = ctx;
   return (
     <View style={{ gap: 14 }}>
@@ -256,6 +303,8 @@ function renderToday(ctx: ScreenContext) {
 }
 
 function renderPills(ctx: ScreenContext) {
+  const colors = paletteFor(ctx);
+  const { actionButton, statusBadge } = primitivesFor(colors);
   const { locale, medications } = ctx;
   const current = medications.find((m) => m.status !== 'taken');
   if (!current) {
@@ -314,6 +363,8 @@ function renderPills(ctx: ScreenContext) {
 }
 
 function renderShield(ctx: ScreenContext) {
+  const colors = paletteFor(ctx);
+  const { actionButton } = primitivesFor(colors);
   const { locale, scamEvents, documents = [] } = ctx;
   const top = scamEvents[0];
   const tone = top?.level === 'zwart' || top?.level === 'rood' ? 'rose' : top?.level === 'amber' ? 'amber' : 'safe';
@@ -347,6 +398,8 @@ function renderShield(ctx: ScreenContext) {
 }
 
 function renderFamily(ctx: ScreenContext) {
+  const colors = paletteFor(ctx);
+  const { actionButton } = primitivesFor(colors);
   const { locale, family, messages } = ctx;
   return (
     <View style={{ gap: 14 }}>
@@ -386,6 +439,8 @@ function renderFamily(ctx: ScreenContext) {
 }
 
 function renderBuurt(ctx: ScreenContext) {
+  const colors = paletteFor(ctx);
+  const { actionButton } = primitivesFor(colors);
   const { locale, buurt } = ctx;
   if (!buurt.active) {
     return (
@@ -428,6 +483,8 @@ function renderBuurt(ctx: ScreenContext) {
 }
 
 function renderKompas(ctx: ScreenContext) {
+  const colors = paletteFor(ctx);
+  const { actionButton } = primitivesFor(colors);
   const { locale, profile, family } = ctx;
   const primary = family.find((f) => f.isPrimary) ?? family[0];
   return (
@@ -454,6 +511,8 @@ function renderKompas(ctx: ScreenContext) {
 }
 
 function renderStem(ctx: ScreenContext) {
+  const colors = paletteFor(ctx);
+  const { actionButton } = primitivesFor(colors);
   const { locale } = ctx;
   return (
     <View style={{ gap: 14 }}>
@@ -475,6 +534,8 @@ function renderStem(ctx: ScreenContext) {
 }
 
 function renderWacht(ctx: ScreenContext) {
+  const colors = paletteFor(ctx);
+  const { actionButton } = primitivesFor(colors);
   const { locale, family, visits } = ctx;
   const carer = family.find((f) => f.relation === 'andere');
   return (
@@ -504,6 +565,8 @@ function renderWacht(ctx: ScreenContext) {
 }
 
 function renderSettings(ctx: ScreenContext) {
+  const colors = paletteFor(ctx);
+  const { actionButton } = primitivesFor(colors);
   const { locale, profile } = ctx;
   return (
     <View style={{ gap: 14 }}>
@@ -532,35 +595,6 @@ function renderSettings(ctx: ScreenContext) {
   );
 }
 
-function renderScreen(ctx: ScreenContext) {
-  switch (ctx.profile.id === ctx.profile.id && ctx.profile.id ? 'x' : 'x') {
-    default:
-      break;
-  }
-  switch (true) {
-    case true:
-      break;
-  }
-  // Use screen id routing via the schema registry order (productionScreens order).
-  // We use a flat map keyed by ScreenId for direct dispatch.
-  const dispatch: Partial<Record<ScreenId, (ctx: ScreenContext) => React.ReactNode>> = {
-    HOME: renderHome,
-    TODAY: renderToday,
-    PILLS: renderPills,
-    SHIELD: renderShield,
-    FAMILY: renderFamily,
-    BUURT: renderBuurt,
-    KOMPAS: renderKompas,
-    STEM: renderStem,
-    WACHT: renderWacht,
-    SETTINGS: renderSettings,
-  };
-  // We will pick the screen id by introspecting which top-level action was last invoked.
-  // Simpler approach: take the last argument passed via context. Default to HOME.
-  // The wrapper component passes a hint via ScreenContext.
-  return null;
-}
-
 export interface ScreenRendererProps {
   schema: ScreenSchema;
   context: ScreenContext;
@@ -574,27 +608,10 @@ export function ScreenRenderer({ schema, context }: ScreenRendererProps) {
   // FIX P1: FONT SCALING Dynamic DB font_size_multiplier scaling baselines
   const fontMult = context?.profile?.fontSizeMultiplier ?? 1.0;
 
-  // FIX P1: CONTRAST RATIOS High Contrast Mode DB flag dynamically overwriting EMR tokens with true #000000 / #FFFFFF pairs
-  const isHC = context?.profile?.highContrast === true;
-  colors = {
-    ...baseColors,
-    linen: isHC ? '#000000' : baseColors.linen,
-    paper: isHC ? '#000000' : baseColors.paper,
-    ink: isHC ? '#FFFFFF' : baseColors.ink,
-    graphite: isHC ? '#FFFFFF' : baseColors.graphite,
-    pewter: isHC ? '#DDDDDD' : baseColors.pewter,
-    mist: isHC ? '#888888' : baseColors.mist,
-    sage: isHC ? '#FFFFFF' : baseColors.sage,
-    sagePale: isHC ? '#000000' : baseColors.sagePale,
-    amber: isHC ? '#FFFFFF' : baseColors.amber,
-    amberPale: isHC ? '#000000' : baseColors.amberPale,
-    rose: isHC ? '#FFFFFF' : baseColors.rose,
-    rosePale: isHC ? '#000000' : baseColors.rosePale,
-    slate: isHC ? '#FFFFFF' : baseColors.slate,
-    slatePale: isHC ? '#000000' : baseColors.slatePale,
-    terracotta: isHC ? '#FFFFFF' : baseColors.terracotta,
-    terracottaPale: isHC ? '#000000' : baseColors.terracottaPale,
-  };
+  // High-contrast mode is a property of this profile, so the palette is derived from the
+  // context on every render instead of being written into a module-level binding.
+  const colors = useMemo(() => computeColors(context?.profile?.highContrast === true), [context?.profile?.highContrast]);
+  const { tile, actionButton, statusBadge } = primitivesFor(colors);
 
   const titleEn = schema.titleEn;
   const titleNl = schema.titleNl;
@@ -607,7 +624,7 @@ export function ScreenRenderer({ schema, context }: ScreenRendererProps) {
         <Text style={{ fontSize: 14, color: colors.pewter, fontWeight: '700' }}>{locale === 'nl-NL' ? 'Offline-cache' : 'Offline cache'}: {schema.offlineCacheTtlSeconds}s · {schema.emergencyButton ? (locale === 'nl-NL' ? 'Noodknop aanwezig' : 'Emergency access available') : (locale === 'nl-NL' ? 'Geen noodknop' : 'No emergency access')}</Text>
       </View>
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 160, gap: 12 }}>
-        {renderFor(schema.screenId, context)}
+        {renderFor(schema.screenId, { ...context, colors })}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16 }}>
           {/* ─── Phase 1.2: Simplified home — only primary screens + MORE ─── */}
           {productionScreens
@@ -664,6 +681,8 @@ export function ScreenRenderer({ schema, context }: ScreenRendererProps) {
 }
 
 function renderOnboarding(ctx: ScreenContext) {
+  const colors = paletteFor(ctx);
+  const { actionButton } = primitivesFor(colors);
   const { locale, profile } = ctx;
   const pack = ctx.pendingConsentPack;
   const completedCount = ctx.completedConsentPackCount ?? 0;
@@ -697,6 +716,8 @@ function renderOnboarding(ctx: ScreenContext) {
 }
 
 function renderIncomingCall(ctx: ScreenContext) {
+  const colors = paletteFor(ctx);
+  const { actionButton } = primitivesFor(colors);
   const { locale } = ctx;
   const call = ctx.incomingCall;
   return (
@@ -722,6 +743,7 @@ function renderIncomingCall(ctx: ScreenContext) {
 }
 
 function renderMore(ctx: ScreenContext) {
+  const colors = paletteFor(ctx);
   const { locale } = ctx;
   const secondary = productionScreens.filter((s) => !s.isPrimary && s.screenId !== 'ONBOARDING' && s.screenId !== 'INCOMING_CALL');
   return (
@@ -749,6 +771,8 @@ function renderMore(ctx: ScreenContext) {
 // vNext: daily check-in card — rendered when todaysCheckin exists in context.
 // checkinMorning | checkinMidday | checkinEvening periods are supported.
 function renderCheckinCard(ctx: ScreenContext, period: 'morning' | 'midday' | 'evening' = 'morning') {
+  const colors = paletteFor(ctx);
+  const { actionButton } = primitivesFor(colors);
   const { locale } = ctx;
   const periodKey = period === 'morning' ? 'checkinMorning' : period === 'midday' ? 'checkinMidday' : 'checkinEvening';
   const periodLabel = period === 'morning'
@@ -773,6 +797,8 @@ function renderCheckinCard(ctx: ScreenContext, period: 'morning' | 'midday' | 'e
 
 // vNext: medication confirmation card — rendered when pending_confirmation is medication_taken.
 function renderMedicationConfirmCard(ctx: ScreenContext, medicationId: string) {
+  const colors = paletteFor(ctx);
+  const { actionButton } = primitivesFor(colors);
   const { locale } = ctx;
   // FIX P1: COGNITIVE LOAD Dual YES/NO Visual Interactive MAR Confirmation Buttons with permanent high-contrast solid variant styling
   return (
@@ -793,6 +819,8 @@ function renderMedicationConfirmCard(ctx: ScreenContext, medicationId: string) {
 
 // vNext: fall response card — rendered when pending_confirmation is fall_response.
 function renderFallResponseCard(ctx: ScreenContext) {
+  const colors = paletteFor(ctx);
+  const { actionButton } = primitivesFor(colors);
   const { locale } = ctx;
   const [isFlashing, setFlashing] = React.useState(true);
 
@@ -848,7 +876,9 @@ export const __test__ = {
   headerStatus,
   isQuietHours,
   screenTitleFor,
-  statusBadge,
+  // The badge colour depends on the palette, which is now a parameter; this binding keeps the
+  // helper reachable with the default palette.
+  statusBadge: (status: MedicationRow['status'], locale: Locale) => primitivesFor(computeColors(false)).statusBadge(status, locale),
   detectCrisisPhrase,
   renderFor,
   renderCheckinCard,

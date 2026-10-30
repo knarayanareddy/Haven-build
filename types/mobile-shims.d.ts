@@ -14,6 +14,9 @@ declare module 'react-native' {
   export const Easing: any;
   export const Modal: any;
   export const StatusBar: any;
+  export const BackHandler: {
+    addEventListener: (event: 'hardwareBackPress', handler: () => boolean) => { remove: () => void };
+  };
   export const AccessibilityInfo: {
     isBoldTextEnabled: () => Promise<boolean>;
     addEventListener: (event: string, handler: (...args: any[]) => void) => { remove: () => void };
@@ -30,6 +33,7 @@ declare module 'react-native-safe-area-context' {
 
 declare module '@react-navigation/native' {
   export const NavigationContainer: any;
+  export function useNavigation<T = any>(): T;
 }
 
 declare module '@react-navigation/native-stack' {
