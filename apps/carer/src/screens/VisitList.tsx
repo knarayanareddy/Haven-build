@@ -7,7 +7,7 @@ import { Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { colors } from '@haven/ui/src/tokens';
 import { useAuth } from '../auth/AuthProvider';
 import { CarerClient } from '../services/havenClient';
-import { enqueueOffline, getQueueSize } from '../services/offlineQueue';
+import { enqueueOffline, getQueueSize, refreshOfflineQueueSize } from '../services/offlineQueue';
 
 interface ElderVisit {
   elder_id: string;
@@ -39,9 +39,23 @@ export function VisitList({ navigation }: { navigation: { navigate: (screen: str
   const [offlineCount, setOfflineCount] = useState(getQueueSize());
 
   useEffect(() => {
-    const interval = setInterval(() => setOfflineCount(getQueueSize()), 5000);
-    return () => clearInterval(interval);
-  }, []);
+    // Count only this carer's captures: the store lives on the handset, and a shared device
+    // holds her colleague's queue too. Reading IndexedDB is async, so poll it rather than the
+    // synchronous mirror, which is empty after a cold start.
+    let cancelled = false;
+    const carerId = sessionUserId(session) ?? undefined;
+    const tick = async () => {
+      const count = await refreshOfflineQueueSize(carerId);
+      if (!cancelled) setOfflineCount(count);
+    };
+    setOfflineCount(getQueueSize());
+    void tick();
+    const interval = setInterval(() => { void tick(); }, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [session]);
 
   useEffect(() => {
     let mounted = true;

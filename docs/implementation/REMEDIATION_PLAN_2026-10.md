@@ -724,6 +724,9 @@ ever CASCADE or SET NULL again.
 
 ### 11.4 What is left, and what each one needs
 
+> **Superseded by §13.** This was the inventory at the end of the fifth pass; the
+> seventh pass converted the last five files and the allowlist is now empty.
+
 The 26 allowlisted files fall into four groups. Each entry in
 `scripts/ci/test-substance-allowlist.json` names the specific harness it needs:
 
@@ -948,3 +951,111 @@ reasons, and only the first was about SQL that existed before this work: my `ALT
 FUNCTION`, my over-broad revoke, and wiring that had never been exercised. That is the
 answer to the question §12.3 opened with — the cause was not "unknown", it was never
 observed, because the job could not start the stack to observe it.
+
+---
+
+## 13. Seventh pass — the static suites reach zero (2026-10-30)
+
+### 13.1 What "done" means, per step
+
+The goal was not "fewer static files" but *no claim that a test cannot support*. Each
+row had to be true before the row above it could be marked done.
+
+| Step | Done when | Evidence |
+|---|---|---|
+| Edge function behaviour | `fn-medmij-fhir-import` is driven through the harness and the staging rows are inspected in a database double | `tests/edge/fhir-import-behaviour.test.mjs`, 9 tests |
+| Approval gate | the SQL gate is asked of the schema model, not of the handler source | same file, 4 tests over `sql-model.fn('promote_fhir_medication_staging')` |
+| Database lifecycle | every table carrying an `elder_id` is exported *or* named as withheld, and redacted *or* retained with a written reason | `tests/edge/db-lifecycle-coverage.test.mjs`, 9 tests |
+| Client queue | the real `offlineQueue.ts` runs against a real IndexedDB implementation | `tests/edge/carer-offline-queue-behaviour.test.mjs`, 11 tests |
+| React boundary | React's own comparator decides, not a comparator written in the test | `tests/edge/floating-voice-button-memo.test.mjs`, 8 tests |
+| The allowlist | `scripts/ci/test-substance-allowlist.json` is empty and the auditor still passes | `tests/edge: 48 files · behavioural 48 · static-only 0` |
+| Nothing else broke | the full pipeline is green, not just the edge suite | `corepack pnpm test` exit 0: 428 tests, RLS, function coverage, test substance, docs truth |
+
+### 13.2 Converted in this pass
+
+| Deleted | Replaced by | What the old one could not see |
+|---|---|---|
+| `fhir-staging-r1-closure` | `fhir-import-behaviour.test.mjs` | that the handler answers 500 for a malformed body |
+| `data-lifecycle-diff` | `db-lifecycle-coverage.test.mjs` | three tables holding a person's narrative after erasure, two tables in neither export nor erasure |
+| `deadlock-elimination-load-perf` | same file | nothing — its "0 deadlocks at 15k/min" was measured on a timer loop inside the test. The claim is dropped; the snapshot columns and ingress buffer it existed to protect are asserted directly |
+| `carer-indexeddb-queue-closure` | `carer-offline-queue-behaviour.test.mjs` | that the pending-capture badge always reads zero |
+| `floating-voice-rerender-closure` | `floating-voice-button-memo.test.mjs` | that nothing supplies the audio meter it was throttling |
+
+### 13.3 Five defects the conversions found
+
+1. **A malformed request and a lethal contraindication both answered 500.**
+   `supabase/functions/_shared/errors.ts` recognised `401/403/404/422/429` prefixes in a
+   thrown message but not `400` or `409`, and handlers announce their status that way
+   (`throw new Error("409 Conflict: Lethal contraindication detected")`). A safety
+   rejection was indistinguishable from an outage. The mapper now honours any status the
+   API uses and refuses to invent one for numbers that are not statuses.
+
+2. **Erasure left the narrative behind.**
+   `soft_purge_profile()` redacted handover notes, life stories, companion memory,
+   documents and transcripts, but not `carer_visit_logs` (`activities_nl`,
+   `observations_nl`, `concerns_nl`), `incidents` (`description_nl`,
+   `resolution_notes_nl`) or `fall_events.resolution_notes`. "She seemed confused after
+   breakfast" survived next to a profile whose name had been erased. Fixed in
+   `supabase/migrations/20261029000004_function_privileges_and_erasure_audit.sql`;
+   structured clinical facts stay, because a care provider has to keep them.
+
+3. **The erasure claimed completion before writing its receipt.**
+   The same function set `deletion_requests.status = 'completed'` *before* inserting the
+   `GDPR_ERASURE_PURGE` audit row. A failure between the two left a fulfilled request
+   with no evidence. The update now follows the insert.
+
+4. **Two tables were in neither the export nor the erasure.**
+   `fhir_medication_staging` holds raw vendor FHIR resources until a clinician reviews
+   them; `profiles`' `ON DELETE CASCADE` never fires on a soft purge, so they outlived
+   the person's erasure. `location_events_partitioned` holds the retention half of the
+   location history that the export never returned. Both are exported, and the staging
+   table is deleted, in `supabase/migrations/20260620000001_fix_export_elder_data_recorded_at.sql`
+   and `supabase/functions/fn-right-to-erasure/index.ts`.
+
+5. **The offline badge counted a Map the browser never writes to.**
+   `apps/carer/src/screens/VisitList.tsx` polls `getQueueSize()` every five seconds for
+   "N captures waiting to send". `apps/carer/src/services/offlineQueue.ts` answered from
+   `memoryQueue`, which only the no-IndexedDB fallback populates, so a carer with twelve
+   unsent handovers saw zero. The service now maintains the count from the store on every
+   mutation and exposes `refreshOfflineQueueSize(carerId)`, which the screen uses so the
+   badge counts only the signed-in carer — a shared handset holds a colleague's queue too.
+
+### 13.4 One gap this pass does not close
+
+`audioVolumePct` has no producer. `apps/elder/src/renderer/ScreenRenderer.tsx` renders
+`FloatingVoiceButton` without it and `apps/elder/src/services/voiceRecorder.ts` exposes no
+metering, so the listening ring never appears and the memo throttle guards a signal that
+does not exist yet. That is a product gap, not a test gap; it is recorded at the top of
+`tests/edge/floating-voice-button-memo.test.mjs` rather than papered over, because the
+suite it replaced "measured" 600 frames per second of a meter nothing was sending.
+
+### 13.5 Harness additions this pass needed
+
+- `loadAppModule()` accepts `{ stubs }` and applies them **before** relative-import
+  normalisation (`tests/edge/support/edge-function-harness.mjs`). The transpiler has
+  already rewritten `./supabase-server` to `./supabase-server.mjs` by then, so a stub
+  keyed on the original specifier matched nothing — the failure surfaced as
+  `Cannot find package 'next'`.
+- `tests/edge/support/shared-loader.mjs` emits `react-jsx`; it copied JSX through
+  untouched, so no `.tsx` file could be loaded at all.
+- `fake-indexeddb` (dev dependency) rather than a hand-written fake: composite
+  `['carerId','elderId']` keys, `IDBKeyRange.only()` and structured clone are exactly the
+  semantics a hand-rolled double gets subtly wrong, and a wrong double would have agreed
+  with the assertions.
+- The `react` specifier in the memo test points at the copy the elder app renders with
+  (`apps/elder/node_modules/react`, 19.2.3) instead of being stubbed; stubbing React would
+  put the memo decision back in the test's hands.
+- `scripts/validate-suite.mjs` keeps a list of paths that must exist; it named
+  `tests/edge/data-lifecycle-diff.test.mjs` and failed the pipeline the moment the file
+  was deleted. Updated — which is the argument for running `pnpm test` and not only
+  `pnpm test:edge` after a deletion.
+
+### 13.6 Where it stands
+
+```
+tests/edge: 48 files · behavioural 48 · static-only 0 (allowlisted 0)
+# tests 428 · # pass 428 · # fail 0
+```
+
+Allowlist trajectory across the whole remediation: **55 → 35 → 26 → 22 → 18 → 17 → 15 →
+14 → 10 → 8 → 6 → 5 → 4 → 2 → 0**.

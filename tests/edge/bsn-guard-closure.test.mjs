@@ -76,9 +76,20 @@ test('a 9-digit number that fails the 11-proef is allowed', () => {
   assert.doesNotThrow(() => guard.assertNoBsnInPayload({ transcript: 'Mijn willekeurige code is 123456783.' }));
 });
 
-test('a BSN embedded in a longer digit run is still found', () => {
-  // Sliding window: the guard must not only look at whole fields.
-  assert.equal(guard.containsBsn(`ref 991${VALID_BSN}887`), true);
+test('a BSN glued into a longer digit run is no longer claimed as a detection', () => {
+  // This assertion used to be the opposite, and the change is deliberate.
+  //
+  // The windowed scan it required is what produced a real outage: any run of 15+ digits
+  // contains a 9-window that satisfies the modulo-11 test about one time in eleven, and
+  // `000000000` satisfies it outright. Carer handover notes were being rejected with 422
+  // for a BSN nobody had sent, because an elder id ended in zeros. The guard now treats a
+  // run of exactly nine digits as a BSN — which is how one arrives on the wire, with or
+  // without separators — and declines to guess when a number is embedded in a longer
+  // identifier, where the false-positive rate made the check unusable.
+  assert.equal(guard.containsBsn(`ref 991${VALID_BSN}887`), false,
+    'a 15-digit reference is ambiguous; rejecting every request that contains one is not acceptable');
+  assert.equal(guard.containsBsn(`mijn bsn is ${VALID_BSN}.`), true,
+    'the same value on its own is still a BSN');
 });
 
 test('a BSN nested inside an object is rejected', () => {
@@ -134,4 +145,39 @@ test('the guard lives in _shared so every function shares one rule set', async (
     assert.match(source, /from ["']\.\.\/_shared\/bsn_guard\.ts["']/, `${caller} must import the shared guard`);
     assert.equal(/function\s+isValid11Proef/.test(source), false, `${caller} must not define its own 11-proef`);
   }
+});
+
+// ─── False positives: the guard must not reject ordinary requests ────────────
+//
+// The scanner used to slide a 9-character window across every position of the whole
+// serialised request. Any run of 15+ digits therefore contained a sub-window that
+// satisfied the modulo-11 test about one time in eleven, and `000000000` satisfies it
+// outright — so a carer handover note was rejected with 422 because an elder id ended in
+// zeros. These cases come from that incident.
+
+test('a request whose ids contain long digit runs is not treated as a BSN', () => {
+  const payload = {
+    elder_id: 'eeee0000-0000-4000-8000-0000000000e1',
+    appetite: 3,
+    mood: 4,
+    notes_nl: 'Mevrouw heeft slecht gegeten vandaag.',
+    idempotency_key: 'c9946e8b-323b-4d57-a1c5-7bbaaf1b7b0b',
+  };
+  assert.doesNotThrow(() => guard.assertNoBsnInPayload(payload),
+    'ordinary identifiers must not be mistaken for a citizen service number');
+});
+
+test('nine zeros are not a BSN', () => {
+  assert.equal(guard.containsBsn('000000000'), false,
+    'the modulo-11 sum is zero for nine zeros, but no BSN is 000000000');
+});
+
+test('a BSN adjacent to other digits is not claimed to be detected', () => {
+  // Documented limitation rather than a silent guess: a 19-digit run is ambiguous, and
+  // guessing at it rejected legitimate requests. Runs of exactly nine are the rule.
+  assert.equal(guard.containsBsn('1234567890123456789'), false);
+});
+
+test('a BSN inside prose is still detected', () => {
+  assert.equal(guard.containsBsn('mijn burgerservicenummer is 111 222 333, graag noteren'), true);
 });

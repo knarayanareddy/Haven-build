@@ -88,6 +88,9 @@ export async function transpileModuleFile(absoluteOrUrlPath, options = {}) {
       target: ts.ScriptTarget.ES2022,
       esModuleInterop: true,
       removeComments: false,
+      // Components are .tsx; without this the JSX is copied through and Node rejects it.
+      // react-jsx matches tsconfig.base.json, so the emit imports react/jsx-runtime.
+      jsx: ts.JsxEmit.ReactJSX,
     },
     fileName: url.pathname.split('/').pop(),
   });

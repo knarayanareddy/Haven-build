@@ -51,6 +51,9 @@ BEGIN
     'browser_shield_events', (SELECT COALESCE(jsonb_agg(to_jsonb(be)), '[]'::jsonb) FROM browser_shield_events be WHERE be.elder_id = p_elder_id AND be.deleted_at IS NULL),
     'call_reputation_lookups', (SELECT COALESCE(jsonb_agg(to_jsonb(crl)), '[]'::jsonb) FROM call_reputation_lookups crl WHERE crl.elder_id = p_elder_id),
     'location_events', (SELECT COALESCE(jsonb_agg(to_jsonb(le)), '[]'::jsonb) FROM location_events le WHERE le.elder_id = p_elder_id AND le.deleted_at IS NULL),
+    -- Retention partitions of location_events hold the same precise coordinates moved out of
+    -- the live table; without them the export silently omits the older half of the history.
+    'location_events_partitioned', (SELECT COALESCE(jsonb_agg(to_jsonb(lep)), '[]'::jsonb) FROM location_events_partitioned lep WHERE lep.elder_id = p_elder_id),
     'driving_events', (SELECT COALESCE(jsonb_agg(to_jsonb(de)), '[]'::jsonb) FROM driving_events de WHERE de.elder_id = p_elder_id AND de.deleted_at IS NULL),
     'wandering_events', (SELECT COALESCE(jsonb_agg(to_jsonb(we)), '[]'::jsonb) FROM wandering_events we WHERE we.elder_id = p_elder_id AND we.deleted_at IS NULL),
     'fall_events', (SELECT COALESCE(jsonb_agg(to_jsonb(fe)), '[]'::jsonb) FROM fall_events fe WHERE fe.elder_id = p_elder_id),
@@ -97,6 +100,9 @@ BEGIN
     'notification_preferences', (SELECT COALESCE(jsonb_agg(to_jsonb(npr)), '[]'::jsonb) FROM notification_preferences npr WHERE npr.profile_id = p_elder_id),
     'push_tokens', (SELECT COALESCE(jsonb_agg(to_jsonb(pt)), '[]'::jsonb) FROM push_tokens pt WHERE pt.profile_id = p_elder_id),
     'fhir_import_jobs', (SELECT COALESCE(jsonb_agg(to_jsonb(fj)), '[]'::jsonb) FROM fhir_import_jobs fj WHERE fj.elder_id = p_elder_id AND fj.deleted_at IS NULL),
+    -- Vendor resources the older adult imported but a clinician has not yet approved. The raw
+    -- resource is their data whether or not it became a medication, so it belongs in the export.
+    'fhir_medication_staging', (SELECT COALESCE(jsonb_agg(to_jsonb(fms)), '[]'::jsonb) FROM fhir_medication_staging fms WHERE fms.elder_id = p_elder_id),
     'health_record_imports', (SELECT COALESCE(jsonb_agg(to_jsonb(hri)), '[]'::jsonb) FROM health_record_imports hri WHERE hri.elder_id = p_elder_id),
     'external_care_sync_jobs', (SELECT COALESCE(jsonb_agg(to_jsonb(ecs)), '[]'::jsonb) FROM external_care_sync_jobs ecs WHERE ecs.elder_id = p_elder_id AND ecs.deleted_at IS NULL),
     'app_events', (SELECT COALESCE(jsonb_agg(to_jsonb(ae)), '[]'::jsonb) FROM app_events ae WHERE ae.elder_id = p_elder_id OR ae.profile_id = p_elder_id),

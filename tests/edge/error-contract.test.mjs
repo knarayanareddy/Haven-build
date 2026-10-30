@@ -140,3 +140,39 @@ test('numeric "429" text inside a message does not change a successful response'
   assert.equal(/finalStatus/.test(jsonFn), false, 'json() must not compute a second status');
   assert.equal(/includes\(\s*["']429["']\s*\)/.test(jsonFn), false, 'json() must not sniff the body for "429"');
 });
+
+// ─── Status announced in the message ─────────────────────────────────────────
+//
+// Handlers across the repository throw `new Error("409 Conflict: …")` and
+// `new Error("400: Malformed …")`. The mapper used to recognise 401/403/404/422/429 only,
+// so a malformed request surfaced as a 500 and a lethal medication contraindication
+// surfaced as a 500 instead of a 409 — the client could not tell "you sent something
+// wrong" from "we broke", and the safety alert looked like an outage.
+
+test('a 400 announced in the message is a 400, not a 500', () => {
+  assert.equal(toHttpError(new Error('400: Malformed FHIR resources array')).status, 400);
+});
+
+test('a 409 announced in the message is a 409', () => {
+  const mapped = toHttpError(new Error('409 Conflict: Lethal contraindication detected'));
+  assert.equal(mapped.status, 409);
+  assert.equal(mapped.code, 'CONFLICT');
+});
+
+test('every status this API uses maps from its message prefix', () => {
+  const cases = [
+    ['400: bad', 400], ['401 Nope', 401], ['403 Forbidden', 403], ['404: gone', 404],
+    ['409 Conflict', 409], ['413 Too Large', 413], ['422 Unprocessable', 422],
+    ['429 Too Many Requests', 429], ['503 Unavailable', 503],
+  ];
+  for (const [message, expected] of cases) {
+    assert.equal(toHttpError(new Error(message)).status, expected, `${message} must be ${expected}`);
+  }
+});
+
+test('a status number that is not an API status is not invented', () => {
+  // "3 items failed" or "502 upstream" must not be read as the caller's status when it is
+  // not one this API uses; 502 stays a server error rather than becoming a client one.
+  assert.equal(toHttpError(new Error('234 things went wrong')).status, 500);
+  assert.equal(toHttpError(new Error('999: nonsense')).status, 500);
+});

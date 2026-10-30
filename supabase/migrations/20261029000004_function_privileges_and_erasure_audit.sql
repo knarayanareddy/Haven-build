@@ -61,7 +61,15 @@ BEGIN
   UPDATE public.voice_interactions SET transcript_nl = NULL, transcript_en = NULL, response_text_nl = '[ERASED]', response_text_en = '[ERASED]' WHERE elder_id = p_target_id;
   UPDATE public.vital_signs SET context_notes_nl = NULL WHERE elder_id = p_target_id;
   UPDATE public.documents SET label_nl = '[ERASED]', label_en = '[ERASED]', summary_nl = NULL, summary_en = NULL WHERE elder_id = p_target_id;
-  UPDATE public.deletion_requests SET status = 'completed', completed_at = now() WHERE elder_id = p_target_id;
+  -- Free text that describes the person's day, care and incidents. These four tables were
+  -- the only narrative columns in the schema left untouched by the purge: handover notes and
+  -- life stories were redacted, while "she seemed confused after breakfast" survived next to
+  -- the erased profile. Structured clinical facts (a medication name and dose, a fall's
+  -- detection source and confidence) stay: they are the record the care team must keep.
+  UPDATE public.carer_visit_logs SET activities_nl = '[ERASED]', observations_nl = '[ERASED]', concerns_nl = '[ERASED]' WHERE elder_id = p_target_id;
+  UPDATE public.incidents SET description_nl = '[ERASED]', resolution_notes_nl = '[ERASED]', external_authority_nl = NULL WHERE elder_id = p_target_id;
+  UPDATE public.fall_events SET resolution_notes = '[ERASED]' WHERE elder_id = p_target_id;
+  UPDATE public.medications SET instructions_nl = NULL, instructions_en = NULL WHERE elder_id = p_target_id;
 
   -- Accountability receipt. Written in the same transaction as the redaction and
   -- written exactly once (the early RETURN above makes the purge idempotent).
@@ -75,6 +83,11 @@ BEGIN
     p_target_id,
     '{"reason": "Right to Erasure fulfillment", "idempotent_closure": true, "compliance": "GDPR Art. 17", "schema_version": "20261029000004"}'::jsonb
   );
+
+  -- Mark the request completed only after the receipt exists. Previously the status was
+  -- flipped to 'completed' first, so a failure in the audit insert left a request that
+  -- claimed to be fulfilled and no evidence that anything had been erased.
+  UPDATE public.deletion_requests SET status = 'completed', completed_at = now() WHERE elder_id = p_target_id;
 END;
 $$;
 

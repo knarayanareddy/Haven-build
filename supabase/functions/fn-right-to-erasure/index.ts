@@ -60,6 +60,8 @@ const SOFT_DELETE_TABLES = [
   "daily_checkin_schedule",
   "medication_ocr_reviews",
   "medication_interaction_alerts",
+  "fhir_medication_staging",     // raw vendor resources; cascade never fires on a soft purge
+  "location_events_partitioned", // retention partitions of location_events
   "voice_profiles",              // has family_member_id — handled specially
   "elder_voice_preferences",
   "video_call_sessions",
