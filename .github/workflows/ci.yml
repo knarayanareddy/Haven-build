@@ -191,10 +191,27 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      - name: Export the local stack credentials
+        if: success()
+        run: |
+          # The live tests need SUPABASE_URL / anon key and signed-in JWTs. Derive them
+          # from the stack that is already running instead of relying on supabase
+          # status' key names, which differ between CLI releases.
+          supabase status -o env > /tmp/supabase-env.txt
+          set -a
+          . /tmp/supabase-env.txt
+          set +a
+          {
+            echo "SUPABASE_URL=${API_URL}"
+            echo "SUPABASE_ANON_KEY=${ANON_KEY:-$PUBLISHABLE_KEY}"
+          } >> "$GITHUB_ENV"
+
       - name: Live RLS integration tests
         run: |
           set -o pipefail
-          corepack pnpm run test:supabase:local 2>&1 | tee /tmp/live-rls.log
+          # The stack is already up and every migration is applied; the "local" script
+          # would start the excluded containers and reset the database again.
+          HAVEN_SKIP_LOCAL_START=1 corepack pnpm run test:supabase:local 2>&1 | tee /tmp/live-rls.log
 
       # Same reason as the stack diagnostics: the step log sits behind a signed blob
       # URL, so the reason goes into a check annotation the API can read.

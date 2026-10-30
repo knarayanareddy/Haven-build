@@ -19,9 +19,22 @@ fi
 
 if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_ANON_KEY:-}" ]; then
   status_env="$(supabase status -o env 2>/dev/null || true)"
-  export SUPABASE_URL="${SUPABASE_URL:-$(printf '%s\n' "$status_env" | sed -n 's/^API_URL="\{0,1\}\([^" ]*\)"\{0,1\}$/\1/p')}"
-  export SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY:-$(printf '%s\n' "$status_env" | sed -n 's/^ANON_KEY="\{0,1\}\([^" ]*\)"\{0,1\}$/\1/p')}"
-  jwt_secret="$(printf '%s\n' "$status_env" | sed -n 's/^JWT_SECRET="\{0,1\}\([^" ]*\)"\{0,1\}$/\1/p')"
+  # `supabase status -o env` renamed some keys between CLI releases
+  # (ANON_KEY -> PUBLISHABLE_KEY, SERVICE_ROLE_KEY -> SECRET_KEY), so accept both
+  # rather than depending on whichever version the runner installed.
+  status_value() {
+    local key="$1"
+    printf '%s\n' "$status_env" | sed -n "s/^${key}=\"\\{0,1\\}\\([^\" ]*\\)\"\\{0,1\\}\$/\\1/p"
+  }
+  export SUPABASE_URL="${SUPABASE_URL:-$(status_value API_URL)}"
+  export SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY:-$(status_value ANON_KEY)}"
+  if [ -z "${SUPABASE_ANON_KEY:-}" ]; then
+    export SUPABASE_ANON_KEY="$(status_value PUBLISHABLE_KEY)"
+  fi
+  jwt_secret="$(status_value JWT_SECRET)"
+  if [ -z "$jwt_secret" ]; then
+    jwt_secret="$(status_value SERVICE_ROLE_KEY | cut -d. -f2 | base64 -d 2>/dev/null | sed -n 's/.*"secret":"\([^"]*\)".*/\1/p')"
+  fi
 else
   jwt_secret=""
 fi
