@@ -386,7 +386,7 @@ export async function call(handler, req) {
  *   'apps/elder/src/services/sqliteOfflineQueue.ts'
  * @returns {Promise<string>} importable path of the transpiled module
  */
-export async function loadAppModule(relativePath) {
+export async function loadAppModule(relativePath, { stubs = {} } = {}) {
   installGlobalShim();
   const outDir = await linkSharedModules();
   // The rewritten specifier is relative to the transpile directory, so the shim has to
@@ -397,12 +397,50 @@ export async function loadAppModule(relativePath) {
   );
   const url = new URL(`../../../${relativePath}`, import.meta.url);
   const path = await transpileModuleFile(url, { outDir });
-  const rewritten = readFileSync(path, 'utf8')
+
+  // Stubs are applied to the *original* specifiers, before relative imports are
+  // normalised — otherwise `./supabase-server` has already become `./supabase-server.mjs`
+  // and the stub would never match.
+  let rewritten = readFileSync(path, 'utf8');
+  const stubbed = new Set();
+  let stubIndex = 0;
+  for (const [specifier, stub] of Object.entries(stubs)) {
+    stubIndex += 1;
+    let target;
+    if (typeof stub === 'string') {
+      const name = `stub-${stubIndex}-${specifier.replace(/[^a-z0-9]+/gi, '-')}.mjs`;
+      writeFileSync(join(outDir, name), stub);
+      target = `./${name}`;
+    } else {
+      target = new URL(`../../../${stub.path}`, import.meta.url).href;
+    }
+    // The transpiler has already turned './x' into './x.mjs', so a stub key may be
+    // written either way.
+    const candidates = new Set([
+      specifier,
+      specifier.replace(/\.ts$/, '.mjs'),
+      `${specifier.replace(/\.ts$/, '')}.mjs`,
+      `${specifier.replace(/\.ts$/, '')}.ts`,
+    ]);
+    for (const candidate of candidates) {
+      for (const quote of ["'", '"']) {
+        rewritten = rewritten.split(`from ${quote}${candidate}${quote}`).join(`from '${target}'`);
+      }
+    }
+    // A stubbed relative module must not also be transpiled into the directory.
+    stubbed.add(specifier.replace(/^\.\//, '').replace(/\.ts$/, ''));
+  }
+
+  rewritten = rewritten
     .replace(/from\s+['"]expo-sqlite['"]/g, "from './expo-sqlite-node.mjs'")
-    .replace(/from\s+['"]\.\/([A-Za-z0-9_-]+)(?:\.ts)?['"]/g, "from './$1.mjs'");
+    .replace(/from\s+['"]\.\/([A-Za-z0-9_-]+)(?:\.ts)?['"]/g, (match, name) => (
+      stubbed.has(name) ? match.replace(/expo-sqlite/, 'expo-sqlite') : `from './${name}.mjs'`
+    ));
   writeFileSync(path, rewritten);
-  // Sibling modules the app module imports (types-only today, but keep it general).
+
+  // Sibling modules the app module imports (types-only modules compile to nothing).
   for (const match of [...rewritten.matchAll(/from\s+['"]\.\/([A-Za-z0-9_-]+)\.mjs['"]/g)]) {
+    if (stubbed.has(match[1])) continue;
     const sibling = new URL(`../../../${relativePath.replace(/[^/]+$/, '')}${match[1]}.ts`, import.meta.url);
     try {
       const siblingPath = await transpileModuleFile(sibling, { outDir });
@@ -410,9 +448,10 @@ export async function loadAppModule(relativePath) {
         .replace(/from\s+['"]expo-sqlite['"]/g, "from './expo-sqlite-node.mjs'");
       writeFileSync(siblingPath, siblingSource);
     } catch {
-      // A type-only sibling compiles to nothing importable; ignore.
+      // Type-only sibling: nothing to import at runtime.
     }
   }
+
   const loaded = await import(`${path}?app=${(shimCounter += 1)}`);
   // Returned as a plain copy because a module namespace object is frozen, and the test
   // needs the same sqlite shim instance the module is using (to age a lease, say).
