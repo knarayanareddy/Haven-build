@@ -6,13 +6,19 @@ import type { Locale } from '@haven/contracts/src/haven';
 import { useAuth } from '../auth/AuthProvider';
 import { HavenClient } from '../services/havenClient';
 import { startVoiceRecording, type ActiveVoiceRecording } from '../services/voiceRecorder';
+import { bindRecordingMeter } from '../services/voiceMeter';
 import { decideEscalation, decideEscalationForError, type Escalation } from '../services/safetyEscalation';
 
 export interface FloatingVoiceButtonProps {
   locale: Locale;
   screenId: string;
   voiceFallback: string;
-  audioVolumePct?: number; // Raw incoming un-throttled audio meter level
+  /**
+   * An externally driven meter, 0..100. The button measures its own recording (below), so
+   * this is only for a parent that owns the audio session — the macOS toolbar, or a future
+   * shared recorder. When it is present it wins.
+   */
+  audioVolumePct?: number;
   hapticTrigger: () => void;
   onRenderFrame?: () => void; // Telemetry helper
   navigation?: any;
@@ -23,11 +29,32 @@ function FloatingVoiceButtonComponent({ locale, screenId, voiceFallback, audioVo
   const [isListening, setListening] = useState(false);
   const [macosVoiceState, setMacosState] = useState<'idle' | 'listening' | 'processing'>('idle');
   const [isProcessing, setProcessing] = useState(false);
+  const [liveMeterPct, setLiveMeterPct] = useState(0);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const lastRenderTime = useRef(Date.now());
   const lastHapticStep = useRef<number>(0);
   const recordingRef = useRef<ActiveVoiceRecording | null>(null);
+  const unsubscribeMeterRef = useRef<(() => void) | null>(null);
   const { session } = useAuth();
+
+  // The parent wins when it drives a meter; otherwise the level comes from this recording.
+  const volumePct = audioVolumePct > 0 ? audioVolumePct : liveMeterPct;
+
+  const detachMeter = useCallback(() => {
+    unsubscribeMeterRef.current?.();
+    unsubscribeMeterRef.current = null;
+    setLiveMeterPct(0);
+  }, []);
+
+  const attachMeter = useCallback((recording: ActiveVoiceRecording) => {
+    detachMeter();
+    // Ten samples a second arrive; only a change of ten-percent bucket reaches setState, so
+    // the ring moves without the JS thread rendering on every sample.
+    unsubscribeMeterRef.current = bindRecordingMeter(recording, setLiveMeterPct);
+  }, [detachMeter]);
+
+  // A button unmounted mid-recording must stop polling the recorder.
+  useEffect(() => () => { unsubscribeMeterRef.current?.(); }, []);
   
   if (onRenderFrame) onRenderFrame();
   lastRenderTime.current = Date.now();
@@ -90,6 +117,7 @@ function FloatingVoiceButtonComponent({ locale, screenId, voiceFallback, audioVo
       present(decideEscalationForError(error, locale));
     } finally {
       recordingRef.current = null;
+      detachMeter();
       setListening(false);
       setProcessing(false);
       setMacosState('idle');
@@ -110,6 +138,7 @@ function FloatingVoiceButtonComponent({ locale, screenId, voiceFallback, audioVo
         if (!session) throw new Error(locale === 'nl-NL' ? 'Log eerst in om spraak te gebruiken.' : 'Please sign in before using voice.');
         const recording = await startVoiceRecording();
         recordingRef.current = recording;
+        attachMeter(recording);
         setListening(true);
         setMacosState('listening');
         startPulse();
@@ -119,21 +148,22 @@ function FloatingVoiceButtonComponent({ locale, screenId, voiceFallback, audioVo
       } catch (error) {
         Alert.alert('HAVEN', String((error as Error).message ?? error));
         recordingRef.current = null;
+        detachMeter();
         setListening(false);
         setMacosState('idle');
         stopPulse();
       }
     }
-  }, [hapticTrigger, isListening, locale, session, startPulse, stopPulse, submitRecording]);
+  }, [attachMeter, detachMeter, hapticTrigger, isListening, locale, session, startPulse, stopPulse, submitRecording]);
 
   // P3 #2: Refined haptic touch feedback step scales matching exact visual volume visualizer rings
   useEffect(() => {
-    if (!isListening || audioVolumePct === 0) {
+    if (!isListening || volumePct === 0) {
       lastHapticStep.current = 0;
       return;
     }
 
-    const currentStep = audioVolumePct > 75 ? 3 : audioVolumePct > 50 ? 2 : audioVolumePct > 25 ? 1 : 0;
+    const currentStep = volumePct > 75 ? 3 : volumePct > 50 ? 2 : volumePct > 25 ? 1 : 0;
     if (currentStep !== lastHapticStep.current && currentStep > 0) {
       lastHapticStep.current = currentStep;
       if (currentStep === 3) {
@@ -144,7 +174,7 @@ function FloatingVoiceButtonComponent({ locale, screenId, voiceFallback, audioVo
         try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle?.Light ?? 'light'); } catch (_) {}
       }
     }
-  }, [isListening, audioVolumePct]);
+  }, [isListening, volumePct]);
 
   // CONFIG 4: Global keyboard shortcuts for macOS (Cmd+Shift+V -> activate voice input, Escape -> dismiss, Cmd+1/2/3 -> main navigation tabs)
   useEffect(() => {
@@ -207,9 +237,9 @@ function FloatingVoiceButtonComponent({ locale, screenId, voiceFallback, audioVo
     : (locale === 'nl-NL' ? 'Tik eenmaal om 60 seconden te spreken. Uw stem wordt automatisch omgezet naar tekst.' : 'Tap once to speak for 60 seconds. Voice is converted to text automatically.');
 
   // P3 #2: Visual visualizer properties matching exact haptic step scales
-  const ringScale = 1 + (audioVolumePct / 100) * 0.6;
-  const ringOpacity = isListening && audioVolumePct > 0 ? 0.2 + (audioVolumePct / 100) * 0.6 : 0;
-  const ringColor = audioVolumePct > 75 ? '#1A2B4C' : audioVolumePct > 50 ? colors.sage : colors.sagePale;
+  const ringScale = 1 + (volumePct / 100) * 0.6;
+  const ringOpacity = isListening && volumePct > 0 ? 0.2 + (volumePct / 100) * 0.6 : 0;
+  const ringColor = volumePct > 75 ? '#1A2B4C' : volumePct > 50 ? colors.sage : colors.sagePale;
 
   return (
     <View style={{ position: 'absolute', left: 18, bottom: 90, alignItems: 'center' }}>
@@ -224,7 +254,7 @@ function FloatingVoiceButtonComponent({ locale, screenId, voiceFallback, audioVo
             <Animated.View style={{ position: 'absolute', top: -6, left: -6, right: -6, bottom: -6, borderRadius: 42, backgroundColor: colors.sage, opacity: haloOpacity }} />
             <View
               accessibilityRole="progressbar"
-              accessibilityValue={{ min: 0, max: 100, now: audioVolumePct }}
+              accessibilityValue={{ min: 0, max: 100, now: volumePct }}
               style={{
                 position: 'absolute',
                 top: -12, left: -12, right: -12, bottom: -12,

@@ -169,8 +169,15 @@ test('the volume visualiser maps meter level to haptic step and ring scale', () 
   }
 
   assert.ok(fab.hasProp('accessibilityRole', 'progressbar'), 'the ring must expose a progressbar role');
-  assert.ok(fab.props.some((prop) => prop.name === 'accessibilityValue' && (prop.expression ?? '').includes('audioVolumePct')),
-    'the ring must report the live volume as its value');
+  // The ring and the screen reader must be driven by the same level. Pinning the identifier
+  // (`audioVolumePct`, since the button also measures its own recording) would make this a
+  // rename alarm rather than an accessibility check, so the source of the scale is read out
+  // of the ring's own scaling expression and then required on the value.
+  const scale = fab.declaration('ringScale');
+  const level = /([A-Za-z_$][\w$]*)\s*\/\s*100/.exec(scale?.initializer ?? '')?.[1] ?? null;
+  assert.ok(level, `the ring must be scaled by a meter level, got: ${scale?.initializer ?? 'nothing'}`);
+  assert.ok(fab.props.some((prop) => prop.name === 'accessibilityValue' && (prop.expression ?? '').includes(level)),
+    `the ring must report the level it draws (${level}) as its value`);
   assert.ok(fab.objects.some((object) => object.text.includes('scale') && object.text.includes('ringScale')),
     'the ring must scale with the meter');
 

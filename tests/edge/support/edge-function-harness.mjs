@@ -17,8 +17,9 @@
 // `fn-fall-escalation/index.ts`, the assertions move with the code; a text match would
 // not.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { linkSharedModules, transpileModuleFile } from './shared-loader.mjs';
 
 const SHARED = new URL('../../../supabase/functions/_shared/', import.meta.url);
@@ -386,6 +387,27 @@ export async function call(handler, req) {
  *   'apps/elder/src/services/sqliteOfflineQueue.ts'
  * @returns {Promise<string>} importable path of the transpiled module
  */
+// A relative import specifier as the transpiler leaves it: './x', './x.mjs', '../a/b'.
+const relativeSpecifier = /from\s+['"](\.[^'"]*)['"]/g;
+
+/**
+ * Resolves a relative specifier against `from` (the original source file) to the .ts/.tsx
+ * file it means. Returns null when the specifier is already flattened or names a stub.
+ */
+function resolveAppModule(from, specifier) {
+  if (specifier.endsWith('.mjs')) return null; // already a stub or already flattened
+  const base = new URL(specifier, from);
+  for (const suffix of ['', '.ts', '.tsx', '/index.ts', '/index.tsx']) {
+    const candidate = new URL(`${base.href}${suffix}`);
+    try {
+      if (statSync(fileURLToPath(candidate)).isFile()) return candidate;
+    } catch {
+      // try the next suffix
+    }
+  }
+  return null;
+}
+
 export async function loadAppModule(relativePath, { stubs = {} } = {}) {
   installGlobalShim();
   const outDir = await linkSharedModules();
@@ -431,25 +453,42 @@ export async function loadAppModule(relativePath, { stubs = {} } = {}) {
     stubbed.add(specifier.replace(/^\.\//, '').replace(/\.ts$/, ''));
   }
 
-  rewritten = rewritten
+  // Modules the app module imports from elsewhere in the app ('./sibling', or
+  // '../services/x' as the button imports its recorder). Node resolves a relative specifier
+  // against the transpile directory, so everything outside it is copied in and the import
+  // flattened to './<basename>.mjs'. `url` is the original source, so specifiers resolve
+  // against the real tree; a specifier that resolves to nothing is left alone (it may name a
+  // package subpath) rather than guessed at.
+  const copied = new Map();
+  const queue = [];
+
+  const normalise = (fromUrl, text, depth) => text
     .replace(/from\s+['"]expo-sqlite['"]/g, "from './expo-sqlite-node.mjs'")
-    .replace(/from\s+['"]\.\/([A-Za-z0-9_-]+)(?:\.ts)?['"]/g, (match, name) => (
-      stubbed.has(name) ? match.replace(/expo-sqlite/, 'expo-sqlite') : `from './${name}.mjs'`
-    ));
+    .replace(relativeSpecifier, (match, name) => {
+      // Already flattened (a stub), or written by hand with an extension.
+      if (name.endsWith('.mjs') || stubbed.has(name)) return match;
+      const base = name.replace(/\.tsx?$/, '');
+      const basename = base.split('/').pop();
+      const target = resolveAppModule(fromUrl, base);
+      if (!target) return match; // a type-only sibling, or not a file at all
+      const seen = copied.get(basename);
+      if (seen && seen.href !== target.href) {
+        throw new Error(
+          `loadAppModule: two different modules both named ${basename}.mjs (${seen.href} and ${target.href})`,
+        );
+      }
+      copied.set(basename, target);
+      if (!seen && depth < 8) queue.push({ source: target, depth: depth + 1 });
+      return `from './${basename}.mjs'`;
+    });
+
+  rewritten = normalise(url, rewritten, 0);
   writeFileSync(path, rewritten);
 
-  // Sibling modules the app module imports (types-only modules compile to nothing).
-  for (const match of [...rewritten.matchAll(/from\s+['"]\.\/([A-Za-z0-9_-]+)\.mjs['"]/g)]) {
-    if (stubbed.has(match[1])) continue;
-    const sibling = new URL(`../../../${relativePath.replace(/[^/]+$/, '')}${match[1]}.ts`, import.meta.url);
-    try {
-      const siblingPath = await transpileModuleFile(sibling, { outDir });
-      const siblingSource = readFileSync(siblingPath, 'utf8')
-        .replace(/from\s+['"]expo-sqlite['"]/g, "from './expo-sqlite-node.mjs'");
-      writeFileSync(siblingPath, siblingSource);
-    } catch {
-      // Type-only sibling: nothing to import at runtime.
-    }
+  while (queue.length > 0) {
+    const { source, depth } = queue.shift();
+    const emitted = await transpileModuleFile(source, { outDir });
+    writeFileSync(emitted, normalise(source, readFileSync(emitted, 'utf8'), depth));
   }
 
   const loaded = await import(`${path}?app=${(shimCounter += 1)}`);
