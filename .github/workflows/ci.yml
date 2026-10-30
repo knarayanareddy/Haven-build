@@ -137,8 +137,10 @@ jobs:
       # health check, and nothing here uses them.
       - name: Start the local Supabase stack
         run: |
+          set -o pipefail
           supabase start \
-            -x studio,imgproxy,logflare,vector,supavisor,edge-runtime,realtime,postgres-meta
+            -x studio,imgproxy,logflare,vector,supavisor,edge-runtime,realtime,postgres-meta \
+            2>&1 | tee /tmp/supabase-start.log
 
       - name: Apply every migration from scratch
         run: supabase db reset --debug
@@ -167,9 +169,15 @@ jobs:
           # The step log and the artifact both live behind a signed blob URL, which
           # makes a red run hard to read from a restricted network. A check-run
           # annotation is plain API, so put the reason there too.
-          reason="$(grep -iE 'error|fail|cannot|no space|denied|timeout|unhealthy' /tmp/supabase-diagnostics.log \
-            | grep -v '^::' | head -6 | sed 's/%/%25/g; s/\r/%0D/g' | paste -sd ' ' - | cut -c1-900)"
-          echo "::error title=Supabase stack did not start::${reason:-no diagnostic line matched; see the step log}"
+          # The CLI's own message is the one that matters; container state is the
+          # context. Both go to the annotation, truncated.
+          reason="$(
+            {
+              [ -s /tmp/supabase-start.log ] && tail -c 700 /tmp/supabase-start.log
+              grep -iE 'error|fail|cannot|no space|denied|timeout|unhealthy' /tmp/supabase-diagnostics.log 2>/dev/null | head -4
+            } | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g' | cut -c1-1200
+          )"
+          echo "::error title=Supabase stack did not start::${reason:-empty log; the CLI exited without output}"
 
       - name: Upload the diagnostics
         if: failure()
