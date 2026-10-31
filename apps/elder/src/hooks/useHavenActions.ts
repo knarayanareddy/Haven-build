@@ -181,26 +181,31 @@ export function useHavenActions(screenId: string) {
       // In a full implementation, this would fetch and display recent companion memories
       return;
     }
-    if (actionId.startsWith('CONFIRM_MED:')) {
-      const medId = actionId.split(':')[1];
-      enqueueOfflineAction('CONFIRM_MEDICATION', { elder_id: elderId, medication_id: medId, status: 'medication_taken' });
-      Alert.alert('HAVEN', t('actions.confirm_med.alert'));
+    // ── Answers to a prompt HAVEN is waiting on ─────────────────────────────
+    //
+    // These four used to go elsewhere, and both destinations were wrong:
+    //
+    //   • `CONFIRM_MED:` queued a medication confirmation that the dispatcher sent to the voice
+    //     pipeline, which resolves no pending confirmation — so the row stayed open and the
+    //     escalation sweep kept running against an elder who had already answered;
+    //   • `FALL_OK:`/`FALL_HELP:` queued FALL_RESPONSE, which posts to fn-fall-event and inserts
+    //     a **new** fall event. Telling HAVEN "I am fine" produced another fall alert.
+    //
+    // Both now answer the confirmation they were asked about, through the endpoint that owns
+    // that row (`fn-pending-confirmation-respond`), which resolves the medication record or the
+    // fall event as a side effect.
+    if (actionId.startsWith('CONFIRM_MED:') || actionId.startsWith('DENY_MED:')) {
+      const [prefix, confirmationId] = actionId.split(':');
+      const taken = prefix === 'CONFIRM_MED';
+      enqueueOfflineAction('CONFIRMATION_RESPOND', { elder_id: elderId, confirmation_id: confirmationId, resolution: taken });
+      Alert.alert('HAVEN', taken ? t('actions.confirm_med.alert') : t('actions.deny_med.alert'));
       return;
     }
-    if (actionId.startsWith('DENY_MED:')) {
-      const medId = actionId.split(':')[1];
-      enqueueOfflineAction('DENY_MEDICATION', { elder_id: elderId, medication_id: medId });
-      Alert.alert('HAVEN', t('actions.deny_med.alert'));
-      return;
-    }
-    if (actionId === 'FALL_OK:' || actionId.startsWith('FALL_OK:')) {
-      enqueueOfflineAction('FALL_RESPONSE', { elder_id: elderId, detection_source: 'elder', status: 'ok', fall_response: 'self_resolved' });
-      Alert.alert('HAVEN', t('actions.fall_ok.alert'));
-      return;
-    }
-    if (actionId === 'FALL_HELP:' || actionId.startsWith('FALL_HELP:')) {
-      enqueueOfflineAction('FALL_RESPONSE', { elder_id: elderId, detection_source: 'elder', status: 'help_needed', fall_response: 'escalated' });
-      Alert.alert('HAVEN', t('actions.fall_help.alert'));
+    if (actionId.startsWith('FALL_OK:') || actionId.startsWith('FALL_HELP:')) {
+      const [prefix, confirmationId] = actionId.split(':');
+      const isFine = prefix === 'FALL_OK';
+      enqueueOfflineAction('CONFIRMATION_RESPOND', { elder_id: elderId, confirmation_id: confirmationId, resolution: isFine });
+      Alert.alert('HAVEN', isFine ? t('actions.fall_ok.alert') : t('actions.fall_help.alert'));
       return;
     }
     if (actionId.startsWith('TAKE:')) {
@@ -212,7 +217,7 @@ export function useHavenActions(screenId: string) {
       }
       try {
         if (!elderId) throw new Error('Missing elder profile for signed-in session');
-        await client.voice({ elder_id: elderId, screen_id: 'PILLS', transcript_text: 'I took it', locale: 'en-GB' });
+        await client.voice({ elder_id: elderId, screen_id: 'PILLS', transcript_text: 'I took it', medication_reminder_id: medicationId, locale: 'en-GB' });
         Alert.alert('HAVEN', t('actions.take_success.alert'));
       } catch (error) {
         if (classifyNetworkError(error) === 'offline') {
@@ -225,8 +230,27 @@ export function useHavenActions(screenId: string) {
       return;
     }
     if (actionId.startsWith('SNOOZE:')) {
-      enqueueOfflineAction('SNOOZE_MEDICATION', { elder_id: elderId, medication_id: actionId.split(':')[1], delay_minutes: 15 });
-      Alert.alert('HAVEN', t('actions.snooze.alert'));
+      // Snooze used to be queued unconditionally and delivered as the sentence "I did not take
+      // it", which the pipeline classifies on "took" — pressing snooze therefore asked the elder
+      // to confirm they *had* taken it. The reminder id now travels in its own field.
+      const reminderId = actionId.split(':')[1];
+      if (!client) {
+        enqueueOfflineAction('SNOOZE_MEDICATION', { elder_id: elderId, medication_id: reminderId, delay_minutes: 15 });
+        Alert.alert('HAVEN', t('actions.snooze.alert'));
+        return;
+      }
+      try {
+        if (!elderId) throw new Error('Missing elder profile for signed-in session');
+        await client.voice({ elder_id: elderId, screen_id: 'PILLS', snooze_reminder_id: reminderId, snooze_minutes: 15, locale: 'en-GB' });
+        Alert.alert('HAVEN', t('actions.snooze.alert'));
+      } catch (error) {
+        if (classifyNetworkError(error) === 'offline') {
+          enqueueOfflineAction('SNOOZE_MEDICATION', { elder_id: elderId, medication_id: reminderId, delay_minutes: 15 });
+          Alert.alert('HAVEN', t('actions.snooze.alert'));
+          return;
+        }
+        Alert.alert(t('haven_explanation_title'), translateElderError(error));
+      }
       return;
     }
     if (!client) {

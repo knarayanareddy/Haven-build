@@ -110,6 +110,20 @@ export interface VisitLogRow {
   note: string;
 }
 
+/**
+ * A question HAVEN is waiting for an answer to, and whose answer changes what happens next.
+ *
+ * `fn-fall-escalation` calls the family when a `fall_response` prompt goes unanswered; the
+ * medication reminder escalates on the same terms. The cards that ask these questions existed
+ * but were never rendered, so the only thing an elder could do with a detected fall was wait.
+ */
+export interface PendingConfirmation {
+  id: string;
+  kind: 'fall_response' | 'medication_taken';
+  medicationName?: string;
+  expiresAt?: string;
+}
+
 export interface ScreenContext {
   locale: Locale;
   now: Date;
@@ -122,6 +136,8 @@ export interface ScreenContext {
   buurt: BuurtRow;
   visits: VisitLogRow[];
   onPrimaryAction: (id: string) => void;
+  /** Set when HAVEN needs an answer; rendered above whatever screen is open. */
+  pendingConfirmation?: PendingConfirmation | null;
   /** Computed by ScreenRenderer from profile.highContrast; screens never assign it. */
   colors?: Palette;
   documents?: Array<{ id: string; label: string }>;
@@ -336,6 +352,8 @@ function renderPills(ctx: ScreenContext) {
         {actionButton(t(locale, 'iHaveTaken'), 'safe', `TAKE:${current.id}`, ctx.onPrimaryAction, `${t(locale, 'iHaveTaken')} ${current.name}`)}
         {actionButton(t(locale, 'notYet'), 'secondary', `SNOOZE:${current.id}`, ctx.onPrimaryAction, `${t(locale, 'notYet')}: ${current.name}`)}
         {actionButton(t(locale, 'tellMeAbout'), 'ghost', 'TELL_PILLS', ctx.onPrimaryAction, t(locale, 'tellMeAbout'))}
+        {/* The scanner existed as an endpoint and a client method with no way to reach it. */}
+        {actionButton(locale === 'nl-NL' ? 'Medicijn scannen' : 'Scan a medicine', 'ghost', 'NAV_MED_SCAN', ctx.onPrimaryAction, locale === 'nl-NL' ? 'Medicijn scannen' : 'Scan a medicine')}
       </View>
       <Text style={{ fontSize: 18, color: colors.graphite, fontWeight: '700', marginTop: 8 }}>{t(locale, 'laterToday')}</Text>
       <View style={{ borderRadius: 22, backgroundColor: colors.paper, borderWidth: 1, borderColor: colors.mist, padding: 12 }}>
@@ -796,7 +814,7 @@ function renderCheckinCard(ctx: ScreenContext, period: 'morning' | 'midday' | 'e
 }
 
 // vNext: medication confirmation card — rendered when pending_confirmation is medication_taken.
-function renderMedicationConfirmCard(ctx: ScreenContext, medicationId: string) {
+function renderMedicationConfirmCard(ctx: ScreenContext, confirmationId: string) {
   const colors = paletteFor(ctx);
   const { actionButton } = primitivesFor(colors);
   const { locale } = ctx;
@@ -810,15 +828,15 @@ function renderMedicationConfirmCard(ctx: ScreenContext, medicationId: string) {
         {locale === 'nl-NL' ? 'Heeft u dit medicijn zojuist ingenomen?' : 'Have you just taken this medication?'}
       </Text>
       <View style={{ gap: 10, marginTop: 10 }}>
-        {actionButton(locale === 'nl-NL' ? '✓ Beoordeel Ja (Ingenomen)' : '✓ YES (Taken)', 'safe', `CONFIRM_MED:${medicationId}`, ctx.onPrimaryAction, locale === 'nl-NL' ? 'Beoordeel Ja' : 'Confirm YES')}
-        {actionButton(locale === 'nl-NL' ? '✕ Beoordeel Nee (Nog Niet)' : '✕ NO (Not Yet)', 'danger', `DENY_MED:${medicationId}`, ctx.onPrimaryAction, locale === 'nl-NL' ? 'Beoordeel Nee' : 'Confirm NO')}
+        {actionButton(locale === 'nl-NL' ? '✓ Beoordeel Ja (Ingenomen)' : '✓ YES (Taken)', 'safe', `CONFIRM_MED:${confirmationId}`, ctx.onPrimaryAction, locale === 'nl-NL' ? 'Beoordeel Ja' : 'Confirm YES')}
+        {actionButton(locale === 'nl-NL' ? '✕ Beoordeel Nee (Nog Niet)' : '✕ NO (Not Yet)', 'danger', `DENY_MED:${confirmationId}`, ctx.onPrimaryAction, locale === 'nl-NL' ? 'Beoordeel Nee' : 'Confirm NO')}
       </View>
     </View>
   );
 }
 
 // vNext: fall response card — rendered when pending_confirmation is fall_response.
-function renderFallResponseCard(ctx: ScreenContext) {
+function renderFallResponseCard(ctx: ScreenContext, confirmationId: string) {
   const colors = paletteFor(ctx);
   const { actionButton } = primitivesFor(colors);
   const { locale } = ctx;
@@ -843,8 +861,8 @@ function renderFallResponseCard(ctx: ScreenContext) {
         {locale === 'nl-NL' ? 'We hebben een val gedetecteerd. Is alles in orde?' : 'We detected a possible fall. Are you alright?'}
       </Text>
       <View style={{ gap: 8, marginTop: 8 }}>
-        {actionButton(locale === 'nl-NL' ? 'Ja, ik ben oke' : 'Yes, I am fine', 'safe',   'FALL_OK:',   ctx.onPrimaryAction, locale === 'nl-NL' ? 'Alles goed' : 'All fine')}
-        {actionButton(locale === 'nl-NL' ? 'Ik heb hulp nodig' : 'I need help', 'danger', 'FALL_HELP:', ctx.onPrimaryAction, locale === 'nl-NL' ? 'Hulp nodig' : 'Need help')}
+        {actionButton(locale === 'nl-NL' ? 'Ja, ik ben oke' : 'Yes, I am fine', 'safe',   `FALL_OK:${confirmationId}`,   ctx.onPrimaryAction, locale === 'nl-NL' ? 'Alles goed' : 'All fine')}
+        {actionButton(locale === 'nl-NL' ? 'Ik heb hulp nodig' : 'I need help', 'danger', `FALL_HELP:${confirmationId}`, ctx.onPrimaryAction, locale === 'nl-NL' ? 'Hulp nodig' : 'Need help')}
       </View>
     </View>
   );
@@ -866,7 +884,18 @@ function renderFor(id: ScreenId, ctx: ScreenContext): React.ReactNode {
     INCOMING_CALL: renderIncomingCall,
     MORE: renderMore,
   };
-  return map[id](ctx);
+  const screen = map[id](ctx);
+
+  // The two questions are urgent enough that they belong on the screen the elder already has
+  // open, not on a screen of their own that nobody navigates to. HOME and TODAY only: PILLS
+  // draws its own medication card, and a fall prompt must not appear under a settings page.
+  const confirmation = ctx.pendingConfirmation;
+  if (!confirmation || (id !== 'HOME' && id !== 'TODAY')) return screen;
+
+  const card = confirmation.kind === 'fall_response'
+    ? renderFallResponseCard(ctx, confirmation.id)
+    : renderMedicationConfirmCard(ctx, confirmation.id);
+  return <>{card}{screen}</>;
 }
 
 // Export the named "for test" helpers used by behaviour tests.

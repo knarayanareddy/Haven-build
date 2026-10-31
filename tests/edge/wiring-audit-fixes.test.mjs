@@ -170,9 +170,11 @@ test('item 3: a queued capture with no endpoint is quarantined, never silently d
     if (served) return null;
     served = true;
     return {
-      idempotencyKey: 'idem-calendar',
-      type: 'SYNC_CALENDAR',
-      payload: {},
+      idempotencyKey: 'idem-incomplete',
+      // A queued confirmation answer whose payload lost the row it answers. The endpoint would
+      // reject it on every attempt, so the drain must quarantine it on the first.
+      type: 'CONFIRMATION_RESPOND',
+      payload: { elder_id: 'profile-elder' },
       createdAt: new Date().toISOString(),
       retryCount: 0,
       status: 'queued',
@@ -185,7 +187,8 @@ test('item 3: a queued capture with no endpoint is quarantined, never silently d
   assert.equal(globalThis.__completed.length, 0, 'an undeliverable capture must not be marked sent');
   assert.equal(globalThis.__failed.length, 0, 'it must not be retried to the ceiling either');
   assert.equal(globalThis.__quarantined.length, 1, 'it leaves the queue exactly once');
-  assert.match(globalThis.__quarantined[0].reason, /SYNC_CALENDAR/, 'the reason names the action type');
+  assert.match(globalThis.__quarantined[0].reason, /CONFIRMATION_RESPOND/, 'the reason names the action type');
+  assert.match(globalThis.__quarantined[0].reason, /confirmation_id/, 'and the field that was missing');
 });
 
 // ─── 2 (family): the dashboard actually subscribes ───────────────────────────

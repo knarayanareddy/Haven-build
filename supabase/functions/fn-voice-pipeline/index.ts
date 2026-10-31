@@ -96,6 +96,52 @@ Deno.serve(asyncWrapper("fn-voice-pipeline", async (req: Request) => {
       const { data: elderProfile } = await dbAdmin.from("profiles").select("locale").eq("id", body.elder_id).maybeSingle();
       const locale = (elderProfile?.locale ?? (body.locale === "nl-NL" ? "nl-NL" : "en-GB")) as "en-GB" | "nl-NL";
       
+      // ─── Snooze: an explicit target, not something to infer from a transcript ───
+      //
+      // The elder's "Snooze" button used to send the sentence "I did not take it", which the
+      // English patterns below match on "took" — so pressing snooze created a *medication
+      // taken* prompt, the opposite of what was asked. The reminder id travels in its own
+      // field and is handled before any classification happens.
+      const snoozeReminderId = typeof body.snooze_reminder_id === "string" ? body.snooze_reminder_id : null;
+      if (snoozeReminderId) {
+        const minutesRaw = Number(body.snooze_minutes);
+        const minutes = Number.isFinite(minutesRaw) && minutesRaw > 0 ? Math.min(Math.round(minutesRaw), 120) : 15;
+        const { data: snoozed } = await db
+          .from("medication_reminders")
+          .select("id, status")
+          .eq("elder_id", body.elder_id)
+          .eq("id", snoozeReminderId)
+          .maybeSingle();
+        if (!snoozed) {
+          throw Object.assign(new Error("404: No such medication reminder for this elder"), { status: 404, code: "NOT_FOUND" });
+        }
+        // The schema allows two snoozes; a third is not a new state it can express, so the
+        // reminder stays at the second and the time still moves.
+        const nextStatus = snoozed.status === "gesnoozed_1" ? "gesnoozed_2" : "gesnoozed_1";
+        const nextTime = new Date(Date.now() + minutes * 60 * 1000).toISOString();
+        const { error: snoozeError } = await db
+          .from("medication_reminders")
+          .update({ status: nextStatus, scheduled_time: nextTime })
+          .eq("id", snoozeReminderId);
+        if (snoozeError) throw snoozeError;
+        const snoozeText = locale === "nl-NL"
+          ? `Goed, ik herinner u over ${minutes} minuten opnieuw.`
+          : `Alright, I will remind you again in ${minutes} minutes.`;
+        const snoozeTranscript: string = typeof body.transcript_text === "string" ? body.transcript_text : "";
+        await db.from("voice_interactions").insert({
+          elder_id: body.elder_id,
+          screen_id: body.screen_id ? String(body.screen_id) : "PILLS",
+          transcript_nl: locale === "nl-NL" ? snoozeTranscript : null,
+          transcript_en: locale === "en-GB" ? snoozeTranscript : null,
+          intent: "snooze",
+          entities: { medication_reminder_id: snoozeReminderId, minutes },
+          ...localizedResponse(locale, snoozeText),
+          action_taken: "SNOOZED",
+          distress_detected: false,
+        });
+        return { body: { transcript: snoozeTranscript, intent: "snooze", response_text: snoozeText, action_taken: "SNOOZED", audio_url: null, distress_detected: false } };
+      }
+
       // ─── FAIL CLOSED on missing or failed transcription (P1.5) ───
       // Previously this defaulted to "Ik heb mijn pillen ingenomen en ik voel me
       // rustig." when no audio was sent, and transcribeDutchAudio() returned
@@ -232,8 +278,28 @@ Deno.serve(asyncWrapper("fn-voice-pipeline", async (req: Request) => {
       // Note: Enforced 2-step confirmation ignores any isRepeatBackEnabled check to guarantee MAR protection.
       if (c.intent === "bevestig_ingenomen") {
         const expiresAt = new Date(Date.now() + 90 * 1000).toISOString();
-        const { data: reminders } = await db.from("medication_reminders").select("id, medication_id").eq("elder_id", body.elder_id).in("status", ["gepland", "herinnerd", "gesnoozed_1", "gesnoozed_2", "geëscaleerd"]).order("scheduled_time", { ascending: true }).limit(1);
-        const reminder = reminders?.[0];
+        // Which dose is being confirmed. A tap on a specific reminder ("I took *this* one")
+        // sends its id; without it the earliest open reminder is used, which is what a spoken
+        // sentence with no target needs. Taking the earliest for a tap meant that answering
+        // the 20:00 pill at 08:00 confirmed — and later recorded — the 08:00 dose instead.
+        const targetedReminderId = typeof body.medication_reminder_id === "string" ? body.medication_reminder_id : null;
+        let reminder: { id: string; medication_id: string } | undefined;
+        if (targetedReminderId) {
+          const { data: targeted } = await db
+            .from("medication_reminders")
+            .select("id, medication_id")
+            .eq("elder_id", body.elder_id)
+            .eq("id", targetedReminderId)
+            .in("status", ["gepland", "herinnerd", "gesnoozed_1", "gesnoozed_2", "geëscaleerd"])
+            .maybeSingle();
+          // A reminder that is already taken, or belongs to another elder, is not a target:
+          // fall back to the open one rather than confirming a closed dose.
+          reminder = targeted ?? undefined;
+        }
+        if (!reminder) {
+          const { data: reminders } = await db.from("medication_reminders").select("id, medication_id").eq("elder_id", body.elder_id).in("status", ["gepland", "herinnerd", "gesnoozed_1", "gesnoozed_2", "geëscaleerd"]).order("scheduled_time", { ascending: true }).limit(1);
+          reminder = reminders?.[0];
+        }
         await db.from("pending_confirmations").insert({
           elder_id: body.elder_id,
           confirmation_type: "medication_taken",

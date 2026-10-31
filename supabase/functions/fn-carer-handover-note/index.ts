@@ -84,8 +84,19 @@ Deno.serve(async (req: Request) => {
     }
 
     const photoPaths: string[] = Array.isArray(body.photo_paths) ? body.photo_paths.filter((p): p is string => typeof p === "string") : [];
+    // The bucket is `handover-photos`, laid out as `<elder_id>/<carer_id>/<file>` (see the
+    // migration). Checking only for `..` let a carer attach *any* object in the project to their
+    // note — another elder's photograph, a document from the vault — because the path is stored
+    // verbatim and rendered later to whoever may read the note. Both segments must be the ones
+    // this request is about.
     for (const path of photoPaths) {
-      if (path.includes("..") || path.includes("\\")) throw new Error("Invalid photo path");
+      if (path.includes("..") || path.includes("\\") || path.includes("//")) throw new Error("Invalid photo path");
+      if (!path.startsWith(`${String(body.elder_id)}/${userId}/`)) {
+        throw Object.assign(new Error("403: photo_paths must belong to this elder and this carer"), { status: 403, code: "FORBIDDEN" });
+      }
+    }
+    if (photoPaths.length > 5) {
+      throw Object.assign(new Error("At most 5 photos per handover note"), { status: 400, code: "BAD_REQUEST" });
     }
 
     const idem = (req.headers.get("idempotency-key") ?? body.idempotency_key) as string | undefined;

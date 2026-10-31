@@ -68,11 +68,18 @@ Deno.serve(async (req) => {
               status: "gepland",
             });
           }
-          await db.from("medication_ocr_jobs").update({
-            status: "completed",
-            review_required: false,
-            created_medication_id: med.id,
-          }).eq("id", review.ocr_job_id);
+          const { data: job } = await db.from("medication_ocr_jobs")
+            .update({ status: "completed", review_required: false, created_medication_id: med.id })
+            .eq("id", review.ocr_job_id)
+            .select("storage_path")
+            .maybeSingle();
+          // The photograph existed to be read. Once a human has agreed with the reading it has
+          // no further use, and keeping it is retention without a purpose — the same rule the
+          // auto-accepted path applies in fn-medication-ocr.
+          const reviewedPath = typeof job?.storage_path === "string" ? job.storage_path : null;
+          if (reviewedPath) {
+            await dbAdmin.storage.from("ocr-inbox").remove([reviewedPath]).catch(() => undefined);
+          }
 
           await db.from("medication_ocr_reviews").update({
             reviewer_id: userId,
@@ -90,6 +97,17 @@ Deno.serve(async (req) => {
             notes: body.notes ?? null,
             updated_at: new Date().toISOString(),
           }).eq("id", body.review_id);
+
+          if (body.decision === "rejected") {
+            // Nothing will be done with this image; "needs_clarification" keeps it so the
+            // reviewer can ask the elder for a better photograph of the same box.
+            const { data: rejectedJob } = await db.from("medication_ocr_jobs")
+              .select("storage_path").eq("id", review.ocr_job_id).maybeSingle();
+            const rejectedPath = typeof rejectedJob?.storage_path === "string" ? rejectedJob.storage_path : null;
+            if (rejectedPath) {
+              await admin().storage.from("ocr-inbox").remove([rejectedPath]).catch(() => undefined);
+            }
+          }
           const rejectedBody: OcrReviewBody = { review_id: body.review_id, decision: String(body.decision) };
           return { body: rejectedBody };
         }

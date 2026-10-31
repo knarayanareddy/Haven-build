@@ -16,8 +16,6 @@ import type { OfflineAction, OfflineActionType } from './offlineQueue';
 /** The calls a queued action may need. Kept structural so a test can supply a stub. */
 export interface OfflineDispatchClient {
   voice(input: object): Promise<unknown>;
-  healthLog(input: object): Promise<unknown>;
-  sendFamilyMessage(input: object): Promise<unknown>;
   invoke(fn: string, body?: object): Promise<unknown>;
 }
 
@@ -51,16 +49,26 @@ export function planOfflineDispatch(action: OfflineAction): DispatchPlan {
   const type: OfflineActionType = action.type;
   switch (type) {
     case 'CONFIRM_MEDICATION':
-    case 'DENY_MEDICATION':
-    case 'SNOOZE_MEDICATION':
-      // The online path for a medication tap is the voice pipeline with an explicit sentence
-      // (`useHavenActions.ts`), so the queued path must send the same thing it would have sent
-      // had the network been up. elder_id is required by the pipeline's authorisation check.
+      // The online path for a medication tap is the voice pipeline with the reminder named
+      // (`useHavenActions.ts`), so the queued path sends the same thing. Naming the reminder
+      // matters: the pipeline otherwise picks the earliest open dose, so a queued tap on the
+      // evening pill could confirm the morning one.
       return route(['elder_id', 'medication_id'], (client) => client.voice({
         elder_id: payload.elder_id,
         screen_id: payload.screen_id ?? 'PILLS',
         locale: payload.locale ?? 'nl-NL',
-        transcript_text: action.type === 'CONFIRM_MEDICATION' ? 'I took it' : 'I did not take it',
+        transcript_text: 'I took it',
+        medication_reminder_id: payload.medication_id,
+      }));
+
+    case 'SNOOZE_MEDICATION':
+      // Not a sentence: an explicit snooze, so it cannot be classified as "I took it".
+      return route(['elder_id', 'medication_id'], (client) => client.voice({
+        elder_id: payload.elder_id,
+        screen_id: payload.screen_id ?? 'PILLS',
+        locale: payload.locale ?? 'nl-NL',
+        snooze_reminder_id: payload.medication_id,
+        snooze_minutes: typeof payload.delay_minutes === 'number' ? payload.delay_minutes : 15,
       }));
 
     case 'DAILY_CHECKIN':
@@ -70,27 +78,14 @@ export function planOfflineDispatch(action: OfflineAction): DispatchPlan {
       // fn-wellness-checkin is the endpoint the live check-in screen uses.
       return route(['elder_id'], (client) => client.invoke('fn-wellness-checkin', { ...payload }));
 
-    case 'SEND_MESSAGE':
-      return route(['elder_id', 'message_type'], (client) => client.sendFamilyMessage({ ...payload }));
-
-    case 'FALL_RESPONSE':
-      return route(['elder_id'], (client) => client.invoke('fn-fall-event', { ...payload }));
-
-    case 'CONSENT_PACK_DECIDE':
-      return route(['elder_id', 'pack_key'], (client) => client.invoke('fn-consent-pack-decide', { ...payload }));
-
-    case 'CREATE_TASK':
-      // The confirming screen answers a pending confirmation; the function needs both the row
-      // and the answer, not a task description.
+    case 'CONFIRMATION_RESPOND':
       return route(['elder_id', 'confirmation_id', 'resolution'], (client) => client.invoke('fn-pending-confirmation-respond', {
         confirmation_id: payload.confirmation_id,
         resolution: payload.resolution,
       }));
 
-    // These were queued with no endpoint behind them. They are rejected on the first drain
-    // attempt rather than retried until the retry ceiling hides them.
-    case 'SYNC_CALENDAR':
-      return permanent('SYNC_CALENDAR has no endpoint; calendar sync is not implemented');
+    case 'CONSENT_PACK_DECIDE':
+      return route(['elder_id', 'pack_key'], (client) => client.invoke('fn-consent-pack-decide', { ...payload }));
 
     default: {
       // A new OfflineActionType must be routed deliberately; `never` makes that a compile

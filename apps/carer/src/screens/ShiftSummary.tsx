@@ -22,7 +22,7 @@ export function ShiftSummary() {
   const { session } = useAuth();
   const { locale, t } = useTranslation();
 
-  const elderIds = useMemo(() => (process.env.EXPO_PUBLIC_CARER_ELDER_IDS ?? '').split(',').map((id) => id.trim()).filter(Boolean), []);
+  const elderIds = useMemo(() => (process.env.EXPO_PUBLIC_CARER_ELDER_IDS ?? '').split(',').map((id: string) => id.trim()).filter(Boolean), []);
   const [summary, setSummary] = useState<SummaryEntry[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [shareReady, setShareReady] = useState(false);
@@ -43,7 +43,7 @@ export function ShiftSummary() {
         const client = new CarerClient({ supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL!, accessToken: session.access_token });
         const shiftEnd = new Date().toISOString();
         const shiftStart = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString();
-        const rows = await Promise.all(elderIds.map(async (elderId) => {
+        const rows = await Promise.all(elderIds.map(async (elderId: string) => {
           const result = await client.shiftSummary(elderId, shiftStart, shiftEnd);
           const live = result.summary as {
             visits_completed?: number;

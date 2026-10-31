@@ -30,11 +30,18 @@ Deno.serve(asyncWrapper("fn-pending-confirmation-respond", async (req: Request) 
 
       // Closure Test 3: Expiry handling for pending confirmations
       if (new Date(String(pending.expires_at)).getTime() < Date.now()) {
-        await dbAdmin.from("pending_confirmations").update({ status: "expired" }).eq("id", body.confirmation_id);
+        // Only the status: writing `resolved_at` or a `resolution` here would record an
+        // answer the elder never gave, which is the same defect as an invented mood score.
+        await dbAdmin.from("pending_confirmations")
+          .update({ status: "expired" })
+          .eq("id", body.confirmation_id);
         throw new Error("403: Pending confirmation token has expired");
       }
 
-      // Idempotency: replay confirmation twice -> only one MAR update
+      // Idempotency: replay confirmation twice -> only one MAR update.
+      //
+      // `status` is added by 20261031010000_pending_confirmations_status.sql. Before that
+      // column existed this test could never be true, and both updates below failed outright.
       if (pending.status === "resolved") {
         return { body: { confirmation_id: body.confirmation_id, resolution: Boolean(body.resolution), confirmation_type: pending.confirmation_type, status: "already_resolved" } };
       }

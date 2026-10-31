@@ -52,6 +52,27 @@ export class CarerClient {
     }>('fn-carer-handover-note', input);
   }
 
+  /**
+   * The medications this elder is actually prescribed.
+   *
+   * The handover form used to offer three hardcoded UUIDs; those ids match no row, and
+   * `administered_medication_id` is a foreign key, so recording one either failed the insert or
+   * attributed a medication that was never prescribed.
+   */
+  async medications(elderId: string) {
+    return this.invoke<{
+      medications: Array<{
+        id: string;
+        name_nl: string;
+        name_en: string;
+        dose_description_nl: string;
+        dose_description_en: string;
+        frequency: string;
+        schedule_times: string[];
+      }>;
+    }>('fn-carer-medications', { elder_id: elderId });
+  }
+
   async visitLog(input: {
     elder_id: string;
     carer_id?: string;

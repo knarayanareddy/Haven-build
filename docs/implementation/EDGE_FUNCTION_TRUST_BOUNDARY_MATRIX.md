@@ -13,6 +13,7 @@ This matrix classifies each Edge Function by its intended trust boundary after t
 - `fn-call-reputation`
 - `fn-care-plan`
 - `fn-care-visit-log`
+- `fn-carer-medications`
 - `fn-companion-memory`
 - `fn-consent-update`
 - `fn-data-export`

@@ -1,8 +1,38 @@
+declare module 'expo-image-picker' {
+  export type MediaType = 'images' | 'videos' | 'livePhotos';
+  export interface ImagePickerAsset {
+    uri: string;
+    width: number;
+    height: number;
+    type?: 'image' | 'video' | 'livePhoto' | 'pairedVideo' | null;
+    fileName?: string | null;
+    fileSize?: number;
+    mimeType?: string;
+  }
+  export type ImagePickerResult =
+    | { canceled: true; assets: null }
+    | { canceled: false; assets: ImagePickerAsset[] };
+  export interface ImagePickerOptions {
+    mediaTypes?: MediaType | MediaType[];
+    quality?: number;
+    exif?: boolean;
+    allowsEditing?: boolean;
+    allowsMultipleSelection?: boolean;
+    selectionLimit?: number;
+  }
+  export function requestCameraPermissionsAsync(): Promise<{ granted: boolean; status: string }>;
+  export function requestMediaLibraryPermissionsAsync(writeOnly?: boolean): Promise<{ granted: boolean; status: string }>;
+  export function launchCameraAsync(options?: ImagePickerOptions): Promise<ImagePickerResult>;
+  export function launchImageLibraryAsync(options?: ImagePickerOptions): Promise<ImagePickerResult>;
+}
+
 declare module 'react-native-gesture-handler';
 
 declare module 'react-native' {
   export const Alert: { alert: (...args: any[]) => void };
   export const ScrollView: any;
+  export const Image: any;
+  export const ActivityIndicator: any;
   export const Text: any;
   export const TextInput: any;
   export const TouchableOpacity: any;
@@ -16,6 +46,13 @@ declare module 'react-native' {
   export const StatusBar: any;
   export const BackHandler: {
     addEventListener: (event: 'hardwareBackPress', handler: () => boolean) => { remove: () => void };
+  };
+  export const AppState: {
+    currentState: 'active' | 'background' | 'inactive' | string;
+    addEventListener: (
+      event: 'change',
+      handler: (state: 'active' | 'background' | 'inactive' | string) => void,
+    ) => { remove: () => void };
   };
   export const AccessibilityInfo: {
     isBoldTextEnabled: () => Promise<boolean>;

@@ -36,8 +36,12 @@ const FUNCTIONS = new URL('../../../supabase/functions/', import.meta.url);
  * object, so a handler that ignores `{ error }` looks identical to a healthy one
  * unless the double produces one. Each entry is `{ table, op, message, code }`
  * (omit `table` to fail on `.rpc()`).
+ *
+ * `storage` supplies buckets for `.storage.from(bucket)`: `{ [bucket]: { download(path), remove(paths) } }`.
+ * A handler that reads an uploaded object back (the medicine-label reader does) needs real
+ * bytes; without an entry the download reports 404, which is also a shape worth testing.
  */
-export function createMockDb({ tables = {}, rpcResults = {}, failures = [] } = {}) {
+export function createMockDb({ tables = {}, rpcResults = {}, failures = [], storage = {} } = {}) {
   const feed = [];
   const store = {};
   for (const [table, rows] of Object.entries(tables)) store[table] = rows.map((row) => ({ ...row }));
@@ -200,11 +204,23 @@ export function createMockDb({ tables = {}, rpcResults = {}, failures = [] } = {
       },
     },
     storage: {
-      from: () => ({
+      from: (bucket) => ({
         createSignedUrl: () => Promise.resolve({ data: { signedUrl: 'https://example.test/signed' }, error: null }),
-        remove: () => Promise.resolve({ data: [], error: null }),
+        remove: (paths) => {
+          const supplied = storage?.[bucket]?.remove;
+          if (supplied) return Promise.resolve(supplied(paths));
+          return Promise.resolve({ data: [], error: null });
+        },
         upload: () => Promise.resolve({ data: { path: 'mock' }, error: null }),
         copy: () => Promise.resolve({ data: null, error: null }),
+        // Reads a stored object back. A handler that reads an upload (the medicine-label
+        // reader does) needs bytes, not a promise of a URL; `createMockDb({ storage })` can
+        // supply its own, per bucket, when a test needs to control the content.
+        download: (path) => {
+          const supplied = storage?.[bucket]?.download;
+          if (supplied) return Promise.resolve(supplied(path));
+          return Promise.resolve({ data: null, error: { message: 'not found', statusCode: 404 } });
+        },
       }),
     },
   };
