@@ -8,6 +8,8 @@ import { ElderStackParamList } from '../navigation/AppNavigator';
 import { useHavenActions } from '../hooks/useHavenActions';
 import { useAuth } from '../auth/AuthProvider';
 import { initializeAndroidDozeGuard } from '../services/dozeGuard';
+import { HavenClient } from '../services/havenClient';
+import { useScreenData } from '../hooks/useScreenData';
 
 type Props = NativeStackScreenProps<ElderStackParamList>;
 
@@ -24,6 +26,12 @@ function sessionUserId(session: { access_token?: string } | null): string | null
   }
 }
 
+/**
+ * The skeleton an offline launch renders before (or without) data.
+ *
+ * Empty on purpose: it used to be the *only* source for every screen, which is why a signed-in
+ * elder saw zeros everywhere. Real values come from `useScreenData`.
+ */
 function loadShell(elderId: string, locale: Locale, t: any): {
   profile: ElderProfile;
   family: FamilyMember[];
@@ -68,17 +76,34 @@ export function ElderScreen({ route, navigation }: Props) {
   const { locale, t } = useTranslation();
   const elderId = sessionUserId(session) ?? 'signed-out';
   const seed = useMemo(() => loadShell(elderId, locale, t), [elderId, locale, t]);
+
+  // Keyed on the token, not the session object: the auth provider hands back a fresh object on
+  // every render, and a client that changes identity each time would re-run the loader forever.
+  const accessToken = session?.access_token ?? null;
+  const client = useMemo(
+    () => (accessToken ? new HavenClient({ supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL!, accessToken }) : null),
+    [accessToken]
+  );
+  const data = useScreenData({
+    client,
+    elderId: sessionUserId(session),
+    screenId: schema.screenId,
+    locale,
+  });
+
   const ctx: ScreenContext = {
     locale: seed.profile.locale,
     now: new Date(),
     profile: seed.profile,
-    family: seed.family,
-    medications: seed.medications,
-    tasks: seed.tasks,
-    messages: seed.messages,
-    scamEvents: seed.scamEvents,
-    buurt: seed.buurt,
-    visits: seed.visits,
+    // Loaded data wins; the shell only carries the profile identity and an empty fallback.
+    family: data.family,
+    medications: data.medications,
+    tasks: data.tasks,
+    messages: data.messages,
+    scamEvents: data.scamEvents,
+    buurt: data.buurt,
+    visits: data.visits,
+    pendingConfirmation: data.pendingConfirmation,
     onPrimaryAction: (actionId: string) => {
       if (actionId.startsWith('NAV_')) {
         const target = actionId.replace('NAV_', '');

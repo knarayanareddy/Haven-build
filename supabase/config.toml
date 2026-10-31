@@ -170,6 +170,9 @@ verify_jwt = false # COMPENSATING CONTROL: internal stream consumer with require
 [functions.fn-carer-handover-note]
 verify_jwt = true
 
+[functions.fn-carer-medications]
+verify_jwt = true
+
 [functions.fn-consent-pack-decide]
 verify_jwt = true
 

@@ -1,1 +1,0 @@
-export { DocumentCamera } from './documentCameraView';

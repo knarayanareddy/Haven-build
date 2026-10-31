@@ -17,6 +17,13 @@ declare module 'react-native' {
   export const BackHandler: {
     addEventListener: (event: 'hardwareBackPress', handler: () => boolean) => { remove: () => void };
   };
+  export const AppState: {
+    currentState: 'active' | 'background' | 'inactive' | string;
+    addEventListener: (
+      event: 'change',
+      handler: (state: 'active' | 'background' | 'inactive' | string) => void,
+    ) => { remove: () => void };
+  };
   export const AccessibilityInfo: {
     isBoldTextEnabled: () => Promise<boolean>;
     addEventListener: (event: string, handler: (...args: any[]) => void) => { remove: () => void };

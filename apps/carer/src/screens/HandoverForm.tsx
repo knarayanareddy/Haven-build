@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { colors } from '@haven/ui/src/tokens';
 import { useTranslation } from '@haven/i18n';
@@ -6,6 +6,11 @@ import { useAuth } from '../auth/AuthProvider';
 import { CarerClient } from '../services/havenClient';
 import { enqueueOffline } from '../services/offlineQueue';
 import { profileIdFromSession } from '@haven/contracts/src/session';
+
+interface MedicationOption {
+  id: string;
+  label: string;
+}
 
 interface HandoverFormProps {
   route: { params: { elder_id: string; elder_name: string } };
@@ -15,7 +20,7 @@ interface HandoverFormProps {
 export function HandoverForm({ route, navigation }: HandoverFormProps) {
   const { elder_id, elder_name } = route.params;
   const { session } = useAuth();
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const carerId = profileIdFromSession(session as { access_token?: string } | null);
   
   const [appetite, setAppetite] = useState(3);
@@ -24,7 +29,10 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
   const [concerns, setConcerns] = useState('');
   const [notes, setNotes] = useState('');
   const [administeredMed, setAdministeredMed] = useState('');
-  const [photosCount, setPhotosCount] = useState(0);
+  // The elder's actual prescriptions, loaded from fn-carer-medications. Empty until it answers:
+  // a picker with nothing in it is honest, three hardcoded ids were not.
+  const [medications, setMedications] = useState<MedicationOption[]>([]);
+  const [medicationsError, setMedicationsError] = useState(false);
   const [isSubmitting, setSubmitting] = useState(false);
   const [interactionWarning, setInteractionWarning] = useState<string | null>(null);
 
@@ -34,12 +42,26 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
     { value: 'handover.mobility.not_today', label: t('handover.mobility.not_today') },
   ];
 
-  const MEDICATION_OPTIONS = [
-    { id: '', label: t('handover.med.none') },
-    { id: '99999999-0000-0000-0000-000000000001', label: 'Metformine 500 mg' },
-    { id: '99999999-0000-0000-0000-000000000002', label: 'Lisinopril 10 mg' },
-    { id: '99999999-0000-0000-0000-000000000003', label: 'Vitamine D 20 mcg' },
-  ];
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    const client = new CarerClient({
+      supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL!,
+      accessToken: session.access_token,
+    });
+    client.medications(elder_id)
+      .then((result) => {
+        if (cancelled) return;
+        setMedications((result.medications ?? []).map((med) => ({
+          id: med.id,
+          label: locale === 'nl-NL'
+            ? `${med.name_nl} ${med.dose_description_nl}`.trim()
+            : `${med.name_en} ${med.dose_description_en}`.trim(),
+        })));
+      })
+      .catch(() => { if (!cancelled) setMedicationsError(true); });
+    return () => { cancelled = true; };
+  }, [session, elder_id, locale]);
 
   /**
    * Queues the note under the signed-in carer.
@@ -60,13 +82,18 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
         mobility: mobility !== 'handover.mobility.self' ? mobility : undefined,
         concerns,
         notes,
+        // Recorded at the point of care, so it must survive the queue as well: dropping it
+        // meant an offline round left no record that the medication had been given.
+        ...(administeredMed
+          ? { administered_medication_id: administeredMed, administered_at: new Date().toISOString() }
+          : {}),
       });
       return true;
     } catch (error) {
       console.warn('[HAVEN] handover note could not be queued:', String((error as Error)?.message ?? error));
       return false;
     }
-  }, [carerId, elder_id, appetite, mood, mobility, concerns, notes]);
+  }, [carerId, elder_id, appetite, mood, mobility, concerns, notes, administeredMed]);
 
   const submitOnline = useCallback(async () => {
     setSubmitting(true);
@@ -115,11 +142,6 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
       [{ text: 'OK', onPress: () => navigation.goBack() }]
     );
   }, [enqueueHandover, t, navigation]);
-
-  const addPhoto = useCallback(() => {
-    setPhotosCount((c) => c + 1);
-    Alert.alert('HAVEN', t('handover.photo.demo'));
-  }, [t]);
 
   const renderScale = (label: string, value: number, onChange: (v: number) => void) => (
     <View style={{ gap: 8 }}>
@@ -179,9 +201,9 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
         <Text style={{ fontSize: 16, fontWeight: '900', color: colors.ink }}>
           {t('handover.administered_med')}
         </Text>
-        {MEDICATION_OPTIONS.map((opt) => (
+        {[{ id: '', label: t('handover.med.none') }, ...medications].map((opt) => (
           <TouchableOpacity
-            key={opt.id}
+            key={opt.id || 'none'}
             accessibilityRole="button"
             accessibilityLabel={opt.label}
             onPress={() => setAdministeredMed(opt.id)}
@@ -194,6 +216,12 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
             <Text style={{ fontSize: 16, fontWeight: '700', color: colors.ink }}>{opt.label}</Text>
           </TouchableOpacity>
         ))}
+        {medicationsError && (
+          // Silently showing only "none" would look like the elder has no prescriptions.
+          <Text accessibilityLiveRegion="polite" style={{ fontSize: 14, fontWeight: '700', color: colors.rose }}>
+            {t('handover.med.unavailable')}
+          </Text>
+        )}
       </View>
 
       {interactionWarning && (
@@ -239,22 +267,6 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
           }}
         />
       </View>
-
-      <TouchableOpacity
-        accessibilityRole="button"
-        accessibilityLabel={t('handover.photo.add')}
-        onPress={addPhoto}
-        style={{
-          flexDirection: 'row', alignItems: 'center', gap: 8,
-          paddingVertical: 12, paddingHorizontal: 16, borderRadius: 16,
-          backgroundColor: colors.paper, borderWidth: 1, borderColor: colors.mist,
-        }}
-      >
-        <Text style={{ fontSize: 20 }}>📷</Text>
-        <Text style={{ fontSize: 16, fontWeight: '700', color: colors.ink }}>
-          {photosCount > 0 ? t('handover.photo.added', { count: photosCount }) : t('handover.photo.add')}
-        </Text>
-      </TouchableOpacity>
 
       <View style={{ flexDirection: 'row', gap: 10 }}>
         <TouchableOpacity

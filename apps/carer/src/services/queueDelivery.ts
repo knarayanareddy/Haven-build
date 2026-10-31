@@ -50,6 +50,13 @@ export function carerDeliveryFor(item: CarerOfflineItem): CarerDeliveryTarget | 
           // Sending the stored keys as-is dropped the free-text part of every note.
           ...(asString(payload.concerns) ? { concerns_nl: asString(payload.concerns)! } : {}),
           ...(asString(payload.notes) ? { notes_nl: asString(payload.notes)! } : {}),
+          // The online path sends what was administered and when. The queued path used to drop
+          // both, so a medication given during a visit that happened to be offline — the normal
+          // case for a rural round — left no record that it had been given.
+          ...(asString(payload.administered_medication_id)
+            ? { administered_medication_id: asString(payload.administered_medication_id)! }
+            : {}),
+          ...(asString(payload.administered_at) ? { administered_at: asString(payload.administered_at)! } : {}),
         }),
       };
     case 'incident_report':
