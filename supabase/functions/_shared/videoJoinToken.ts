@@ -41,12 +41,13 @@ function base64urlEncode(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-function base64urlDecode(value: string): Uint8Array {
+/** Returns an ArrayBuffer rather than a view: WebCrypto's signatures want BufferSource. */
+function base64urlDecode(value: string): ArrayBuffer {
   const padded = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
   const binary = atob(padded);
-  const bytes = new Uint8Array(binary.length);
+  const bytes = new Uint8Array(new ArrayBuffer(binary.length));
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return bytes;
+  return bytes.buffer;
 }
 
 async function hmacKey(secret: string): Promise<CryptoKey> {
@@ -147,7 +148,9 @@ export interface ProviderCredentials {
 }
 
 function env(name: string): string | undefined {
-  const value = globalThis.Deno?.env?.get?.(name);
+  // Bare `Deno`, not `globalThis.Deno`: the latter is not part of the `deno.window` typings,
+  // so `deno check` rejects it even though it works at runtime.
+  const value = Deno.env.get(name);
   return value && value.length > 0 ? value : undefined;
 }
 
