@@ -352,6 +352,8 @@ function renderPills(ctx: ScreenContext) {
         {actionButton(t(locale, 'iHaveTaken'), 'safe', `TAKE:${current.id}`, ctx.onPrimaryAction, `${t(locale, 'iHaveTaken')} ${current.name}`)}
         {actionButton(t(locale, 'notYet'), 'secondary', `SNOOZE:${current.id}`, ctx.onPrimaryAction, `${t(locale, 'notYet')}: ${current.name}`)}
         {actionButton(t(locale, 'tellMeAbout'), 'ghost', 'TELL_PILLS', ctx.onPrimaryAction, t(locale, 'tellMeAbout'))}
+        {/* The scanner existed as an endpoint and a client method with no way to reach it. */}
+        {actionButton(locale === 'nl-NL' ? 'Medicijn scannen' : 'Scan a medicine', 'ghost', 'NAV_MED_SCAN', ctx.onPrimaryAction, locale === 'nl-NL' ? 'Medicijn scannen' : 'Scan a medicine')}
       </View>
       <Text style={{ fontSize: 18, color: colors.graphite, fontWeight: '700', marginTop: 8 }}>{t(locale, 'laterToday')}</Text>
       <View style={{ borderRadius: 22, backgroundColor: colors.paper, borderWidth: 1, borderColor: colors.mist, padding: 12 }}>

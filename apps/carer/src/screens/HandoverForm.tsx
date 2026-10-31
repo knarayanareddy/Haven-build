@@ -1,11 +1,19 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { colors } from '@haven/ui/src/tokens';
 import { useTranslation } from '@haven/i18n';
 import { useAuth } from '../auth/AuthProvider';
 import { CarerClient } from '../services/havenClient';
 import { enqueueOffline } from '../services/offlineQueue';
 import { profileIdFromSession } from '@haven/contracts/src/session';
+import * as ImagePicker from 'expo-image-picker';
+import {
+  MAX_HANDOVER_PHOTOS,
+  PhotoRejectedError,
+  rejectPhotoReason,
+  uploadHandoverPhoto,
+  type UploadedPhoto,
+} from '../services/photoUpload';
 
 interface MedicationOption {
   id: string;
@@ -33,6 +41,10 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
   // a picker with nothing in it is honest, three hardcoded ids were not.
   const [medications, setMedications] = useState<MedicationOption[]>([]);
   const [medicationsError, setMedicationsError] = useState(false);
+  // Photographs are attached to the note by object key. `path` is empty for a photo taken
+  // without a connection: the form keeps the local file and says it was not attached.
+  const [photos, setPhotos] = useState<UploadedPhoto[]>([]);
+  const [photoBusy, setPhotoBusy] = useState(false);
   const [isSubmitting, setSubmitting] = useState(false);
   const [interactionWarning, setInteractionWarning] = useState<string | null>(null);
 
@@ -63,6 +75,8 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
     return () => { cancelled = true; };
   }, [session, elder_id, locale]);
 
+  const uploadedPhotoPaths = photos.map((photo) => photo.path).filter((path) => path.length > 0);
+
   /**
    * Queues the note under the signed-in carer.
    *
@@ -87,13 +101,16 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
         ...(administeredMed
           ? { administered_medication_id: administeredMed, administered_at: new Date().toISOString() }
           : {}),
+        // Only the photographs that reached storage. A local file URI is meaningless to the
+        // endpoint, and the carer is told separately which ones did not go.
+        ...(uploadedPhotoPaths.length > 0 ? { photo_paths: uploadedPhotoPaths } : {}),
       });
       return true;
     } catch (error) {
       console.warn('[HAVEN] handover note could not be queued:', String((error as Error)?.message ?? error));
       return false;
     }
-  }, [carerId, elder_id, appetite, mood, mobility, concerns, notes, administeredMed]);
+  }, [carerId, elder_id, appetite, mood, mobility, concerns, notes, administeredMed, uploadedPhotoPaths]);
 
   const submitOnline = useCallback(async () => {
     setSubmitting(true);
@@ -115,6 +132,7 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
           notes_nl: notes || undefined,
           administered_medication_id: administeredMed || undefined,
           administered_at: administeredMed ? new Date().toISOString() : undefined,
+          ...(uploadedPhotoPaths.length > 0 ? { photo_paths: uploadedPhotoPaths } : {}),
         });
         
         if (result.interaction_warning) {
@@ -142,6 +160,80 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
       [{ text: 'OK', onPress: () => navigation.goBack() }]
     );
   }, [enqueueHandover, t, navigation]);
+
+  /**
+   * Files one picked image: rejects what the bucket would reject, uploads the rest.
+   *
+   * A failed upload keeps the photo in the list with an empty path, so the carer sees it in the
+   * strip and is told it is not going with the note — instead of the count quietly disagreeing
+   * with what was filed.
+   */
+  const attachPickedAsset = useCallback(async (asset: ImagePicker.ImagePickerAsset) => {
+    const rejection = rejectPhotoReason(asset);
+    if (rejection) {
+      // Two reasons, two sentences; spelled out so the key stays checkable by the i18n type.
+      Alert.alert(
+        t('carerAppTitle'),
+        rejection === 'too-large'
+          ? t('handover.photo.rejected.too-large')
+          : t('handover.photo.rejected.unsupported-type'),
+      );
+      return;
+    }
+    if (!carerId || !session) {
+      Alert.alert(t('carerAppTitle'), t('handover.photo.signin_required'));
+      return;
+    }
+    try {
+      const uploaded = await uploadHandoverPhoto({
+        supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL!,
+        accessToken: session.access_token,
+        elderId: elder_id,
+        carerId,
+        photo: asset,
+      });
+      setPhotos((previous) => [...previous, uploaded]);
+    } catch (error) {
+      setPhotos((previous) => [...previous, { localUri: asset.uri, path: '' }]);
+      Alert.alert(
+        t('carerAppTitle'),
+        error instanceof PhotoRejectedError ? t('handover.photo.rejected.unsafe-path') : t('handover.photo.upload_failed'),
+      );
+    }
+  }, [carerId, elder_id, session, t]);
+
+  const pickFromLibrary = useCallback(async () => {
+    setPhotoBusy(true);
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.6, exif: false });
+      if (!result.canceled && result.assets[0]) await attachPickedAsset(result.assets[0]);
+    } finally {
+      setPhotoBusy(false);
+    }
+  }, [attachPickedAsset]);
+
+  const addPhoto = useCallback(async () => {
+    if (photos.length >= MAX_HANDOVER_PHOTOS) {
+      Alert.alert(t('carerAppTitle'), t('handover.photo.limit', { count: MAX_HANDOVER_PHOTOS }));
+      return;
+    }
+    setPhotoBusy(true);
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        // Denial is not a dead end: the carer can still attach a photo already on the phone.
+        Alert.alert(t('carerAppTitle'), t('handover.photo.permission'), [
+          { text: t('handover.photo.choose'), onPress: () => { void pickFromLibrary(); } },
+          { text: t('handover.photo.cancel'), style: 'cancel' },
+        ]);
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.6, exif: false });
+      if (!result.canceled && result.assets[0]) await attachPickedAsset(result.assets[0]);
+    } finally {
+      setPhotoBusy(false);
+    }
+  }, [attachPickedAsset, photos.length, pickFromLibrary, t]);
 
   const renderScale = (label: string, value: number, onChange: (v: number) => void) => (
     <View style={{ gap: 8 }}>
@@ -266,6 +358,57 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
             minHeight: 60, textAlignVertical: 'top',
           }}
         />
+      </View>
+
+      <View style={{ gap: 8 }}>
+        <Text style={{ fontSize: 16, fontWeight: '900', color: colors.ink }}>{t('handover.photo.section')}</Text>
+        {photos.map((photo, index) => (
+          <View
+            key={photo.localUri}
+            style={{
+              flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10,
+              borderRadius: 14, backgroundColor: colors.paper,
+              borderWidth: 1, borderColor: photo.path ? colors.mist : colors.rose,
+            }}
+          >
+            <Image source={{ uri: photo.localUri }} style={{ width: 56, height: 56, borderRadius: 10 }} />
+            <Text style={{ flex: 1, fontSize: 14, fontWeight: '700', color: photo.path ? colors.ink : colors.rose }}>
+              {photo.path ? t('handover.photo.attached') : t('handover.photo.not_uploaded')}
+            </Text>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`${t('handover.photo.remove')} ${index + 1}`}
+              onPress={() => setPhotos((previous) => previous.filter((p) => p.localUri !== photo.localUri))}
+              style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: colors.mist }}
+            >
+              <Text style={{ fontSize: 16, fontWeight: '900', color: colors.ink }}>✕</Text>
+            </TouchableOpacity>
+          </View>
+        ))}
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel={t('handover.photo.add')}
+          accessibilityHint={t('handover.photo.hint')}
+          accessibilityState={{ disabled: photoBusy, busy: photoBusy }}
+          disabled={photoBusy}
+          onPress={addPhoto}
+          style={{
+            flexDirection: 'row', alignItems: 'center', gap: 8,
+            paddingVertical: 12, paddingHorizontal: 16, borderRadius: 16,
+            backgroundColor: colors.paper, borderWidth: 1, borderColor: colors.mist,
+            opacity: photoBusy ? 0.6 : 1,
+          }}
+        >
+          <Text style={{ fontSize: 20 }}>📷</Text>
+          <Text style={{ fontSize: 16, fontWeight: '700', color: colors.ink }}>
+            {photoBusy ? t('handover.photo.uploading') : t('handover.photo.add')}
+          </Text>
+        </TouchableOpacity>
+        {photos.some((photo) => !photo.path) && (
+          <Text accessibilityLiveRegion="polite" style={{ fontSize: 14, fontWeight: '700', color: colors.rose }}>
+            {t('handover.photo.offline_note')}
+          </Text>
+        )}
       </View>
 
       <View style={{ flexDirection: 'row', gap: 10 }}>

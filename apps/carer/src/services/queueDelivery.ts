@@ -57,6 +57,14 @@ export function carerDeliveryFor(item: CarerOfflineItem): CarerDeliveryTarget | 
             ? { administered_medication_id: asString(payload.administered_medication_id)! }
             : {}),
           ...(asString(payload.administered_at) ? { administered_at: asString(payload.administered_at)! } : {}),
+          // Photograph keys uploaded at the point of care. Only non-empty keys are stored, so a
+          // photo that never reached the bucket cannot masquerade as an attachment.
+          ...(Array.isArray(payload.photo_paths)
+            ? {
+                photo_paths: (payload.photo_paths as unknown[])
+                  .filter((path): path is string => typeof path === 'string' && path.length > 0),
+              }
+            : {}),
         }),
       };
     case 'incident_report':

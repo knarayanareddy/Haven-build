@@ -33,7 +33,7 @@ function sessionUserId(session: { access_token?: string } | null): string | null
 
 export function VisitList({ navigation }: { navigation: { navigate: (screen: string, params?: Record<string, string>) => void } }) {
   const { session } = useAuth();
-  const elderIds = useMemo(() => (process.env.EXPO_PUBLIC_CARER_ELDER_IDS ?? '').split(',').map((id) => id.trim()).filter(Boolean), []);
+  const elderIds = useMemo(() => (process.env.EXPO_PUBLIC_CARER_ELDER_IDS ?? '').split(',').map((id: string) => id.trim()).filter(Boolean), []);
   const [visits, setVisits] = useState<ElderVisit[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [offlineCount, setOfflineCount] = useState(getQueueSize());
@@ -72,7 +72,7 @@ export function VisitList({ navigation }: { navigation: { navigate: (screen: str
         });
         const shiftEnd = new Date().toISOString();
         const shiftStart = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString();
-        const rows = await Promise.all(elderIds.map(async (elderId) => {
+        const rows = await Promise.all(elderIds.map(async (elderId: string) => {
           const result = await client.shiftSummary(elderId, shiftStart, shiftEnd);
           const summary = result.summary as {
             outstanding_tasks?: Array<{ medication_name: string; scheduled_time: string }>;

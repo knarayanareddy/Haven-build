@@ -4,6 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { productionScreens } from '@haven/schema/src/screenSchema';
 import { ElderScreen } from '../screens/ElderScreen';
+import { MedicationScanScreen } from '../screens/MedicationScanScreen';
 import { attachBackGuard, type BackNavigation } from './backGuard';
 
 export type ElderStackParamList = Record<string, undefined>;
@@ -32,6 +33,9 @@ export function AppNavigator() {
     <BackHandlerGuard>
       <Stack.Navigator initialRouteName="HOME" screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
         {productionScreens.map((screen) => <Stack.Screen key={screen.screenId} name={screen.screenId} component={ElderScreen} />)}
+        {/* Not part of the screen schema: the scanner is a camera surface with its own lifecycle,
+            opened from the pills screen, not one of the five destinations. */}
+        <Stack.Screen name="MED_SCAN" component={MedicationScanScreen} />
       </Stack.Navigator>
     </BackHandlerGuard>
   );

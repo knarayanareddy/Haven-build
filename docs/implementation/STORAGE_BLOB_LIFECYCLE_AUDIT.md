@@ -13,6 +13,7 @@ Defined in `20260611000002_storage_rpc_security.sql`:
 - `document-vault`
 - `ocr-inbox`
 - `tts-cache`
+- `handover-photos`
 
 All buckets are private.
 
@@ -27,6 +28,8 @@ Current policies assume the first folder segment is the elder/profile id:
 - `document-vault/{elderId}/...`
 - `ocr-inbox/{elderId}/...`
 - `tts-cache/{elderId}/...`
+- `handover-photos/{elderId}/{carerId}/...` — the elder owns the folder, the carer owns the
+  sub-folder, so erasure by elder prefix finds it and two carers cannot overwrite each other
 
 The hardening passes now enforce this assumption in the signed-URL and app write flows.
 
@@ -41,6 +44,7 @@ The hardening passes now enforce this assumption in the signed-URL and app write
 | `document-vault` | `documents.storage_path` | elder-only | deleted by elder-prefix on erasure |
 | `ocr-inbox` | `medication_ocr_jobs.storage_path`, `document_analysis_jobs.storage_path` | elder write-only ingress | deleted by elder-prefix on erasure; also 24h cron cleanup |
 | `tts-cache` | `voice_interactions.response_audio_path` | internal/generated only | deleted by elder-prefix on erasure; also 48h cron cleanup |
+| `handover-photos` | `carer_handover_notes.photo_paths` | carer write (own sub-folder, consented elder), elder read, family read with medications permission | deleted by elder-prefix on erasure; follows the note under WGBO 20 years |
 
 ## Erasure behavior
 
@@ -53,6 +57,7 @@ The hardening passes now enforce this assumption in the signed-URL and app write
 - `document-vault`
 - `ocr-inbox`
 - `tts-cache`
+- `handover-photos`
 
 Implementation note:
 - cleanup is prefix-based (`{elderId}/...`)

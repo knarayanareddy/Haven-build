@@ -170,7 +170,7 @@ Deno.serve(async (req) => {
 
     // ─── Phase 4: Storage cleanup ───
     const storageCleanup = {} as Record<string, number>;
-    for (const bucket of ["voice-notes", "life-story-audio", "life-story-photos", "profile-photos", "document-vault", "ocr-inbox", "tts-cache"]) {
+    for (const bucket of ["voice-notes", "life-story-audio", "life-story-photos", "profile-photos", "document-vault", "ocr-inbox", "tts-cache", "handover-photos"]) {
       storageCleanup[bucket] = await removeStoragePrefix(bucket, userId);
     }
 

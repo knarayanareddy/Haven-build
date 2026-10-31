@@ -139,19 +139,6 @@ test('the handover form no longer ships placeholder prescriptions', async () => 
   assert.match(source, /handover\.med\.unavailable/, 'and say so when the list cannot be loaded');
 });
 
-test('the photo button is gone, along with the claim it made', async () => {
-  const source = readFileSync(new URL('../../apps/carer/src/screens/HandoverForm.tsx', import.meta.url), 'utf8');
-  assert.equal(/addPhoto|photosCount|handover\.photo/.test(source), false,
-    'a button that captured nothing must not claim a photo was added');
-
-  for (const locale of ['nl-NL', 'en-GB']) {
-    const copy = readFileSync(new URL(`../../packages/i18n/locales/${locale}.json`, import.meta.url), 'utf8');
-    assert.equal(/handover\.photo\.(add|added|demo)/.test(copy), false,
-      `${locale} must not keep copy for a control that no longer exists`);
-    assert.match(copy, /"handover\.med\.unavailable"/, `${locale} needs the load-failure message`);
-  }
-});
-
 test('a queued handover carries what was administered and when', async () => {
   const module = await import('../../apps/carer/src/services/queueDelivery.ts')
     .catch(async () => {

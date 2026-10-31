@@ -83,6 +83,131 @@ export async function transcribeDutchAudio(audioBase64: string, locale: "en-GB" 
   return text;
 }
 
+/**
+ * Thrown when a medicine label could not be read.
+ *
+ * Distinct from a generic error because the caller must *not* fall back to inventing a
+ * medication. `fn-medication-ocr` used to call its parser with
+ * `body.ocr_text ?? "Metformine 500mg 2x daily"`, so a request with no text at all — which was
+ * every request from a client that only sent an image — created a real prescription for
+ * Metformine 500 mg twice a day for an older adult who may not take it.
+ */
+export class VisionUnavailableError extends Error {
+  readonly status = 503;
+  readonly code = 'VISION_UNAVAILABLE';
+  constructor(
+    message: string,
+    public readonly reason: 'unreadable' | 'provider-error' | 'not-configured' = 'provider-error',
+  ) {
+    super(message);
+    this.name = 'VisionUnavailableError';
+  }
+}
+
+export interface MedicationLabelReading {
+  name: string;
+  dose: string;
+  frequency: 'dagelijks' | 'tweemaal_daags' | 'driemaal_daags' | 'zo_nodig';
+  times: string[];
+  /** The provider's own confidence, 0..1. Never a constant. */
+  confidence: number;
+  rawText: string;
+}
+
+/** Rejects a reading we cannot act on: a blank name, or a dose with no number in it. */
+function assertUsableReading(reading: MedicationLabelReading): MedicationLabelReading {
+  const name = reading.name.trim();
+  if (name.length < 2) throw new VisionUnavailableError('The label did not name a medicine', 'unreadable');
+  if (!/\d/.test(reading.dose)) throw new VisionUnavailableError('The label did not state a dose', 'unreadable');
+  const times = reading.times.filter((t) => /^([01]\d|2[0-3]):[0-5]\d$/.test(t));
+  return {
+    ...reading,
+    name,
+    times: times.length > 0 ? times : ['08:00'],
+    confidence: Math.max(0, Math.min(1, reading.confidence)),
+  };
+}
+
+/**
+ * Reads a medicine box through a vision model.
+ *
+ * FAIL CLOSED, like the speech path: no image, no provider, or a reading without a name and a
+ * dose raises `VisionUnavailableError`. Nothing here guesses a medicine.
+ *
+ * `imageBase64` is passed straight through, so the caller decides what is sent (the endpoint
+ * reads the object from storage with the service role and never trusts a client-supplied path).
+ */
+export async function extractMedicationLabel(imageBase64: string, mimeType = 'image/jpeg'): Promise<MedicationLabelReading> {
+  if (!imageBase64 || imageBase64.trim().length === 0) {
+    throw new VisionUnavailableError('No image was provided', 'not-configured');
+  }
+
+  if (mockEnabled()) {
+    const mocked = await mockJson('/vision/medication', { image_base64: imageBase64, mime_type: mimeType });
+    if (!mocked) {
+      // HAVEN_AI_MOCK=true without a mock server proves wiring only; it must not invent a drug.
+      throw new VisionUnavailableError('Mock vision endpoint is not configured', 'not-configured');
+    }
+    return assertUsableReading({
+      name: String(mocked.name ?? ''),
+      dose: String(mocked.dose ?? ''),
+      frequency: (mocked.frequency ?? 'dagelijks') as MedicationLabelReading['frequency'],
+      times: Array.isArray(mocked.times) ? mocked.times.map(String) : [],
+      confidence: Number(mocked.confidence ?? 0),
+      rawText: String(mocked.raw_text ?? ''),
+    });
+  }
+
+  const key = requireEnv('OPENAI_API_KEY');
+  const response = await fetch(`${OPENAI_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: Deno.env.get('OPENAI_VISION_MODEL') ?? 'gpt-4o-mini',
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content: [
+            'You transcribe the label of a medicine box photograph for a Dutch care app.',
+            'Return JSON only: {"name": string, "dose": string, "frequency": "dagelijks"|"tweemaal_daags"|"driemaal_daags"|"zo_nodig",',
+            '"times": string[] (24h HH:MM), "confidence": number 0..1, "raw_text": string}.',
+            'Copy what is printed. If the label is not readable, return {"name": "", "dose": "", "confidence": 0}.',
+            'Never guess a medicine, a dose or a schedule that is not on the label.',
+          ].join(' '),
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Read this medicine label.' },
+            { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
+          ],
+        },
+      ],
+    }),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new VisionUnavailableError(payload.error?.message ?? 'Medicine label reading failed', 'provider-error');
+  }
+  const content = String(payload.choices?.[0]?.message?.content ?? '').trim();
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(content) as Record<string, unknown>;
+  } catch {
+    throw new VisionUnavailableError('The vision model did not return JSON', 'unreadable');
+  }
+  return assertUsableReading({
+    name: String(parsed.name ?? ''),
+    dose: String(parsed.dose ?? ''),
+    frequency: (parsed.frequency ?? 'dagelijks') as MedicationLabelReading['frequency'],
+    times: Array.isArray(parsed.times) ? parsed.times.map(String) : [],
+    confidence: Number(parsed.confidence ?? 0),
+    rawText: String(parsed.raw_text ?? ''),
+  });
+}
+
 export async function generateEmbedding(input: string) {
   if (mockEnabled()) {
     const mocked = await mockJson('/embedding', { input });
