@@ -22,7 +22,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -77,14 +77,19 @@ test('iPad split view is limited to landscape shift summaries', () => {
   assert.ok(model.code.includes('isIpad && isLandscape'), 'split view must require both tablet and landscape');
 });
 
-test('the floating voice button grows on iPad', () => {
-  const model = parseFile(join(ROOT, 'apps/carer/src/components/FloatingVoiceButton.tsx'));
-  const sizes = model.objectValues('width');
-  const declared = [...model.declarations.values()].map((d) => d.initializer ?? d.text).filter(Boolean);
-  const rights = model.objectValues('right');
-  const sizeExpr = [...sizes, ...declared].find((value) => value.includes('isIpad') && /\b80\b/.test(value) && /\b60\b/.test(value));
-  assert.ok(sizeExpr, 'the button size must be 80pt on iPad and 60pt on phones, chosen from isIpad');
-  assert.ok(rights.some((value) => value.includes('isIpad')), 'the right margin must depend on the layout');
+test('the carer app no longer mounts a voice button that records nothing', () => {
+  // FloatingVoiceButton showed "HAVEN WACHT luistert…" for 60 seconds and recorded nothing:
+  // no recorder, no upload, no transcript. It was mounted twice in ShiftSummary, so a carer
+  // dictating a handover got a listening animation and lost the note. It is deleted, and this
+  // guards against it (or a copy of its promise) coming back without a recorder behind it.
+  assert.equal(
+    existsSync(join(ROOT, 'apps/carer/src/components/FloatingVoiceButton.tsx')),
+    false,
+    'the render-only voice button must stay deleted',
+  );
+  const summary = readFileSync(join(ROOT, 'apps/carer/src/screens/ShiftSummary.tsx'), 'utf8');
+  assert.equal(summary.includes('FloatingVoiceButton'), false, 'ShiftSummary must not mount it');
+  assert.equal(/luistert/i.test(summary), false, 'no screen may claim to be listening with no recorder');
 });
 
 test('large accessibility text scales by 1.5', () => {

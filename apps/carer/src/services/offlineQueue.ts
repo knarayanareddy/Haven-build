@@ -266,13 +266,90 @@ export async function completeOfflineAction(idempotencyKey: string): Promise<voi
   });
 }
 
+/**
+ * Queues a capture under the signed-in carer and the elder it is about.
+ *
+ * The carer id is a required argument rather than a payload field because it is not part of
+ * what the carer typed. It used to be read from `payload.carer_id`, which no caller ever set,
+ * so every capture on every handset was filed under the literal string 'offline-carer'. That
+ * defeated the per-carer partition the store was built around (a shared handset showed another
+ * carer's queue) and made the "N waiting" badge count zero forever, because the badge asks for
+ * the signed-in carer's items and none had that id.
+ *
+ * Throws rather than falling back to a placeholder: a capture filed under the wrong carer is a
+ * clinical record attributed to the wrong person.
+ */
 export async function enqueueOffline(
+  carerId: string,
   action: CarerOfflineItem['action'],
   payload: Record<string, unknown>
 ): Promise<CarerOfflineItem> {
-  const elderId = String(payload.elder_id ?? '00000000-0000-0000-0000-000000000001');
-  const carerId = String(payload.carer_id ?? 'offline-carer');
+  if (!carerId || carerId === 'offline-carer') {
+    throw new Error('enqueueOffline: a signed-in carer id is required');
+  }
+  const elderId = typeof payload.elder_id === 'string' ? payload.elder_id : '';
+  if (!elderId) {
+    throw new Error('enqueueOffline: payload.elder_id is required');
+  }
   return enqueueOfflineAction(carerId, elderId, action, payload);
+}
+
+/**
+ * Every pending capture belonging to one carer, across all the elders they visit.
+ *
+ * The drain runs on launch without knowing which elder the carer is about to open, so it cannot
+ * use the (carer, elder) index. Ordered oldest first so notes reach the server in the order
+ * they were written.
+ */
+export async function listOfflineActionsForCarer(carerId: string): Promise<CarerOfflineItem[]> {
+  await migrateLocalStorageToIndexedDb(carerId);
+
+  if (!hasIndexedDb()) {
+    return [...memoryQueue.values()]
+      .filter((item) => item.carerId === carerId && isPending(item))
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  }
+
+  const db = await openIndexedDb();
+  const transaction = db.transaction(STORE_NAME, 'readonly');
+  const request = transaction.objectStore(STORE_NAME).getAll();
+
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => {
+      const items = ((request.result as CarerOfflineItem[] | undefined) ?? [])
+        .filter((item) => item.carerId === carerId && isPending(item));
+      items.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      void recount(db, carerId).catch(() => undefined);
+      resolve(items);
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+/** Notes that one more delivery attempt was made, without dropping the capture. */
+export async function recordOfflineAttempt(idempotencyKey: string): Promise<void> {
+  if (!hasIndexedDb()) {
+    const item = memoryQueue.get(idempotencyKey);
+    if (item) memoryQueue.set(idempotencyKey, { ...item, attempts: item.attempts + 1 });
+    return;
+  }
+  const db = await openIndexedDb();
+  const transaction = db.transaction(STORE_NAME, 'readwrite');
+  const store = transaction.objectStore(STORE_NAME);
+  return new Promise((resolve, reject) => {
+    const get = store.get(idempotencyKey);
+    get.onsuccess = () => {
+      const item = get.result as CarerOfflineItem | undefined;
+      if (!item) {
+        resolve();
+        return;
+      }
+      const put = store.put({ ...item, attempts: item.attempts + 1, status: 'queued' });
+      put.onsuccess = () => resolve();
+      put.onerror = () => reject(put.error);
+    };
+    get.onerror = () => reject(get.error);
+  });
 }
 
 /**

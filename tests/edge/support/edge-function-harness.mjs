@@ -465,9 +465,15 @@ export async function loadAppModule(relativePath, { stubs = {} } = {}) {
   const normalise = (fromUrl, text, depth) => text
     .replace(/from\s+['"]expo-sqlite['"]/g, "from './expo-sqlite-node.mjs'")
     .replace(relativeSpecifier, (match, name) => {
-      // Already flattened (a stub), or written by hand with an extension.
-      if (name.endsWith('.mjs') || stubbed.has(name)) return match;
-      const base = name.replace(/\.tsx?$/, '');
+      // A stub was already pointed at a generated file in the transpile directory. Those names
+      // carry a `stub-` or shim prefix and resolve to nothing in the app tree, so the lookup
+      // below leaves them alone.
+      if (stubbed.has(name) || stubbed.has(name.replace(/\.mjs$/, ''))) return match;
+      // `transpileModuleFile` already appends `.mjs` to single-dot sibling imports, so a
+      // sibling can arrive here pre-flattened. Resolving it as well is what makes an entry
+      // module with a `./sibling` import loadable at all: the copy used to be skipped and Node
+      // failed with ERR_MODULE_NOT_FOUND for a module that exists in the repository.
+      const base = name.replace(/\.mjs$/, '').replace(/\.tsx?$/, '');
       const basename = base.split('/').pop();
       const target = resolveAppModule(fromUrl, base);
       if (!target) return match; // a type-only sibling, or not a file at all

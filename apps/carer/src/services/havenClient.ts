@@ -21,7 +21,13 @@ export class CarerClient {
       body: JSON.stringify(body),
     });
     const json = await response.json();
-    if (!response.ok) throw new Error(json.error ?? `${fn} failed`);
+    if (!response.ok) {
+      const failure = new Error(json.error ?? `${fn} failed`) as Error & { status?: number };
+      // The offline drain quarantines a capture the server will always refuse (4xx) and keeps
+      // a transient failure queued (5xx/network). It can only do that if the status survives.
+      failure.status = response.status;
+      throw failure;
+    }
     return json as T;
   }
 

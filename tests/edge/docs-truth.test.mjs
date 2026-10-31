@@ -38,7 +38,17 @@ test('the security report no longer implies complete rate-limit coverage', () =>
 
 test('the README states current counts instead of historical ones', () => {
   const readme = read('README.md');
-  assert.match(readme, /currently\s+\*\*81 Edge Functions\*\*/i);
+  // Derive the function count from the tree. It used to be written into this test as 81, so
+  // adding a function failed with "the README is wrong" even when the README was the only
+  // accurate copy — the same defect the migration count below already documents.
+  const functions = readdirSync(join(root, 'supabase/functions'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith('fn-'));
+  assert.ok(functions.length > 0, 'functions directory must not be empty');
+  assert.match(
+    readme,
+    new RegExp(`currently\\s+\\*\\*${functions.length} Edge Functions\\*\\*`, 'i'),
+    `the README must state the real function count (${functions.length})`,
+  );
 
   // The migration count used to be hard-coded here *and* in the README, so adding
   // a migration failed this test with "the README is wrong" even when the README

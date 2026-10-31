@@ -9,6 +9,7 @@ import { HandoverForm } from './src/screens/HandoverForm';
 import { ShiftSummary } from './src/screens/ShiftSummary';
 import { ResponsiveDrawerTabNavigator } from './src/navigation/ResponsiveDrawerTabNavigator';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { QueueDrain } from './src/components/QueueDrain';
 
 type CarerStackParamList = {
   Main: undefined;
@@ -21,6 +22,9 @@ const Stack = createNativeStackNavigator<CarerStackParamList>();
 export default function App() {
   const content = (
     <AuthProvider>
+      {/* Sends whatever this carer captured without a network. Nothing read the queue before,
+          so handover notes taken offline never reached the next shift. */}
+      <QueueDrain />
       <I18nProvider initialLocale="nl-NL">
         <NavigationContainer>
           <ErrorBoundary>

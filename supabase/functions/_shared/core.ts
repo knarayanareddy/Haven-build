@@ -1,5 +1,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2.43.0";
-import { toHttpError } from "./errors.ts";
+import { HavenHttpError, toHttpError } from "./errors.ts";
+
+// Re-exported so functions can throw a typed, client-safe error without a second import path.
+export { HavenHttpError };
 import { alertLevelFromScore, scoreScamText } from "../../../packages/scam-engine/src/catalog.mjs";
 
 // ─── P0-1 FIX: CORS — dynamic origin validation, not wildcard ───

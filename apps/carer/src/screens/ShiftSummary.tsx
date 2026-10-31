@@ -5,7 +5,6 @@ import { useTranslation } from '@haven/i18n';
 import { useAuth } from '../auth/AuthProvider';
 import { useResponsiveLayout } from '../services/platform';
 import { useAccessibilityInfo } from '../services/accessibility';
-import { FloatingVoiceButton } from '../components/FloatingVoiceButton';
 import { CarerClient } from '../services/havenClient';
 
 interface SummaryEntry {
@@ -103,7 +102,6 @@ export function ShiftSummary() {
             {!session ? 'Log in om de live dienstsamenvatting te laden.' : elderIds.length === 0 ? 'Configureer EXPO_PUBLIC_CARER_ELDER_IDS om toegewezen ouderen te laden.' : loadError ?? 'Geen dienstgegevens gevonden.'}
           </Text>
         </View>
-        <FloatingVoiceButton />
       </View>
     );
   }
@@ -220,7 +218,6 @@ export function ShiftSummary() {
         </ScrollView>
       )}
 
-      <FloatingVoiceButton />
     </View>
   );
 }

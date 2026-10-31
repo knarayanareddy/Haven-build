@@ -88,13 +88,18 @@ Implemented now:
   - i18n copy fallback smoke
   - UI touch/contrast token smoke
 
-Next focused modules:
+Next focused modules (updated 2026-10-31):
 
-1. `apps/elder/src/state/voiceRecordingMachine.ts`
-2. `apps/family/src/services/realtime.ts`
+1. ~~`apps/elder/src/state/voiceRecordingMachine.ts`~~ — deleted: no consumer. Writing a
+   lifecycle test for it would have made a dead machine look maintained.
+2. `apps/family/src/services/realtime.ts` — now wired by
+   `apps/family/src/components/DashboardRealtime.tsx` and covered by
+   `tests/edge/wiring-audit-fixes.test.mjs` (item 2).
 3. `packages/ui/src/components.ts`
-4. Carer and grandchild state-machine lifecycle tests
+4. ~~Carer and grandchild state-machine lifecycle tests~~ — both state machines were deleted
+   for the same reason as (1).
 
-Suggested Devin prompt:
+Suggested prompt:
 
-> Add tests for `apps/elder/src/state/voiceRecordingMachine.ts` only. Use direct module imports where possible. Do not refactor production code unless a test exposes a specific bug.
+> Add tests for `packages/ui/src/components.ts` only. Exercise the components; do not match
+> their source text. Do not refactor production code unless a test exposes a specific bug.

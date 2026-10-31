@@ -5,6 +5,7 @@ import { useTranslation } from '@haven/i18n';
 import { useAuth } from '../auth/AuthProvider';
 import { CarerClient } from '../services/havenClient';
 import { enqueueOffline } from '../services/offlineQueue';
+import { profileIdFromSession } from '@haven/contracts/src/session';
 
 interface HandoverFormProps {
   route: { params: { elder_id: string; elder_name: string } };
@@ -15,6 +16,7 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
   const { elder_id, elder_name } = route.params;
   const { session } = useAuth();
   const { t } = useTranslation();
+  const carerId = profileIdFromSession(session as { access_token?: string } | null);
   
   const [appetite, setAppetite] = useState(3);
   const [mood, setMood] = useState(3);
@@ -38,6 +40,33 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
     { id: '99999999-0000-0000-0000-000000000002', label: 'Lisinopril 10 mg' },
     { id: '99999999-0000-0000-0000-000000000003', label: 'Vitamine D 20 mcg' },
   ];
+
+  /**
+   * Queues the note under the signed-in carer.
+   *
+   * Returns false when there is no carer id to attribute it to, which is the one case where
+   * the note cannot be kept: filing it under a placeholder id would attach a clinical record
+   * to nobody, and the server rejects the send either way.
+   */
+  const enqueueHandover = useCallback(async (): Promise<boolean> => {
+    if (!carerId) return false;
+    try {
+      await enqueueOffline(carerId, 'handover_note', {
+        elder_id,
+        appetite,
+        mood,
+        // The untouched default is an i18n key, not an observation; the online path omits it
+        // and the queued path must send the same record.
+        mobility: mobility !== 'handover.mobility.self' ? mobility : undefined,
+        concerns,
+        notes,
+      });
+      return true;
+    } catch (error) {
+      console.warn('[HAVEN] handover note could not be queued:', String((error as Error)?.message ?? error));
+      return false;
+    }
+  }, [carerId, elder_id, appetite, mood, mobility, concerns, notes]);
 
   const submitOnline = useCallback(async () => {
     setSubmitting(true);
@@ -67,21 +96,25 @@ export function HandoverForm({ route, navigation }: HandoverFormProps) {
         
         Alert.alert(t('carerAppTitle'), t('carerHandoverSaved'), [{ text: 'OK', onPress: () => navigation.goBack() }]);
       } else {
-        enqueueOffline('handover_note', { elder_id, appetite, mood, mobility, concerns, notes });
+        await enqueueHandover();
         Alert.alert(t('carerAppTitle'), t('carerHandoverOffline'), [{ text: 'OK', onPress: () => navigation.goBack() }]);
       }
     } catch (error) {
-      enqueueOffline('handover_note', { elder_id, appetite, mood, mobility, concerns, notes });
+      await enqueueHandover();
       Alert.alert(t('carerAppTitle'), t('handover.alert.network_err'), [{ text: 'OK', onPress: () => navigation.goBack() }]);
     } finally {
       setSubmitting(false);
     }
-  }, [session, elder_id, appetite, mood, mobility, concerns, notes, administeredMed, t, navigation]);
+  }, [session, elder_id, appetite, mood, mobility, concerns, notes, administeredMed, enqueueHandover, t, navigation]);
 
-  const saveOffline = useCallback(() => {
-    enqueueOffline('handover_note', { elder_id, appetite, mood, mobility, concerns, notes });
-    Alert.alert(t('carerAppTitle'), t('handover.alert.offline_saved'), [{ text: 'OK', onPress: () => navigation.goBack() }]);
-  }, [elder_id, appetite, mood, mobility, concerns, notes, t, navigation]);
+  const saveOffline = useCallback(async () => {
+    const queued = await enqueueHandover();
+    Alert.alert(
+      t('carerAppTitle'),
+      queued ? t('handover.alert.offline_saved') : t('handover.alert.network_err'),
+      [{ text: 'OK', onPress: () => navigation.goBack() }]
+    );
+  }, [enqueueHandover, t, navigation]);
 
   const addPhoto = useCallback(() => {
     setPhotosCount((c) => c + 1);

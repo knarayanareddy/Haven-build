@@ -54,3 +54,25 @@ export function parseStoredSession(raw: string | null | undefined): StoredSessio
   }
   return candidate as StoredSession;
 }
+
+/**
+ * The signed-in profile id.
+ *
+ * `session.user.id` is present on sessions written by supabase-js; a restored session may only
+ * carry the JWT, whose `sub` claim is the same id. Two screens used to decode that by hand and
+ * a third read `.user.id` directly and got `undefined` whenever the object was absent.
+ */
+export function profileIdFromSession(session: { access_token?: string; user?: { id?: string } | null } | null | undefined): string | null {
+  const direct = session?.user?.id;
+  if (typeof direct === 'string' && direct.length > 0) return direct;
+  const token = session?.access_token;
+  if (typeof token !== 'string') return null;
+  const [, payload] = token.split('.');
+  if (!payload) return null;
+  try {
+    const claims = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/'))) as { sub?: unknown };
+    return typeof claims.sub === 'string' && claims.sub.length > 0 ? claims.sub : null;
+  } catch {
+    return null;
+  }
+}

@@ -1,12 +1,12 @@
 # 🗄️ HAVEN Codebase Inventory: Edge Functions & Database Schema Map
 
-This authoritative document catalogs the actual, complete list of all **81 Supabase Edge Functions** and all **104 PostgreSQL Database Tables** currently residing in the HAVEN production engineering package (`Haven-build`).
+This authoritative document catalogs the actual, complete list of all **82 Supabase Edge Functions** and all **104 PostgreSQL Database Tables** currently residing in the HAVEN production engineering package (`Haven-build`).
 
 ---
 
 ## 1. ⚡ Supabase Edge Functions (`supabase/functions/`)
 
-There are exactly **81 highly modular Deno / TypeScript Edge Functions** implemented across the product pillars (SCHILD, ANKER, KRING, BUURT, KOMPAS, STEM, WACHT, System Ops, and Compliance).
+There are exactly **82 highly modular Deno / TypeScript Edge Functions** implemented across the product pillars (SCHILD, ANKER, KRING, BUURT, KOMPAS, STEM, WACHT, System Ops, and Compliance).
 
 ```text
 Haven-build/supabase/functions/

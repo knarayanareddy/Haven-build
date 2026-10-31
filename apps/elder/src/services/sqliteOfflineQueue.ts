@@ -5,11 +5,21 @@ const db = SQLite.openDatabaseSync('haven-offline.db');
 
 export function initOfflineQueueDb() {
   db.execSync("create table if not exists offline_actions (idempotency_key text primary key not null, type text not null, payload text not null, created_at text not null, retry_count integer not null default 0, status text not null default 'queued', last_attempt_at text)");
-  try {
-    db.execSync("alter table offline_actions add column status text not null default 'queued'");
-    db.execSync("alter table offline_actions add column last_attempt_at text");
-  } catch (_) {
-    // Columns already exist
+  // Each column is added in its own statement. They used to share one try block, so the first
+  // "duplicate column" error on an upgraded install skipped every later `alter table` — the
+  // new column silently never appeared on exactly the handsets that needed it.
+  for (const statement of [
+    "alter table offline_actions add column status text not null default 'queued'",
+    "alter table offline_actions add column last_attempt_at text",
+    // Why a capture left the queue undelivered. Without it a quarantined action is
+    // indistinguishable from one that was sent, so nothing can be reported or investigated.
+    "alter table offline_actions add column last_error text",
+  ]) {
+    try {
+      db.execSync(statement);
+    } catch (_) {
+      // Column already exists
+    }
   }
 }
 
@@ -81,6 +91,15 @@ export function claimNextOfflineAction(): OfflineAction | null {
 export function completeOfflineAction(idempotencyKey: string) {
   initOfflineQueueDb();
   db.runSync("delete from offline_actions where idempotency_key = ?", idempotencyKey);
+}
+
+// ─── Quarantine an undeliverable capture ───
+export function quarantineOfflineAction(idempotencyKey: string, reason: string) {
+  initOfflineQueueDb();
+  db.runSync(
+    "update offline_actions set status = 'failed', last_error = ?, last_attempt_at = ? where idempotency_key = ?",
+    reason, new Date().toISOString(), idempotencyKey
+  );
 }
 
 // ─── Safely reset mid-processing crashes to queued / retry states ───

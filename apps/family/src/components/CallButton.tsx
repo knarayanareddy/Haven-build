@@ -8,7 +8,7 @@
 
 import React, { useCallback, useState } from 'react';
 
-type CallState = 'idle' | 'ringing' | 'connected' | 'declined' | 'error';
+type CallState = 'idle' | 'ringing' | 'connected' | 'declined' | 'error' | 'unavailable';
 
 interface CallButtonProps {
   elderId: string;
@@ -33,15 +33,25 @@ export function CallButton({ elderId, elderName, supabaseUrl, accessToken }: Cal
           authorization: `Bearer ${accessToken}`,
           'content-type': 'application/json',
         },
+        // No provider: the server uses whichever media provider this deployment has
+        // credentials for. This used to send 'mock', so even a configured LiveKit deployment
+        // opened a room with no media in it.
         body: JSON.stringify({
           elder_id: elderId,
-          provider: 'mock',
           idempotency_key: `call-${elderId}-${Date.now()}`,
         }),
       });
 
       const json = await response.json();
       if (!response.ok) throw new Error(json.error ?? 'Could not initiate call');
+
+      // `media: 'none'` comes back for the test-only mock provider. Saying "Belt…" there
+      // promises a call that cannot be answered, so it is reported as unavailable instead.
+      if (json.media === 'none') {
+        setCallState('unavailable');
+        setError('Beeldbellen is in deze omgeving nog niet beschikbaar.');
+        return;
+      }
 
       setCallState(json.status === 'connected' ? 'connected' : 'ringing');
     } catch (error) {
@@ -61,6 +71,7 @@ export function CallButton({ elderId, elderName, supabaseUrl, accessToken }: Cal
     connected: { label_nl: 'Verbonden',          label_en: 'Connected',          bg: '#4A7B5A', fg: '#FFFFFF' },
     declined:  { label_nl: 'Niet opgenomen',    label_en: 'Not answered',       bg: '#C94A4A', fg: '#FFFFFF' },
     error:     { label_nl: 'Bellen niet gelukt', label_en: 'Call failed',        bg: '#C94A4A', fg: '#FFFFFF' },
+    unavailable: { label_nl: 'Beeldbellen nog niet beschikbaar', label_en: 'Video calling not available yet', bg: '#6B7490', fg: '#FFFFFF' },
   };
 
   const config = stateConfig[callState];
@@ -69,7 +80,7 @@ export function CallButton({ elderId, elderName, supabaseUrl, accessToken }: Cal
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
       <button
         onClick={callState === 'ringing' || callState === 'connected' ? endCall : initiateCall}
-        disabled={callState === 'ringing'}
+        disabled={callState === 'ringing' || callState === 'unavailable'}
         aria-label={config.label_nl}
         style={{
           background: config.bg,
@@ -102,7 +113,7 @@ export function CallButton({ elderId, elderName, supabaseUrl, accessToken }: Cal
         </p>
       )}
 
-      {callState === 'error' && errorMessage && (
+      {(callState === 'error' || callState === 'unavailable') && errorMessage && (
         <p style={{ color: '#C94A4A', fontWeight: 700, fontSize: 14, margin: 0 }}>
           {errorMessage}
         </p>

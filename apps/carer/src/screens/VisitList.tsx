@@ -108,25 +108,25 @@ export function VisitList({ navigation }: { navigation: { navigate: (screen: str
   const completeVisit = useCallback(async (elderId: string) => {
     const visit = visits.find((v) => v.elder_id === elderId);
     const completedAt = new Date().toISOString();
-    if (!session) {
-      enqueueOffline('visit_log', { elder_id: elderId, check_in_time: visit?.started_at ?? completedAt, check_out_time: completedAt });
-      setVisits((prev) => prev.map((v) => v.elder_id === elderId ? { ...v, visit_status: 'completed' as const } : v));
+    const signedInCarerId = sessionUserId(session);
+    if (!session || !signedInCarerId) {
+      // Without a session there is no carer to attribute the visit to. Queuing it under a made-up
+      // id is how this used to lose the attribution entirely; say so instead of filing it wrong.
+      Alert.alert('HAVEN', 'Log opnieuw in om je bezoek af te ronden.');
       return;
     }
     try {
-      const carerId = sessionUserId(session);
-      if (!carerId) throw new Error('Missing carer profile for signed-in session');
       const client = new CarerClient({ supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL!, accessToken: session.access_token });
       await client.visitLog({
         elder_id: elderId,
-        carer_id: carerId,
+        carer_id: signedInCarerId,
         visit_date: completedAt.slice(0, 10),
         check_in_time: visit?.started_at ?? completedAt,
         check_out_time: completedAt,
       });
       setVisits((prev) => prev.map((v) => v.elder_id === elderId ? { ...v, visit_status: 'completed' as const } : v));
     } catch (error) {
-      enqueueOffline('visit_log', { elder_id: elderId, check_in_time: visit?.started_at ?? completedAt, check_out_time: completedAt });
+      void enqueueOffline(signedInCarerId, 'visit_log', { elder_id: elderId, check_in_time: visit?.started_at ?? completedAt, check_out_time: completedAt }).catch(() => undefined);
       Alert.alert('HAVEN', String((error as Error).message ?? error));
     }
   }, [session, visits]);

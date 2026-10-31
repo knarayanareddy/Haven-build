@@ -1,8 +1,9 @@
-import { admin, corsHeaders, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
+import { admin, corsHeaders, HavenHttpError, json, readJsonBody, recordMetric, userClient, errorResponse } from "../_shared/core.ts";
 import { assertElderOrFamilyCan, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { withIdempotency } from "../_shared/idempotency.ts";
 import { rateLimit } from "../_shared/ratelimit.ts";
+import { providerIsConfigured, providerMediaKind, resolveDefaultProvider } from "../_shared/videoJoinToken.ts";
 
 const PROVIDERS = new Set(["mock", "livekit", "twilio"]);
 
@@ -20,12 +21,13 @@ async function canInitiateVideoCall(userId: string, elderId: string): Promise<vo
   // Step 2: Must have messages permission (basic family access)
   await assertElderOrFamilyCan(userId, elderId, "messages");
 
-  // Step 3: Check elder consent for video calls
+  // Step 3: Check elder consent for video calls — the video-call pack, not the scam-coaching
+  // pack it used to fall back on. Consenting to scam coaching is not consenting to be filmed.
   const { data: consent } = await dbAdmin
     .from("consent_pack_status")
     .select("status")
     .eq("elder_id", elderId)
-    .eq("pack_key", "shield_scam_coaching") // closest consent pack — TODO: add dedicated video_call pack
+    .eq("pack_key", "core_video_call")
     .maybeSingle();
   if (!consent || consent.status !== "accepted") {
     throw new Error("Elder has not consented to video calling");
@@ -38,9 +40,27 @@ Deno.serve(async (req) => {
   try {
     await rateLimit(req, "fn-video-call-create");
     const body = await readJsonBody(req) as Record<string, unknown>;
-    validateBody(body, { elder_id: "uuid", provider: "string" }, { allowUnknown: true });
-    if (!PROVIDERS.has(String(body.provider))) throw new Error("provider must be mock, livekit or twilio");
+    validateBody(body, { elder_id: "uuid" }, { allowUnknown: true });
+
+    // The caller may name a provider; otherwise the deployment's configured one is used. The
+    // family dashboard used to hardcode 'mock', so a deployment with real media credentials
+    // still produced sessions no one could join.
+    const provider = body.provider === undefined
+      ? resolveDefaultProvider()
+      : String(body.provider);
+    if (!provider || !PROVIDERS.has(provider)) {
+      if (body.provider === undefined) {
+        throw new HavenHttpError("Video calling is not configured on this deployment", 503, "SERVICE_UNAVAILABLE");
+      }
+      throw new Error("provider must be mock, livekit or twilio");
+    }
     const userId = await getJwtUserId(req);
+
+    // No configured media provider means no call. Creating the session anyway is what made the
+    // family button say "Belt…" over a room that did not exist.
+    if (!providerIsConfigured(provider)) {
+      throw new HavenHttpError("Video calling is not configured on this deployment", 503, "SERVICE_UNAVAILABLE");
+    }
 
     // P1-9 FIX: Dedicated permission + feature flag check
     await canInitiateVideoCall(userId, String(body.elder_id));
@@ -58,12 +78,23 @@ Deno.serve(async (req) => {
         const { data: session, error } = await db.from("video_call_sessions").insert({
           elder_id: body.elder_id,
           initiator_id: userId,
-          provider: body.provider,
+          provider,
           provider_room_id: roomId,
           status: "created",
         }).select().single();
         if (error) throw error;
-        return { body: { video_call_session_id: session.id, provider: body.provider, provider_room_id: roomId, status: "created", join_url_for_elder: `haven://call/${session.id}?role=elder` } };
+        return {
+          body: {
+            video_call_session_id: session.id,
+            provider,
+            provider_room_id: roomId,
+            status: "created",
+            // 'none' only for the mock provider, which carries no media and must be labelled
+            // as such by the caller rather than shown as a live call.
+            media: providerMediaKind(provider),
+            join_url_for_elder: `haven://call/${session.id}?role=elder`,
+          },
+        };
       },
     });
 

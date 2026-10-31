@@ -224,6 +224,7 @@
   "actions.consent_defer.alert": "Deciding later is ok. We will remind you tomorrow.",
   "actions.signin_required.alert": "Signing in is required to answer video calls.",
   "actions.call_answered.alert": "Call answered. Session: {sessionId}",
+  "actions.call_no_media.alert": "Call answered. Video is not available in this environment; you are connected by phone.",
   "actions.call_declined.alert": "Call declined. Session {sessionId} closed.",
   "actions.checkin_received.alert": "Check-in ({period}) received. Thank you!",
   "actions.daily_rhythm.start": "Starting your daily rhythm. Good morning!",

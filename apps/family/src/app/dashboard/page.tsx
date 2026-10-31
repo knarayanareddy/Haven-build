@@ -8,6 +8,7 @@ import { AlertList, AlertRow } from '../../components/AlertList';
 import { DailyStatusPill } from '../../components/DailyStatusPill';
 import { TrustSignalPanel } from '../../components/TrustSignalPanel';
 import { CallButton } from '../../components/CallButton';
+import { DashboardRealtime } from '../../components/DashboardRealtime';
 import { familyDashboardSummary } from '../../services/dashboard';
 import { createSupabaseServerClient, readSupabaseEnv } from '../../lib/supabase-server';
 import { NO_PERMISSIONS, resolveFamilySession, type FamilyPermissions } from '../../lib/session';
@@ -39,7 +40,7 @@ type LoadedDashboard =
   | { kind: 'anonymous' }
   | { kind: 'no-consent' }
   | { kind: 'error'; message: string }
-  | { kind: 'ready'; data: DashboardData; accessToken: string; supabaseUrl: string };
+  | { kind: 'ready'; data: DashboardData; accessToken: string; supabaseUrl: string; userId: string };
 
 /**
  * Loads the dashboard for the signed-in family member.
@@ -98,6 +99,9 @@ async function loadDashboard(): Promise<LoadedDashboard> {
       kind: 'ready',
       accessToken,
       supabaseUrl: env.url,
+      // The family member's own id, needed by the realtime subscriber to filter their own
+      // notifications channel — the elder id would subscribe to the wrong person's.
+      userId: session.userId,
       data: {
         permissions: session.permissions,
         elderId: summary.elder_id ?? session.elderId,
@@ -198,11 +202,19 @@ export default async function DashboardPage() {
     );
   }
 
-  const { data, accessToken, supabaseUrl } = result;
+  const { data, accessToken, supabaseUrl, userId } = result;
   const can = data.permissions ?? NO_PERMISSIONS;
 
   return (
     <main style={{ display: 'grid', gap: 24, padding: 32, background: '#F5F3EE', minHeight: '100vh', fontFamily: 'Nunito, system-ui, sans-serif', color: '#1A1F2E' }}>
+      {/* Subscribes to this elder's alerts, medication, messages and own notifications and
+          refreshes the server render when one arrives. Without it a fall alert raised while
+          the dashboard is open is invisible until the page is reloaded by hand. */}
+      <DashboardRealtime
+        elderId={data.elderId}
+        profileId={userId}
+        permissions={{ alerts: can.alerts, medications: can.medications, messages: can.messages, location: can.location }}
+      />
       <header>
         <h1 style={{ margin: 0, fontSize: 36 }}>HAVEN — {data.elderName}</h1>
         <p style={{ color: '#6B7490', fontWeight: 700, marginTop: 6 }}>Toestemming-gebaseerde mantelzorg-dashboard. Precieze locatie wordt nooit getoond.</p>
