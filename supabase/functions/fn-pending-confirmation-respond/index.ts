@@ -1,5 +1,5 @@
 import { rateLimit } from "../_shared/ratelimit.ts";
-import { admin, corsHeaders, json, readJsonBody, recordMetric, userClient } from "../_shared/core.ts";
+import { admin, corsHeaders, dispatchNotification, json, readJsonBody, recordMetric, userClient } from "../_shared/core.ts";
 import { assertSelf, getJwtUserId } from "../_shared/authz.ts";
 import { validateBody } from "../_shared/validation.ts";
 import { withIdempotency } from "../_shared/idempotency.ts";
@@ -92,6 +92,24 @@ Deno.serve(asyncWrapper("fn-pending-confirmation-respond", async (req: Request) 
             resolution_notes: "Elder actively confirmed they are okay.",
           }).eq("id", fallEventId);
           if (fallError) throw fallError;
+        }
+      }
+
+      if (pending.confirmation_type === "fall_response" && body.resolution === false) {
+        const { data: relatives, error: familyError } = await dbAdmin.from("family_relationships")
+          .select("family_member_id").eq("elder_id", pending.elder_id)
+          .eq("elder_consented", true).eq("is_active", true).eq("notify_on_crisis", true);
+        if (familyError) throw familyError;
+        // This records and attempts notifications, but does not establish receipt or call an
+        // emergency service. The app must never assert that either has happened.
+        for (const relative of relatives ?? []) {
+          await dispatchNotification({
+            recipient_id: String(relative.family_member_id), elder_id: String(pending.elder_id),
+            notification_type: "crisis_gedetecteerd",
+            title_nl: "Hulp gevraagd na een val", title_en: "Help requested after a fall",
+            body_nl: "Neem direct contact op met uw naaste.", body_en: "Contact your loved one immediately.",
+            data: { fall_event_id: payload.fall_event_id ?? null, confirmation_id: body.confirmation_id },
+          });
         }
       }
 

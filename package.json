@@ -9,7 +9,7 @@
     "test:edge": "node --experimental-transform-types --test tests/edge/*.test.mjs",
     "test:e2e": "node tests/e2e/iphone-suite-smoke.test.mjs",
     "test:integration:live": "node tests/integration/live-rls.test.mjs",
-    "test": "corepack pnpm run validate:suite && corepack pnpm run typecheck && corepack pnpm run lint && corepack pnpm run test:edge && corepack pnpm run test:rls && corepack pnpm run audit:functions && corepack pnpm run audit:tests && corepack pnpm run audit:docs",
+    "test": "corepack pnpm run validate:suite && corepack pnpm run typecheck && corepack pnpm run lint && corepack pnpm run test:edge && corepack pnpm run test:information-flow && corepack pnpm run test:rls && corepack pnpm run audit:functions && corepack pnpm run audit:tests && corepack pnpm run audit:docs",
     "preview:iphone": "python3 -m http.server 4173 --directory apps/iphone-suite",
     "preview:family": "python3 -m http.server 4174 --directory apps/family-dashboard",
     "mock:ai": "node scripts/mock-ai-server.mjs",
@@ -42,7 +42,8 @@
     "audit:functions": "node scripts/ci/audit-function-coverage.mjs",
     "audit:docs": "node scripts/ci/audit-docs-truth.mjs",
     "audit:tests": "node scripts/ci/audit-test-substance.mjs",
-    "audit:deps": "node scripts/ci/audit-dependencies.mjs"
+    "audit:deps": "node scripts/ci/audit-dependencies.mjs",
+    "test:information-flow": "node --experimental-transform-types --test tests/integration/information-flow-diagnostic.test.mjs"
   },
   "workspaces": [
     "apps/*",
@@ -98,6 +99,7 @@
     }
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.3.14",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "1.60.0",
     "@types/node": "^25.9.3",

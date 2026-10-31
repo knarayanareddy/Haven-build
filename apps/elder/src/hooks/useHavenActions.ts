@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { Alert } from 'react-native';
+import { Alert, Linking } from 'react-native';
 import { useTranslation } from '@haven/i18n';
 import { useAuth } from '../auth/AuthProvider';
 import { HavenClient } from '../services/havenClient';
@@ -27,8 +27,15 @@ export function useHavenActions(screenId: string) {
   const elderId = sessionUserId(session);
 
   const handlePrimaryAction = useCallback(async (actionId: string) => {
-    if (actionId === 'CALL_FAMILY' || actionId === 'EMERGENCY') {
-      Alert.alert('HAVEN', actionId === 'EMERGENCY' ? t('actions.emergency.alert') : t('actions.call_family.alert'));
+    if (actionId === 'EMERGENCY') {
+      Alert.alert('HAVEN', t('actions.emergency.alert'), [
+        { text: t('actions.emergency.cancel'), style: 'cancel' },
+        { text: t('actions.emergency.call'), onPress: () => { void Linking.openURL('tel:112').catch(() => Alert.alert('HAVEN', t('actions.emergency.failed'))); } },
+      ]);
+      return;
+    }
+    if (actionId === 'CALL_FAMILY') {
+      Alert.alert('HAVEN', t('actions.call_family.alert'));
       return;
     }
     if (actionId === 'LANG_TOGGLE') {
@@ -117,42 +124,41 @@ export function useHavenActions(screenId: string) {
       return;
     }
     if (actionId.startsWith('CALL_ANSWER:')) {
+      // A provider token alone is not a connected audio/video call. This build has no
+      // media client, so fail visibly rather than marking a session joined without media.
+      Alert.alert('HAVEN', t('actions.video_unavailable.alert'));
+      return;
+    }
+    if (actionId.startsWith('CALL_DECLINE:')) {
       const sessionId = actionId.split(':')[1];
-      if (!client) {
+      if (!client || !sessionId) {
         Alert.alert('HAVEN', t('actions.signin_required.alert'));
         return;
       }
       try {
-        if (!elderId) throw new Error('Missing elder profile for signed-in session');
-        if (!sessionId) throw new Error('Missing video call session');
-        // Two steps, and the second one is what actually joins: the join token is an
-        // invitation, redeemed for provider credentials. The old code fetched a token and
-        // dropped it, then told the elder the call was answered.
-        const { token } = await client.videoCallJoinToken({ video_call_session_id: sessionId });
-        const joined = await client.videoCallRedeem({ video_call_session_id: sessionId, token });
-        Alert.alert('HAVEN', joined.media === 'none'
-          ? t('actions.call_no_media.alert')
-          : t('actions.call_answered.alert', { sessionId }));
+        const response = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/fn-video-call-end`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${session?.access_token}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ video_call_session_id: sessionId }),
+        });
+        if (!response.ok) throw new Error('Could not decline call');
+        Alert.alert('HAVEN', t('actions.call_declined.alert', { sessionId }));
       } catch (error) {
         Alert.alert(t('haven_explanation_title'), translateElderError(error));
       }
       return;
     }
-    if (actionId.startsWith('CALL_DECLINE:')) {
-      const sessionId = actionId.split(':')[1];
-      if (client) {
-        try {
-          await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/fn-video-call-end`, {
-            method: 'POST',
-            headers: {
-              authorization: `Bearer ${session?.access_token}`,
-              'content-type': 'application/json',
-            },
-            body: JSON.stringify({ session_id: sessionId }),
-          });
-        } catch (_) {}
+    if (actionId.startsWith('TOGGLE_TASK:')) {
+      const taskId = actionId.slice('TOGGLE_TASK:'.length);
+      if (!client || !elderId || !taskId) {
+        Alert.alert('HAVEN', t('actions.live_signin_required.alert'));
+        return;
       }
-      Alert.alert('HAVEN', t('actions.call_declined.alert', { sessionId }));
+      try {
+        await client.completeTask(taskId);
+      } catch (error) {
+        Alert.alert(t('haven_explanation_title'), translateElderError(error));
+      }
       return;
     }
     if (actionId.startsWith('CHECKIN:')) {
@@ -204,12 +210,30 @@ export function useHavenActions(screenId: string) {
     if (actionId.startsWith('FALL_OK:') || actionId.startsWith('FALL_HELP:')) {
       const [prefix, confirmationId] = actionId.split(':');
       const isFine = prefix === 'FALL_OK';
-      enqueueOfflineAction('CONFIRMATION_RESPOND', { elder_id: elderId, confirmation_id: confirmationId, resolution: isFine });
-      Alert.alert('HAVEN', isFine ? t('actions.fall_ok.alert') : t('actions.fall_help.alert'));
+      const payload = { elder_id: elderId, confirmation_id: confirmationId, resolution: isFine };
+      if (isFine) {
+        enqueueOfflineAction('CONFIRMATION_RESPOND', payload);
+        Alert.alert('HAVEN', t('actions.fall_ok.alert'));
+      } else {
+        // Present the emergency dialler immediately, without waiting on any network call.
+        Alert.alert('HAVEN', t('actions.fall_help.alert'), [
+          { text: t('actions.emergency.cancel'), style: 'cancel' },
+          { text: t('actions.emergency.call'), onPress: () => { void Linking.openURL('tel:112').catch(() => Alert.alert('HAVEN', t('actions.emergency.failed'))); } },
+        ]);
+        if (!client || !elderId) enqueueOfflineAction('CONFIRMATION_RESPOND', payload);
+        else {
+          try { await client.invoke('fn-pending-confirmation-respond', { confirmation_id: confirmationId, resolution: false }); }
+          catch { enqueueOfflineAction('CONFIRMATION_RESPOND', payload); }
+        }
+      }
       return;
     }
     if (actionId.startsWith('TAKE:')) {
       const medicationId = actionId.split(':')[1];
+      if (!elderId || !medicationId) {
+        Alert.alert('HAVEN', t('actions.live_signin_required.alert'));
+        return;
+      }
       if (!client) {
         enqueueOfflineAction('CONFIRM_MEDICATION', { elder_id: elderId, medication_id: medicationId, screen_id: screenId });
         Alert.alert('HAVEN', t('actions.take_offline.alert'));
@@ -217,8 +241,9 @@ export function useHavenActions(screenId: string) {
       }
       try {
         if (!elderId) throw new Error('Missing elder profile for signed-in session');
-        await client.voice({ elder_id: elderId, screen_id: 'PILLS', transcript_text: 'I took it', medication_reminder_id: medicationId, locale: 'en-GB' });
-        Alert.alert('HAVEN', t('actions.take_success.alert'));
+        const result = await client.voice({ elder_id: elderId, screen_id: 'PILLS', medication_action: 'taken', medication_reminder_id: medicationId });
+        if (result.action_taken !== 'AWAIT_REPEAT_BACK') throw new Error('Medication confirmation was not created');
+        Alert.alert('HAVEN', result.response_text);
       } catch (error) {
         if (classifyNetworkError(error) === 'offline') {
           enqueueOfflineAction('CONFIRM_MEDICATION', { elder_id: elderId, medication_id: medicationId, screen_id: screenId });

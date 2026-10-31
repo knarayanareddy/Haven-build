@@ -30,6 +30,7 @@ declare module 'react-native-gesture-handler';
 
 declare module 'react-native' {
   export const Alert: { alert: (...args: any[]) => void };
+  export const Linking: { openURL: (url: string) => Promise<unknown> };
   export const ScrollView: any;
   export const Image: any;
   export const ActivityIndicator: any;

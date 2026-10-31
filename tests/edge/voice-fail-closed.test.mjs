@@ -82,6 +82,6 @@ test('a transcription failure maps to 503 with no intent, never a medication int
 
 test('a missing audio field is a 400, not a fabricated statement', () => {
   const pipeline = read('supabase/functions/fn-voice-pipeline/index.ts');
-  assert.match(pipeline, /if \(!body\.audio_base64 && !body\.transcript_text\)/);
+  assert.match(pipeline, /if \(!medicationTap && !body\.audio_base64 && !body\.transcript_text\)/);
   assert.match(pipeline, /status: 400/);
 });

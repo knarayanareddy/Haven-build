@@ -89,7 +89,19 @@ export function ElderScreen({ route, navigation }: Props) {
     elderId: sessionUserId(session),
     screenId: schema.screenId,
     locale,
+    refreshMs: 10_000,
   });
+
+  // Only visible text messages are acknowledged; media cannot yet be opened in this screen.
+  const visibleUnreadIds = data.messages.slice(0, 3).filter((message) => message.unread && !message.hasMedia).map((message) => message.id).join(',');
+  useEffect(() => {
+    if (schema.screenId !== 'FAMILY' || !client || !visibleUnreadIds) return;
+    let active = true;
+    void client.markFamilyMessagesRead(visibleUnreadIds.split(','))
+      .then(() => { if (active) data.refresh(); })
+      .catch((error) => console.warn('[HAVEN] Could not mark messages read', error));
+    return () => { active = false; };
+  }, [schema.screenId, client, visibleUnreadIds, data.refresh]);
 
   const ctx: ScreenContext = {
     locale: seed.profile.locale,
@@ -104,15 +116,19 @@ export function ElderScreen({ route, navigation }: Props) {
     buurt: data.buurt,
     visits: data.visits,
     pendingConfirmation: data.pendingConfirmation,
+    incomingCall: data.incomingCall,
     onPrimaryAction: (actionId: string) => {
       if (actionId.startsWith('NAV_')) {
         const target = actionId.replace('NAV_', '');
         navigation.navigate(target);
         return;
       }
-      actions.handlePrimaryAction(actionId);
+      void actions.handlePrimaryAction(actionId).then(() => data.refresh());
     },
   };
   void session;
-  return <ScreenRenderer schema={schema} context={ctx} />;
+  const activeSchema = data.incomingCall
+    ? productionScreens.find((screen) => screen.screenId === 'INCOMING_CALL') ?? schema
+    : schema;
+  return <ScreenRenderer schema={activeSchema} context={ctx} />;
 }

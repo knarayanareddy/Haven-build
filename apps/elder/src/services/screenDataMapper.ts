@@ -25,6 +25,7 @@ export interface ScreenDataPayload {
     tasks?: unknown[];
     pending_confirmations?: unknown[];
     visits?: unknown[];
+    incoming_calls?: unknown[];
   } | null;
 }
 
@@ -37,6 +38,7 @@ export interface MappedScreenData {
   visits: VisitLogRow[];
   buurt: BuurtRow;
   pendingConfirmation: PendingConfirmation | null;
+  incomingCall: { video_call_session_id: string; from_name?: string; is_test: boolean } | null;
 }
 
 type Row = Record<string, unknown>;
@@ -73,7 +75,7 @@ function relationOf(value: unknown): FamilyMember['relation'] {
   return RELATIONS.includes(raw as FamilyMember['relation']) ? (raw as FamilyMember['relation']) : 'andere';
 }
 
-export function mapScreenData(payload: ScreenDataPayload | null, locale: 'nl-NL' | 'en-GB'): MappedScreenData {
+export function mapScreenData(payload: ScreenDataPayload | null, locale: 'nl-NL' | 'en-GB', elderId?: string | null): MappedScreenData {
   const data = payload?.data ?? {};
   const familyRows = (data.family ?? []) as Row[];
 
@@ -107,12 +109,11 @@ export function mapScreenData(payload: ScreenDataPayload | null, locale: 'nl-NL'
     return {
       id: str(row.id),
       from: sender,
-      kind: kind === 'video' || kind === 'voice' || kind === 'heart' ? kind : 'text',
+      kind: kind === 'video_hallo' ? 'video' : kind === 'voice_note' ? 'voice' : 'text',
       body: locale === 'nl-NL' ? str(row.content_nl) || str(row.content_en) : str(row.content_en) || str(row.content_nl),
-      // Read state lives in a separate table the screen does not need; a message is new until
-      // the elder has opened the conversation, which this payload cannot see. Showing them all
-      // as read is the conservative direction: no unread badge for a message already seen.
-      unread: false,
+      unread: row.read_by_elder === false && (!elderId || row.sender_id !== elderId),
+      hasMedia: Boolean(row.storage_path),
+
     };
   });
 
@@ -181,5 +182,10 @@ export function mapScreenData(payload: ScreenDataPayload | null, locale: 'nl-NL'
       events: [],
     },
     pendingConfirmation,
+    incomingCall: (() => {
+      const call = ((data.incoming_calls ?? []) as Row[])[0];
+      if (!call || !str(call.id)) return null;
+      return { video_call_session_id: str(call.id), from_name: nameByProfile.get(str(call.initiator_id)) || undefined, is_test: call.provider === 'mock' };
+    })(),
   };
 }

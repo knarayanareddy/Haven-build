@@ -3,7 +3,7 @@
 // ─── Phase 2.1: "Call Grandma" Button ───
 // Family dashboard component that triggers a video call to the elder.
 // Flow: idle → ringing (fn-video-call-create called) → connected/declined/error
-// Falls back to regular phone call if video fails.
+// No automatic phone fallback is implemented.
 // Security: Requires elder consent (fn-video-call-create checks feature flag + consent).
 
 import React, { useCallback, useState } from 'react';
@@ -103,7 +103,7 @@ export function CallButton({ elderId, elderName, supabaseUrl, accessToken }: Cal
 
       {callState === 'ringing' && (
         <p style={{ color: '#A56A00', fontWeight: 700, fontSize: 14, margin: 0 }}>
-          {elderName} krijgt een oproep op het scherm. Als video niet werkt, probeert HAVEN een gewoon telefoontje.
+          Oproep aangevraagd. De oudere moet de app open hebben. Beeldbellen werkt nog niet; bel zelf op een andere manier.
         </p>
       )}
 

@@ -130,7 +130,7 @@ test('the retention sweeper covers the regulated tables and is bounded', () => {
 test('the emergency fall RPC survives a device revoked mid-crisis', () => {
   const fn = model.fn('get_active_emergency_falls');
   assert.ok(fn, 'get_active_emergency_falls() must exist');
-  assert.match(fn.body, /LEFT JOIN device_sessions/i, 'a missing device must not hide a fall');
+  assert.match(fn.body, /LEFT JOIN (?:public\.)?device_sessions/i, 'a missing device must not hide a fall');
   assert.match(fn.body, /revoked_at/i, 'the query must reason about revocation');
 
   const index = model.indexesFor('fall_events').find((i) => i.name === 'idx_fall_events_active_emergency');

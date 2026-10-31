@@ -103,9 +103,8 @@ test('a reminder that is already taken is not the target of a new confirmation',
 
   const response = await speak(db, { transcript_text: 'Ik heb het ingenomen', medication_reminder_id: MORNING });
 
-  assert.equal(response.status, 200, JSON.stringify(response.body));
-  assert.equal(db.store.pending_confirmations[0].payload.medication_reminder_id, EVENING,
-    'a closed dose cannot be confirmed again; the open one is the honest fallback');
+  assert.equal(response.status, 404, JSON.stringify(response.body));
+  assert.equal(db.store.pending_confirmations.length, 0, 'a closed dose must not redirect confirmation to another dose');
 });
 
 test('another elder\u2019s reminder cannot be named as the target', async () => {
@@ -114,9 +113,8 @@ test('another elder\u2019s reminder cannot be named as the target', async () => 
 
   const response = await speak(db, { transcript_text: 'Ik heb het ingenomen', medication_reminder_id: EVENING });
 
-  assert.equal(response.status, 200, JSON.stringify(response.body));
-  assert.equal(db.store.pending_confirmations[0].payload.medication_reminder_id, MORNING,
-    'the foreign reminder is ignored, not confirmed');
+  assert.equal(response.status, 404, JSON.stringify(response.body));
+  assert.equal(db.store.pending_confirmations.length, 0, 'a foreign target must not redirect confirmation to another dose');
 });
 
 test('snoozing moves that reminder instead of asking whether it was taken', async () => {
