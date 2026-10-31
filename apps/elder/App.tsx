@@ -6,13 +6,16 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { I18nProvider } from '@haven/i18n';
 import { AuthProvider } from './src/auth/AuthProvider';
 import { AppNavigator } from './src/navigation/AppNavigator';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 
 export default function App() {
   const content = (
     <AuthProvider>
       <I18nProvider initialLocale="nl-NL">
         <NavigationContainer>
-          <AppNavigator />
+          <ErrorBoundary>
+            <AppNavigator />
+          </ErrorBoundary>
         </NavigationContainer>
       </I18nProvider>
     </AuthProvider>

@@ -5,6 +5,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import { createClient, Session, SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@haven/database/src/types';
 import type { Locale } from '@haven/contracts/src/haven';
+import { parseStoredSession } from '@haven/contracts/src/session';
 import { translate } from '@haven/i18n';
 
 const SESSION_KEY = 'haven.carer.secure.session';
@@ -52,12 +53,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     SecureStore.getItemAsync(SESSION_KEY).then(async (stored: string | null) => {
       if (!mounted || !supabase) return;
       if (stored) {
-        const parsed = JSON.parse(stored) as Session;
-        setSession(parsed);
-        await supabase.auth.setSession({
-          access_token: parsed.access_token,
-          refresh_token: parsed.refresh_token,
-        });
+        const parsed = parseStoredSession(stored);
+        if (parsed) {
+          setSession(parsed as unknown as Session);
+          await supabase.auth.setSession({
+            access_token: parsed.access_token,
+            refresh_token: parsed.refresh_token,
+          });
+        } else {
+          await SecureStore.deleteItemAsync(SESSION_KEY);
+        }
       }
       setReady(true);
     });

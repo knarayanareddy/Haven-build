@@ -8,6 +8,7 @@ import { AuthProvider } from './src/auth/AuthProvider';
 import { HandoverForm } from './src/screens/HandoverForm';
 import { ShiftSummary } from './src/screens/ShiftSummary';
 import { ResponsiveDrawerTabNavigator } from './src/navigation/ResponsiveDrawerTabNavigator';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 
 type CarerStackParamList = {
   Main: undefined;
@@ -22,6 +23,7 @@ export default function App() {
     <AuthProvider>
       <I18nProvider initialLocale="nl-NL">
         <NavigationContainer>
+          <ErrorBoundary>
           <Stack.Navigator
             initialRouteName="Main"
             screenOptions={{
@@ -34,6 +36,7 @@ export default function App() {
             <Stack.Screen name="HandoverForm" component={HandoverForm as any} options={{ title: 'Handover Notitie' }} />
             <Stack.Screen name="ShiftSummary" component={ShiftSummary as any} options={{ title: 'Overdracht' }} />
           </Stack.Navigator>
+          </ErrorBoundary>
         </NavigationContainer>
       </I18nProvider>
     </AuthProvider>

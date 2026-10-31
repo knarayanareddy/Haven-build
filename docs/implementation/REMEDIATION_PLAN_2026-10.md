@@ -1093,7 +1093,7 @@ would notice. The prop stays for a parent that owns an audio session — the mac
 — and wins when present. The memo comparator still earns its place: it is what stops a parent
 re-render (the screen renderer re-renders on its clock) from re-rendering the button.
 
-### 14.3 What is verified, and what needs a device
+### 14.3 What is verified, and what needs a device — **closed in §15.2**
 
 Verified: the mapping, the throttle, the polling loop, unsubscribe and stop, permission
 refusal before any recorder is constructed, a platform without metering support, and a
@@ -1122,4 +1122,81 @@ answer that question; only a phone can.
 ```
 tests/edge: 49 files · behavioural 49 · static-only 0
 # tests 446 · # pass 446 · # fail 0
+```
+
+---
+
+## 15. Ninth pass — PR #3, and the number that needed a device (2026-10-30)
+
+### 15.1 The meter floor no longer depends on a guess
+
+§14.3 left one open question: whether `METER_FLOOR_DB = -50` produced a useful ring on real
+hardware. It could not be answered by testing, because the premise was wrong.
+
+A fixed floor assumes every microphone reports the same absolute level for the same sound.
+They do not. Handset gain, automatic gain control and the room differ by tens of decibels, so
+−25 dBFS is a normal speaking voice on one phone and air-conditioning on another. With one
+absolute floor:
+
+* on a hot microphone the room's own hum mapped to **44%** — the ring sitting half-open in a
+  silent room, telling an older adult "HAVEN hears you" while it heard nothing;
+* on a quiet one a raised voice barely moved it.
+
+The floor is now **measured per recording**: a rolling low percentile (10th) of the last twelve
+seconds of levels, clamped to a plausible range, with the ring spanning the thirty decibels
+above it and a 4 dB gate so room tone does not twitch the ring. Until twelve samples have
+arrived the ring draws nothing rather than guessing.
+
+This is testable without hardware, and it is tested against the three device profiles the
+constant was supposed to cover:
+
+| Profile | Room | Voice | Ring at rest | Ring at voice |
+|---|---|---|---|---|
+| hot input (close mic, high gain) | −28 dB | −8 dB | 0 | 62 |
+| typical phone | −52 dB | −22 dB | 0 | 100 |
+| quiet input (distant mic, low gain) | −68 dB | −45 dB | 0 | 81 |
+
+The property that matters — flat over an empty room, open over a voice — now holds on all
+three. `METER_FLOOR_DB` survives only as the starting value for the first few samples.
+
+**Still not provable here:** whether 62% on a mid-range Android phone *feels* responsive to a
+person holding it. That is a judgement about a device, not a fact about the code. What changed
+is that the code no longer depends on a number that could only have been a guess.
+
+### 15.2 PR #3: what was ported, and what was rejected
+
+`devin/1782682103-fix-blockers-owasp` branched from an **unrelated root**: `origin/main` is a
+single squashed commit, the PR's tree descends from `bd3f9be`, and `git merge-base` returns
+nothing. There is no rebase to run — GitHub cannot merge it either, which is why it has been
+open since June. Its fixes were re-applied by hand onto this tree.
+
+| # | Claim | Verdict |
+|---|---|---|
+| 1 | `AuthProvider` `JSON.parse` unguarded (Elder + Carer) | **Real, ported.** The parse sat in a `.then()` during app start, where a throw cannot be caught by React: corrupt keychain data left a blank screen with no route to the sign-in form. Extracted to `packages/contracts/src/session.ts` as `parseStoredSession` and tested against truncated JSON, `null`, `[]`, missing and empty tokens. |
+| 2 | `ScreenRenderer` mutable `let colors` → `useMemo` | **Claim was false; fixed properly.** The PR's version assigned the `useMemo` result straight back into the same module-level `let`, under a comment reading "Sync module-level ref". The race survived and gained a side effect during render. The palette is now computed per profile and passed through `ScreenContext`; the three shared primitives became a `primitivesFor(colors)` factory so 47 call sites did not have to change. |
+| 3 | Dead `renderScreen()` removed | **Real, ported.** 29 lines of unreachable switch blocks. |
+| 4 | Carer `createNativeStackNavigator` → state navigation | **Rejected.** The stated cause was a native Fragment crash. Both apps have `react-native-screens` 4.25.2 installed and correctly paired with native-stack 7.17.3; nothing in the repo reproduces a crash. The rewrite removes transitions, the back gesture and deep links, drops the `NavigationContainer` that `HandoverForm`'s `route.params` depends on, and replaces it with hand-passed props. Trading working navigation for an unreproduced crash is not a fix. |
+| 5 | Elder `BackHandler` guard | **Real, ported** as `apps/elder/src/navigation/backGuard.ts`. Back pops when it can, and **stays put at the root** rather than closing the app — an older adult who taps back once should not lose a 60-second recording. Tested with a fake `BackHandler`. |
+| 6 | `ErrorBoundary` in all three apps | **Real, ported.** Three copies (separate bundles), byte-identical, and tested by constructing the component and inspecting the tree it renders: recovery copy, a labelled retry control at ≥72pt, and a log line that carries the error *name* but never its message. |
+| 7 | `HelpOverlay` trigger 48 → 72px | **Real, ported** — by using `touch.minimum`, the token that already said 72, rather than a literal. |
+| 8 | Carer nav emoji → text, tokens | **Real, ported.** An emoji is the only label on those tabs; an OEM font without the glyph renders an empty box, and a screen reader announces "calendar" rather than "Visits". |
+| 9 | Grandchild hardcoded hex → tokens | **Ported for the five that are exact token duplicates** (`#1A1F2E` = ink, `#5E4A8A` = violet, `#3D4558` = graphite, `#FAF0E8` = terracottaPale, error red → rose). One border colour (`#D8D2CA`) has no token and was left, named and commented — inventing a token to satisfy a colour audit is the same mistake as inventing a test. |
+| 10 | Type shims for `BackHandler` / `useNavigation` | **Real, ported.** |
+
+Also ported from the PR's intent: the dead-code removal exposed that `__test__.statusBadge`
+was the only caller of the module-level palette, so it now binds the default palette
+explicitly.
+
+### 15.3 What the port needed from the harness
+
+`loadAppModule()` could not load `apps/*/src/components/ErrorBoundary.tsx` or
+`ScreenRenderer.tsx`: they import `react`, which does not resolve from `/tmp`. The test now
+points the `react` specifier at the copy the elder app renders with (19.2.3) rather than
+stubbing it — the boundary extends the real `React.Component`, so a stub would be testing a
+different class.
+
+```
+tests/edge: 50 files · behavioural 50 · static-only 0
+# tests 471 · # pass 471 · # fail 0
+pnpm test → exit 0   ·   typecheck (5 targets) → exit 0   ·   lint --max-warnings=0 → clean
 ```
