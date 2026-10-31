@@ -28,7 +28,7 @@ Validation currently reports:
 | Layer | Source | Lines | Status |
 |---|---|---|---|
 | **Original SSOT** | `designdoc.md` v1.2.1 | ~6,939 | Built |
-| **P0 security hardening closure** | 12 migrations + 55 Edge Functions *at that time* (the repository now holds 46 migrations and 81 functions) | ~2,900 SQL / ~5,500 TS | Built (June 2026) |
+| **P0 security hardening closure** | 12 migrations + 55 Edge Functions *at that time* (the repository now holds 47 migrations and 82 functions) | ~2,900 SQL / ~5,500 TS | Built (June 2026) |
 | **vNext Well-Rounded Patch** | `docs/implementation/VNEXT_IMPLEMENTATION_REPORT.md` | 13 migrations + 72 Edge Functions at the time of that report | Built (June 2026) |
 | **End-to-end runtime/config pass** | Supabase grants/lint fixes, Expo/EAS/env wiring, hosted smoke script, demo-data removal, token encryption/config gates | 81 Edge Functions + current migrations | Built (June 20, 2026) |
 | **Test pyramid** | `tests/edge/*.test.mjs` + `tests/integration/live-rls.test.mjs` + static smoke tests | `node --experimental-transform-types --test tests/edge/*.test.mjs` | green — `corepack pnpm run test:edge` reports the live count |
@@ -90,7 +90,7 @@ quoted here); the runner is
 - **authz behavioural tests** (exercising real `_shared/authz.ts` against a mock Supabase client)
 - **error contract tests** (401/403/404/409/413/422/429/500 mapping, no internal leakage)
 - **rate-limit contract tests** (identity/network buckets, spoofed headers, backend degradation)
-- **Edge Function coverage audit** (81 functions: 65 rate-limited, 16 documented exemptions)
+- **Edge Function coverage audit** (82 functions: 66 rate-limited, 16 documented exemptions)
 - **RLS coverage audit** (110 tables, forced RLS, service-role-only list justified)
 - **RLS policy static audit** (15 critical tables with forced RLS, all expected policies)
 - **Storage policy static audit** (7 buckets + 4 critical policies)
@@ -341,7 +341,7 @@ Covers:
 ### Supabase migrations
 
 ```text
-supabase/migrations/                                           # 46 migrations applied in order
+supabase/migrations/                                           # 47 migrations applied in order
 ├── 20260611000001_haven_v121_production_schema.sql            # v1.2.1 canonical schema
 ├── 20260611000002_storage_rpc_security.sql                    # Storage RLS + column revoke
 ├── 20260611000003_full_feature_domain_tables.sql             # WACHT + ANKER extension
@@ -378,7 +378,7 @@ The migrations implement:
 
 ### Edge Functions
 
-There are currently **81 Edge Functions** in `supabase/functions`. They are classified into explicit trust zones per `docs/implementation/EDGE_FUNCTION_TRUST_BOUNDARY_MATRIX.md`:
+There are currently **82 Edge Functions** in `supabase/functions`. They are classified into explicit trust zones per `docs/implementation/EDGE_FUNCTION_TRUST_BOUNDARY_MATRIX.md`:
 
 - user-scoped functions (`verify_jwt = true`) use the caller's JWT and relationship/permission checks
 - admin/service functions use explicit admin bearer or service execution paths

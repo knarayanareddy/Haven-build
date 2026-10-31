@@ -84,7 +84,7 @@ export function useHavenActions(screenId: string) {
       return;
     }
     if (actionId === 'WELLNESS_GOOD' || actionId === 'WELLNESS_OK') {
-      enqueueOfflineAction('WELLNESS_CHECKIN', { mood: actionId === 'WELLNESS_GOOD' ? 5 : 3 });
+      enqueueOfflineAction('WELLNESS_CHECKIN', { elder_id: elderId, checkin_type: 'ad_hoc', mood_score: actionId === 'WELLNESS_GOOD' ? 5 : 1, captured_via: 'app' });
       Alert.alert('HAVEN', actionId === 'WELLNESS_GOOD' ? t('actions.wellness_good.alert') : t('actions.wellness_ok.alert'));
       return;
     }
@@ -98,20 +98,20 @@ export function useHavenActions(screenId: string) {
     }
     if (actionId.startsWith('CONSENT_ACCEPT:')) {
       const packKey = actionId.split(':')[1];
-      enqueueOfflineAction('CONSENT_PACK_DECIDE', { pack_key: packKey, decision: 'accepted' });
+      enqueueOfflineAction('CONSENT_PACK_DECIDE', { elder_id: elderId, pack_key: packKey, decision: 'accepted' });
       // Fallback description: Akkoord / Accepted
       Alert.alert('HAVEN', t('actions.consent_accept.alert', { packKey }));
       return;
     }
     if (actionId.startsWith('CONSENT_DECLINE:')) {
       const packKey = actionId.split(':')[1];
-      enqueueOfflineAction('CONSENT_PACK_DECIDE', { pack_key: packKey, decision: 'declined' });
+      enqueueOfflineAction('CONSENT_PACK_DECIDE', { elder_id: elderId, pack_key: packKey, decision: 'declined' });
       Alert.alert('HAVEN', t('actions.consent_decline.alert'));
       return;
     }
     if (actionId.startsWith('CONSENT_DEFER:')) {
       const packKey = actionId.split(':')[1];
-      enqueueOfflineAction('CONSENT_PACK_DECIDE', { pack_key: packKey, decision: 'deferred' });
+      enqueueOfflineAction('CONSENT_PACK_DECIDE', { elder_id: elderId, pack_key: packKey, decision: 'deferred' });
       // Fallback description: Later / oké
       Alert.alert('HAVEN', t('actions.consent_defer.alert'));
       return;
@@ -124,8 +124,15 @@ export function useHavenActions(screenId: string) {
       }
       try {
         if (!elderId) throw new Error('Missing elder profile for signed-in session');
-        await client.videoCallJoinToken({ session_id: sessionId, elder_id: elderId });
-        Alert.alert('HAVEN', t('actions.call_answered.alert', { sessionId }));
+        if (!sessionId) throw new Error('Missing video call session');
+        // Two steps, and the second one is what actually joins: the join token is an
+        // invitation, redeemed for provider credentials. The old code fetched a token and
+        // dropped it, then told the elder the call was answered.
+        const { token } = await client.videoCallJoinToken({ video_call_session_id: sessionId });
+        const joined = await client.videoCallRedeem({ video_call_session_id: sessionId, token });
+        Alert.alert('HAVEN', joined.media === 'none'
+          ? t('actions.call_no_media.alert')
+          : t('actions.call_answered.alert', { sessionId }));
       } catch (error) {
         Alert.alert(t('haven_explanation_title'), translateElderError(error));
       }
@@ -152,17 +159,19 @@ export function useHavenActions(screenId: string) {
       const parts = actionId.split(':');
       const period = parts[1] ?? 'morning';
       const mood = parts[2] ?? '3';
-      enqueueOfflineAction('DAILY_CHECKIN', { period, mood_score: Number(mood) });
+      enqueueOfflineAction('DAILY_CHECKIN', { elder_id: elderId, checkin_type: period, mood_score: Number(mood), captured_via: 'app' });
       Alert.alert('HAVEN', t('actions.checkin_received.alert', { period }));
       return;
     }
 
     // === NEW: Unified Daily Rhythm Flow ===
     if (actionId === 'START_DAILY_RHYTHM') {
+      // This used to enqueue a check-in with `mood_score: 4` — a number the elder never gave,
+      // written into their record by a button labelled "start my day". A check-in with an
+      // invented mood is worse than no check-in: it is clinical data that never happened.
+      // Nothing is recorded here. The mood buttons on the today screen send the elder's own
+      // answer as CHECKIN:<period>:<score>.
       Alert.alert('HAVEN', t('actions.daily_rhythm.start'));
-      // In a real implementation, this would open a guided modal with 3 steps
-      // For now we trigger the first check-in
-      enqueueOfflineAction('DAILY_CHECKIN', { period: 'morning', mood_score: 4 });
       return;
     }
 
@@ -174,30 +183,30 @@ export function useHavenActions(screenId: string) {
     }
     if (actionId.startsWith('CONFIRM_MED:')) {
       const medId = actionId.split(':')[1];
-      enqueueOfflineAction('CONFIRM_MEDICATION', { medication_id: medId, status: 'medication_taken' });
+      enqueueOfflineAction('CONFIRM_MEDICATION', { elder_id: elderId, medication_id: medId, status: 'medication_taken' });
       Alert.alert('HAVEN', t('actions.confirm_med.alert'));
       return;
     }
     if (actionId.startsWith('DENY_MED:')) {
       const medId = actionId.split(':')[1];
-      enqueueOfflineAction('DENY_MEDICATION', { medication_id: medId });
+      enqueueOfflineAction('DENY_MEDICATION', { elder_id: elderId, medication_id: medId });
       Alert.alert('HAVEN', t('actions.deny_med.alert'));
       return;
     }
     if (actionId === 'FALL_OK:' || actionId.startsWith('FALL_OK:')) {
-      enqueueOfflineAction('FALL_RESPONSE', { status: 'ok', fall_response: 'self_resolved' });
+      enqueueOfflineAction('FALL_RESPONSE', { elder_id: elderId, detection_source: 'elder', status: 'ok', fall_response: 'self_resolved' });
       Alert.alert('HAVEN', t('actions.fall_ok.alert'));
       return;
     }
     if (actionId === 'FALL_HELP:' || actionId.startsWith('FALL_HELP:')) {
-      enqueueOfflineAction('FALL_RESPONSE', { status: 'help_needed', fall_response: 'escalated' });
+      enqueueOfflineAction('FALL_RESPONSE', { elder_id: elderId, detection_source: 'elder', status: 'help_needed', fall_response: 'escalated' });
       Alert.alert('HAVEN', t('actions.fall_help.alert'));
       return;
     }
     if (actionId.startsWith('TAKE:')) {
       const medicationId = actionId.split(':')[1];
       if (!client) {
-        enqueueOfflineAction('CONFIRM_MEDICATION', { medication_id: medicationId, screen_id: screenId });
+        enqueueOfflineAction('CONFIRM_MEDICATION', { elder_id: elderId, medication_id: medicationId, screen_id: screenId });
         Alert.alert('HAVEN', t('actions.take_offline.alert'));
         return;
       }
@@ -207,7 +216,7 @@ export function useHavenActions(screenId: string) {
         Alert.alert('HAVEN', t('actions.take_success.alert'));
       } catch (error) {
         if (classifyNetworkError(error) === 'offline') {
-          enqueueOfflineAction('CONFIRM_MEDICATION', { medication_id: medicationId, screen_id: screenId });
+          enqueueOfflineAction('CONFIRM_MEDICATION', { elder_id: elderId, medication_id: medicationId, screen_id: screenId });
           Alert.alert('HAVEN', t('actions.take_offline_fallback.alert'));
           return;
         }
@@ -216,7 +225,7 @@ export function useHavenActions(screenId: string) {
       return;
     }
     if (actionId.startsWith('SNOOZE:')) {
-      enqueueOfflineAction('SNOOZE_MEDICATION', { medication_id: actionId.split(':')[1], delay_minutes: 15 });
+      enqueueOfflineAction('SNOOZE_MEDICATION', { elder_id: elderId, medication_id: actionId.split(':')[1], delay_minutes: 15 });
       Alert.alert('HAVEN', t('actions.snooze.alert'));
       return;
     }

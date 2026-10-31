@@ -215,6 +215,9 @@ verify_jwt = true
 [functions.fn-video-call-join-token]
 verify_jwt = true
 
+[functions.fn-video-call-redeem]
+verify_jwt = true
+
 [functions.fn-voice-profile-create]
 verify_jwt = true
 

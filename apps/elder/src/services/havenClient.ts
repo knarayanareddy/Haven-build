@@ -11,7 +11,13 @@ export interface HavenClientConfig {
 export class HavenClient {
   constructor(private readonly config: HavenClientConfig) {}
 
-  private async invoke<T>(fn: string, body: unknown): Promise<T> {
+  /**
+   * Calls an edge function.
+   *
+   * Public because the offline dispatcher routes a queued capture to the same function the
+   * online path would have called, and not every one of those has a named method here.
+   */
+  async invoke<T = unknown>(fn: string, body: object = {}): Promise<T> {
     const response = await fetch(`${this.config.supabaseUrl}/functions/v1/${fn}`, {
       method: 'POST',
       headers: {
@@ -23,7 +29,12 @@ export class HavenClient {
     const json = await response.json();
     if (!response.ok) {
       // FIX P2: COGNITIVE LOAD Automatically translate all underlying API and network exceptions into reassuring Dutch B1 prose
-      throw new Error(translateElderError(json.error ?? `HAVEN function failed: ${fn}`));
+      const failure = new Error(translateElderError(json.error ?? `HAVEN function failed: ${fn}`)) as Error & { status?: number };
+      // The offline queue decides between "retry later" and "this will never be accepted" from
+      // the status; without it every rejection looks like a network blip and the capture is
+      // retried until the ceiling hides it.
+      failure.status = response.status;
+      throw failure;
     }
     return json as T;
   }
@@ -58,5 +69,9 @@ export class HavenClient {
   featureFlags(elder_id: string) { return this.invoke('fn-feature-flags', { elder_id }); }
   screenData(input: Record<string, unknown>) { return this.invoke('fn-screen-data', input); }
   registerPushToken(input: Record<string, unknown>) { return this.invoke('fn-push-token-register', input); }
-  videoCallJoinToken(input: Record<string, unknown>) { return this.invoke('fn-video-call-join-token', input); }
+  videoCallJoinToken(input: { video_call_session_id: string }) { return this.invoke<{ token: string; expires_in_seconds: number }>('fn-video-call-join-token', input); }
+  /** Trades the join token for media credentials. The session only becomes 'joined' here. */
+  videoCallRedeem(input: { video_call_session_id: string; token: string }) {
+    return this.invoke<{ status: string; media: 'webrtc' | 'none'; provider_token: string | null; provider_room_id: string }>('fn-video-call-redeem', input);
+  }
 }

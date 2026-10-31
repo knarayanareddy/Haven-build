@@ -75,7 +75,8 @@ This catalog tracks the current **81** production Edge Functions and the design-
 | `fn-transaction-intercept` | PSD2 intercept | service | Writes `financial_transactions` |
 | `fn-video-call-create` | Live video calling | JWT | Creates video call sessions |
 | `fn-video-call-end` | Live video calling | JWT | Ends video call sessions |
-| `fn-video-call-join-token` | Live video calling | JWT | Creates join tokens for video sessions |
+| `fn-video-call-join-token` | Live video calling | JWT | Issues a signed, expiring join token bound to this session and this caller; stores only its hash |
+| `fn-video-call-redeem` | Live video calling | JWT | Verifies a join token (signature, expiry, stored digest, single use, subject) and returns provider media credentials |
 | `fn-vital-threshold-check` | Vital thresholds | service | Notifies family |
 | `fn-voice-pipeline` | STEM voice | JWT | Writes `voice_interactions`, actions, TTS |
 | `fn-voice-profile-create` | Familiar Voice | JWT | Creates voice profile records/provider jobs |

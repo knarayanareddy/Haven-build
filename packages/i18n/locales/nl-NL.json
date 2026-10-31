@@ -224,6 +224,7 @@
   "actions.consent_defer.alert": "Later beslissen is oké. We herinneren u morgen.",
   "actions.signin_required.alert": "Inloggen is vereist om videogesprekken te beantwoorden.",
   "actions.call_answered.alert": "Oproep aangenomen. Sessie: {sessionId}",
+  "actions.call_no_media.alert": "Oproep aangenomen. Beeld is in deze omgeving niet beschikbaar; u hoort elkaar via de telefoon.",
   "actions.call_declined.alert": "Oproep geweigerd. Sessie {sessionId} gesloten.",
   "actions.checkin_received.alert": "Check-in ({period}) ontvangen. Bedankt!",
   "actions.daily_rhythm.start": "Uw dagritme wordt gestart. Goedemorgen!",

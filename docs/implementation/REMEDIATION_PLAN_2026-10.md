@@ -1200,3 +1200,63 @@ tests/edge: 50 files · behavioural 50 · static-only 0
 # tests 471 · # pass 471 · # fail 0
 pnpm test → exit 0   ·   typecheck (5 targets) → exit 0   ·   lint --max-warnings=0 → clean
 ```
+
+## 16. Tenth pass — the audit fixes, in the audit's order (2026-10-31)
+
+The read-only audit of 2026-10-31 found fourteen items. Four of them were the same defect:
+a module that worked, was tested, and which no entry point reached. The fixes therefore landed
+in the audit's order — silent alerting and offline data loss first, then the video-call lies,
+then the stubs — and every item carries a test that starts at the entry point and asserts the
+effect reaches the outside world. Those tests live in
+`tests/edge/wiring-audit-fixes.test.mjs` (24 tests), and each exists because a green unit test
+of the module below it would not have caught the defect.
+
+### 16.1 The rubric applied to every item
+
+An item is done when all four hold:
+
+1. the entry point the user touches calls the module (proved by executing the entry point, not
+   by matching its source text);
+2. the module's effect is observable outside the process — a fetch, a database row, an SMS,
+   a rendered alert — and the test stubs that boundary, never the module;
+3. the failure path is honest: no success response, no "saved" copy and no `records_pushed`
+   for work that did not happen;
+4. the full suite is green, including the static-only audit, which cannot be satisfied by a
+   test that reads source text.
+
+### 16.2 What each fix changed
+
+| # | Defect | Fix | Enforcing test |
+|---|---|---|---|
+| 1 | push registration never called | `apps/elder/src/components/SessionEffects.tsx` mounted in `apps/elder/App.tsx`; registers on the signed-in profile | *item 1: the elder app registers this device for push on a signed-in session* |
+| 2 | family dashboard never subscribed | `apps/family/src/components/DashboardRealtime.tsx` mounted in `dashboard/page.tsx`; channels built by `subscriptionsFor()` in `apps/family/src/services/realtime.ts`, now elder-scoped | *item 2: the family dashboard opens one realtime channel per permitted table and refreshes* |
+| 3 | neither offline queue was drained | `apps/elder/src/services/drainElderQueue.ts` + carer `services/queueDrain.ts`, mounted via `SessionEffects` and `QueueDrain` | *item 3: … sends queued handover notes under the signed-in carer* and *… quarantined, never silently dropped* |
+| 4 | every capture filed under `'offline-carer'` | `enqueueOffline(carerId, …)` takes a required carer id and throws on the placeholder; badge and write share the partition | *item 4: a queued capture carries the signed-in carer…* |
+| 5 | video consent checked `shield_scam_coaching` | migration `20261031000000_video_call_consent_and_join_token.sql` seeds `core_video_call`; create and join gate on it | *item 5: scam-coaching consent does not authorise a video call* |
+| 6 | join token was a random UUID | HMAC-signed, expiring token bound to session + subject; only its SHA-256 is stored; `fn-video-call-redeem` verifies and marks the session joined | *item 6: redeeming the token joins the call; a replay is refused* |
+| 7 | `START_DAILY_RHYTHM` invented `mood_score: 4` | the button records nothing; the elder's own mood tap is the only source of a score | *item 7: "start my day" records no mood…* |
+| 8 | carer `FloatingVoiceButton` recorded nothing | deleted, both mounts removed | *the carer app no longer mounts a voice button that records nothing* |
+| 9 | `fn-care-system-sync` reported local row counts as pushed | calls `CARE_SYSTEM_ENDPOINT`; `records_pushed` is the receiver's accepted count; no endpoint → 503 | *item 9: records_pushed is what the receiver accepted…* |
+| 10–12, 14 | `calendarSync.ts`, `consentPacks.ts`, `security.ts`, three state machines, `offlineSyncMachine.ts` | deleted; `validate-suite.mjs` no longer requires them | *the repository keeps no ghost entries for deleted modules* |
+| 13 | grandchild app asked for UUIDs and a bearer token | Supabase Auth one-time code (`apps/grandchild/src/auth.ts`); elder and family id resolved from `family_relationships` under RLS (`src/scope.ts`) | *item 13: the grandchild scope comes from the session…* |
+
+### 16.3 Two harness defects found while writing the tests
+
+* `loadAppModule()` skipped copying a sibling imported as `./x` — `transpileModuleFile()` had
+  already appended `.mjs`, and the flattener treated anything ending in `.mjs` as "already
+  handled". Every module with a single-dot sibling import failed with `ERR_MODULE_NOT_FOUND`
+  for a file that exists. Fixed in `tests/edge/support/edge-function-harness.mjs`.
+* `tests/edge/docs-truth.test.mjs` hard-coded `81 Edge Functions`, so adding a function failed
+  the suite with "the README is wrong" even when the README was the only accurate copy — the
+  same defect the migration count in that file already documented. The count is now derived
+  from the tree.
+
+### 16.4 Result
+
+```
+pnpm test → exit 0
+# tests 495 · # pass 495 · # fail 0
+tests/edge: 51 files · behavioural 51 · static-only 0 (allowlisted 0)
+Functions: 82 | rate-limited: 66 | exempt: 16 | unaccounted: 0
+```
+
