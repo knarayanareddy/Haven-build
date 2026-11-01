@@ -55,6 +55,34 @@ export class HavenClient {
     return json as T;
   }
 
+  async markFamilyMessagesRead(messageIds: string[]): Promise<void> {
+    if (!messageIds.length) return;
+    const headers: Record<string, string> = { authorization: `Bearer ${this.config.accessToken}`, 'content-type': 'application/json' };
+    const key = this.config.supabaseAnonKey ?? process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+    if (key) headers.apikey = key;
+    const response = await fetch(`${this.config.supabaseUrl}/rest/v1/rpc/mark_family_messages_read`, {
+      method: 'POST', headers, body: JSON.stringify({ p_message_ids: messageIds }),
+    });
+    if (!response.ok) throw new Error('Could not mark messages as read');
+  }
+
+  /** Complete one task; RLS confines the update to the signed-in elder. */
+  async completeTask(taskId: string): Promise<void> {
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${this.config.accessToken}`,
+      'content-type': 'application/json',
+      prefer: 'return=representation',
+    };
+    const key = this.config.supabaseAnonKey ?? process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+    if (key) headers.apikey = key;
+    const response = await fetch(`${this.config.supabaseUrl}/rest/v1/tasks?id=eq.${encodeURIComponent(taskId)}`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({ completed: true, completed_at: new Date().toISOString() }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !Array.isArray(body) || body.length === 0) throw new Error('Task could not be saved');
+  }
+
   voice(input: VoicePipelineInput) { return this.invoke<VoicePipelineOutput>('fn-voice-pipeline', input); }
   scam(input: ScamPipelineInput) { return this.invoke<ScamPipelineOutput>('fn-scam-pipeline', input); }
   medicationOcr(input: Record<string, unknown>) { return this.invoke('fn-medication-ocr', input); }

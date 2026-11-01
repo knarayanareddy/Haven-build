@@ -2500,6 +2500,7 @@ export type Database = {
           device_session_id: string | null
           elder_ack_at: string | null
           elder_id: string
+          escalation_claimed_at: string | null
           family_notified_at: string | null
           id: string
           resolution_notes: string | null
@@ -2514,6 +2515,7 @@ export type Database = {
           device_session_id?: string | null
           elder_ack_at?: string | null
           elder_id: string
+          escalation_claimed_at?: string | null
           family_notified_at?: string | null
           id?: string
           resolution_notes?: string | null
@@ -2528,6 +2530,7 @@ export type Database = {
           device_session_id?: string | null
           elder_ack_at?: string | null
           elder_id?: string
+          escalation_claimed_at?: string | null
           family_notified_at?: string | null
           id?: string
           resolution_notes?: string | null
@@ -7222,6 +7225,10 @@ export type Database = {
       }
       is_valid_dutch_bsn: { Args: { p_candidate: string }; Returns: boolean }
       longtransactionsenabled: { Args: never; Returns: boolean }
+      mark_family_messages_read: {
+        Args: { p_message_ids: string[] }
+        Returns: number
+      }
       mark_reminder_taken: {
         Args: { p_elder_id: string; p_reminder_id: string }
         Returns: {
@@ -8002,6 +8009,8 @@ export type Database = {
         | "false_alarm"
         | "no_response"
         | "resolved"
+        | "processing"
+        | "family_alerted"
       fhir_staging_status: "pending_review" | "approved" | "rejected"
       financial_consent_status: "requested" | "active" | "revoked" | "expired"
       integration_environment: "mock" | "sandbox" | "production"
@@ -8333,6 +8342,8 @@ export const Constants = {
         "false_alarm",
         "no_response",
         "resolved",
+        "processing",
+        "family_alerted",
       ],
       fhir_staging_status: ["pending_review", "approved", "rejected"],
       financial_consent_status: ["requested", "active", "revoked", "expired"],

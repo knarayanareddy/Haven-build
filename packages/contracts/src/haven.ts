@@ -69,6 +69,8 @@ export interface VoicePipelineInput {
   entities?: Record<string, string>;
   /** The reminder a tap refers to, so the repeat-back confirms the dose that was tapped. */
   medication_reminder_id?: string;
+  /** An explicit tap on a specific reminder; not inferred from a transcript. */
+  medication_action?: 'taken';
   /** Snooze this reminder instead of interpreting speech. */
   snooze_reminder_id?: string;
   snooze_minutes?: number;

@@ -60,19 +60,26 @@ Deno.serve(asyncWrapper("fn-fall-escalation", async (req: Request) => {
 
   const fallsToProcess = (activeFalls as EmergencyFallRow[] ?? []).slice(0, 50);
   const familyNotified: string[] = [];
+  const failed: string[] = [];
 
   // 3. Multi-Patient / Per-Recipient Worker Isolation Loop
   await Promise.allSettled(fallsToProcess.map(async (ev) => {
+    let claimTime: string | null = null;
     try {
-      // FIX A3: Atomic test-and-set claim using RETURNING * supporting both possible and stale processing claims
-      const { data: claimed, error: claimErr } = await db.from("fall_events")
-        .update({ status: "processing" })
+      // Conditional claim: only the status from the RPC snapshot can be claimed. Recovery
+      // of a processing claim additionally requires an expired lease at UPDATE time.
+      const claimedAt = new Date().toISOString();
+      let claimQuery = db.from("fall_events")
+        .update({ status: "processing", escalation_claimed_at: claimedAt })
         .eq("id", ev.fall_id)
-        .in("status", ["possible", "processing"])
-        .select()
-        .maybeSingle();
-
-      if (claimErr || !claimed) return; // already claimed by another worker
+        .eq("status", ev.status);
+      if (ev.status === "processing") {
+        claimQuery = claimQuery.lt("escalation_claimed_at", new Date(Date.now() - 5 * 60_000).toISOString());
+      }
+      const { data: claimed, error: claimErr } = await claimQuery.select().maybeSingle();
+      if (claimErr) throw claimErr;
+      if (!claimed) return;
+      claimTime = claimedAt;
 
       // FIX A3: When claiming a 'processing' row that was stale, log a 'STALE_CLAIM_RECOVERED' entry to audit_log
       if (ev.status === "processing") {
@@ -137,18 +144,21 @@ Deno.serve(asyncWrapper("fn-fall-escalation", async (req: Request) => {
         preciseLocationUrl = null;
       }
 
-      const { data: family } = await db.from("family_relationships")
+      const { data: family, error: familyError } = await db.from("family_relationships")
         .select("family_member_id")
         .eq("elder_id", ev.elder_id)
         .eq("elder_consented", true)
         .eq("is_active", true)
         .eq("notify_on_crisis", true);
 
+      if (familyError) throw familyError;
       const stakeholders = family as Array<{ family_member_id: string }> | null ?? [];
+      if (!stakeholders.length) throw new Error("No family recipients configured for fall escalation");
+      let queued = 0;
 
       await Promise.allSettled(stakeholders.map(async (f) => {
         try {
-          await dispatchNotification({
+          const notification = await dispatchNotification({
             recipient_id: String(f.family_member_id),
             elder_id: String(ev.elder_id),
             notification_type: "crisis_gedetecteerd",
@@ -163,6 +173,12 @@ Deno.serve(asyncWrapper("fn-fall-escalation", async (req: Request) => {
               location_expires_in_seconds: preciseLocationUrl ? PRECISE_LOCATION_TTL : null,
             },
           });
+          // dispatchNotification can return after a failed push (including no token). Inspect
+          // its persisted result rather than equating insertion with successful submission.
+          const { data: persisted, error: notificationError } = await db.from("notifications")
+            .select("id,send_error").eq("id", notification.id).maybeSingle();
+          if (notificationError) throw notificationError;
+          if (persisted && !persisted.send_error) queued += 1;
         } catch (pushErr) {
           const errMsg = String((pushErr as Error).message ?? pushErr);
           if (errMsg.includes("410") || errMsg.includes("Unregistered") || errMsg.includes("NotRegistered")) {
@@ -172,20 +188,30 @@ Deno.serve(asyncWrapper("fn-fall-escalation", async (req: Request) => {
         }
       }));
 
-      const { data: updated } = await db.from("fall_events")
-        .update({ status: "family_alerted", family_notified_at: new Date().toISOString() })
+      if (queued === 0) throw new Error("No fall notification was submitted successfully");
+      const { data: updated, error: updateError } = await db.from("fall_events")
+        .update({ status: "family_alerted", family_notified_at: new Date().toISOString(), escalation_claimed_at: null })
         .eq("id", ev.fall_id)
         .eq("status", "processing")
+        .eq("escalation_claimed_at", claimedAt)
         .select("id")
         .maybeSingle();
 
+      if (updateError) throw updateError;
       if (updated) {
         familyNotified.push(ev.fall_id);
       }
     } catch (patientErr) {
+      failed.push(ev.fall_id);
+      if (claimTime) {
+        const { error: releaseError } = await db.from("fall_events")
+          .update({ status: ev.status === "no_response" ? "no_response" : "possible", escalation_claimed_at: null })
+          .eq("id", ev.fall_id).eq("status", "processing").eq("escalation_claimed_at", claimTime);
+        if (releaseError) await captureException(releaseError, { fn: "fn-fall-escalation", context: "claim_release" });
+      }
       await captureException(patientErr, { fn: "fn-fall-escalation", context: "per_patient_enclosure", fall_id: ev.fall_id });
     }
   }));
 
-  return json({ ok: true, events_processed: familyNotified.length, alerted_ids: familyNotified }, 200, req);
+  return json({ ok: failed.length === 0, events_processed: familyNotified.length, alerted_ids: familyNotified, failed_ids: failed }, failed.length ? 503 : 200, req);
 }));

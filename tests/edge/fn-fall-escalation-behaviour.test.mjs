@@ -38,7 +38,7 @@ function fall(fallId) {
 function seed({ falls }) {
   return createMockDb({
     tables: {
-      fall_events: falls.map((entry) => ({ id: entry.fall_id, elder_id: entry.elder_id, status: entry.status })),
+      fall_events: falls.map((entry) => ({ id: entry.fall_id, elder_id: entry.elder_id, status: entry.status, escalation_claimed_at: entry.status === 'processing' ? new Date(Date.now() - 600_000).toISOString() : null })),
       family_relationships: [
         { family_member_id: FAMILY_OK, elder_id: ELDER_ID, elder_consented: true, is_active: true, notify_on_crisis: true },
         { family_member_id: FAMILY_GONE, elder_id: ELDER_ID, elder_consented: true, is_active: true, notify_on_crisis: true },

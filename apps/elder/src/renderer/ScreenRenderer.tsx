@@ -85,6 +85,7 @@ export interface MessageRow {
   kind: 'text' | 'video' | 'voice' | 'heart';
   body: string;
   unread: boolean;
+  hasMedia?: boolean;
 }
 
 export interface ScamEventRow {

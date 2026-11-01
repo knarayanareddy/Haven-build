@@ -35,7 +35,7 @@ const ANON_EXCEPTION = 'get_emergency_profile';
 // User-facing RPCs that authorise inside the function: the elder's own export and the
 // consent-gated family summary. Every other function is Edge-Function (service_role)
 // territory — see the deny-by-default test below.
-const CLIENT_RPCS = ['export_elder_data', 'family_dashboard_summary'];
+const CLIENT_RPCS = ['export_elder_data', 'family_dashboard_summary', 'mark_family_messages_read'];
 
 // Everything that mutates or deletes personal data without the subject's own
 // participation. export_elder_data is NOT in this list: it is how a person exercises
@@ -103,6 +103,7 @@ test('the caller-derived RPCs the clients legitimately need stay callable', () =
     get_emergency_profile: 'authenticated',
     export_elder_data: 'authenticated',
     family_dashboard_summary: 'authenticated',
+    mark_family_messages_read: 'authenticated',
   };
   for (const [name, role] of Object.entries(granted)) {
     assert.ok(model.fn(name), `${name}() must exist`);

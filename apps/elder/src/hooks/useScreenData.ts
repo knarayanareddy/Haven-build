@@ -45,7 +45,7 @@ export function useScreenData(options: {
     try {
       const payload = await client.screenData({ elder_id: elderId, screen_id: screenId, locale }) as ScreenDataPayload;
       if (!mounted.current) return;
-      setMapped(mapScreenData(payload, locale));
+      setMapped(mapScreenData(payload, locale, elderId));
       setError(null);
     } catch (loadError) {
       // Offline is the normal case on a handset; keep whatever is on screen and try again.
@@ -74,5 +74,6 @@ export function useScreenData(options: {
     };
   }, [load, refreshMs]);
 
-  return { ...mapped, loading, error, refresh: () => { void load(); } };
+  const refresh = useCallback(() => { void load(); }, [load]);
+  return { ...mapped, loading, error, refresh };
 }

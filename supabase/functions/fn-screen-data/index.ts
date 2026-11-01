@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
 
     const queries = await Promise.all([
       db.from("medication_reminders").select("id,scheduled_time,status,medications(name_nl,name_en,dose_description_nl,dose_description_en)").eq("elder_id", userId).gte("scheduled_time", nowIso.slice(0, 10)).order("scheduled_time", { ascending: true }).limit(8),
-      db.from("family_messages").select("id,sender_id,message_type,content_nl,content_en,created_at").eq("elder_id", userId).is("deleted_at", null).order("created_at", { ascending: false }).limit(5),
+      db.from("family_messages").select("id,sender_id,message_type,content_nl,content_en,storage_path,read_by_elder,created_at").eq("elder_id", userId).is("deleted_at", null).order("created_at", { ascending: false }).limit(5),
       db.from("scam_events").select("id,alert_level,score_composite,explanation_nl,explanation_en,created_at").eq("elder_id", userId).is("deleted_at", null).order("created_at", { ascending: false }).limit(3),
       db.from("neighbourhood_profiles").select("postcode_pc4,neighbourhood_label,is_active,walk_buddy_seeking,family_can_see_connections").eq("elder_id", userId).maybeSingle(),
       // Only consented, active relationships: an elder must never see a delegate who has been
@@ -79,6 +79,12 @@ Deno.serve(async (req) => {
         .is("deleted_at", null)
         .order("check_in_time", { ascending: false })
         .limit(5),
+      // Limit to recent incoming sessions; ended, joined and stale calls do not ring.
+      db.from("video_call_sessions").select("id,initiator_id,provider,status,created_at")
+        .eq("elder_id", userId).neq("initiator_id", userId)
+        .in("status", ["created", "ringing"])
+        .gte("created_at", new Date(Date.now() - 2 * 60_000).toISOString())
+        .order("created_at", { ascending: false }).limit(1),
     ]);
     for (const q of queries) if (q.error) throw q.error;
 
@@ -97,6 +103,7 @@ Deno.serve(async (req) => {
         tasks: queries[5].data ?? [],
         pending_confirmations: queries[6].data ?? [],
         visits: queries[7].data ?? [],
+        incoming_calls: queries[8].data ?? [],
       },
     }, 200, req);
   } catch (e) {

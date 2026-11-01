@@ -356,7 +356,7 @@ test('the elder\u2019s fall and medication answers queue a confirmation response
       '@haven/i18n': `export const useTranslation = () => ({ t: (key) => key });`,
       '../auth/AuthProvider': `export const useAuth = () => ({ session: { access_token: 'a.b.c', user: { id: '${ELDER}' } } });`,
       '../services/havenClient': `export class HavenClient { async screenData() { return {}; } async voice() { return {}; } }`,
-      'react-native': `export const Alert = { alert: (...args) => globalThis.__alerts.push(args) };`,
+      'react-native': `export const Alert = { alert: (...args) => globalThis.__alerts.push(args) }; export const Linking = { openURL: async () => {} };`,
       '../services/sqliteOfflineQueue': `export function enqueueOfflineAction(type, payload) { globalThis.__enqueued.push({ type, payload }); }`,
       '../state/networkResilience': `export function classifyNetworkError() { return 'offline'; }`,
       '../services/errorMapper': `export function translateElderError(e) { return String(e); }`,

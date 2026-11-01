@@ -604,7 +604,7 @@ test('item 7: "start my day" records no mood, and a mood tap records the elder\'
         export class HavenClient { async screenData() { return {}; } async voice() { return {}; } }
       `,
       'react-native': `
-        export const Alert = { alert: (...args) => globalThis.__alerts.push(args) };
+        export const Alert = { alert: (...args) => globalThis.__alerts.push(args) }; export const Linking = { openURL: async () => {} };
       `,
       '../services/sqliteOfflineQueue': `
         export function enqueueOfflineAction(type, payload) { globalThis.__enqueued.push({ type, payload }); }

@@ -149,7 +149,11 @@ Deno.serve(asyncWrapper("fn-voice-pipeline", async (req: Request) => {
       // medication-taken statement that the classifier below turns into a MAR
       // confirmation — for a dose the older adult never reported, and with a
       // positive mood reading nobody said. Neither may ever be synthesised.
-      if (!body.audio_base64 && !body.transcript_text) {
+      const medicationTap = body.medication_action === "taken";
+      if (medicationTap && (typeof body.medication_reminder_id !== "string" || !body.medication_reminder_id)) {
+        throw Object.assign(new Error("400: Medication reminder is required"), { status: 400, code: "BAD_REQUEST" });
+      }
+      if (!medicationTap && !body.audio_base64 && !body.transcript_text) {
         throw Object.assign(
           new Error(locale === "nl-NL"
             ? "Geen spraak ontvangen. Neem opnieuw op."
@@ -183,10 +187,10 @@ Deno.serve(asyncWrapper("fn-voice-pipeline", async (req: Request) => {
           );
         }
       } else {
-        transcript = String(body.transcript_text).trim();
+        transcript = typeof body.transcript_text === "string" ? body.transcript_text.trim() : "";
       }
 
-      if (!transcript) {
+      if (!transcript && !medicationTap) {
         throw Object.assign(
           new Error(locale === "nl-NL" ? "Geen spraak ontvangen." : "No speech was received."),
           { status: 422, code: "UNPROCESSABLE_ENTITY" },
@@ -270,7 +274,7 @@ Deno.serve(asyncWrapper("fn-voice-pipeline", async (req: Request) => {
       }
       // ────────────────────────────────────────────────────────────────────────
 
-      const c = classify(transcript, locale);
+      const c = medicationTap ? { intent: "bevestig_ingenomen", action: "BEVESTIG_INGENOMEN" } : classify(transcript, locale);
       const distress = c.intent === "crisis";
 
       // ─── LOCKED POLICY: 2-Step Confirmation required for ALL voice medication intakes ───
@@ -285,28 +289,29 @@ Deno.serve(asyncWrapper("fn-voice-pipeline", async (req: Request) => {
         const targetedReminderId = typeof body.medication_reminder_id === "string" ? body.medication_reminder_id : null;
         let reminder: { id: string; medication_id: string } | undefined;
         if (targetedReminderId) {
-          const { data: targeted } = await db
+          const { data: targeted, error: targetError } = await db
             .from("medication_reminders")
             .select("id, medication_id")
             .eq("elder_id", body.elder_id)
             .eq("id", targetedReminderId)
             .in("status", ["gepland", "herinnerd", "gesnoozed_1", "gesnoozed_2", "geëscaleerd"])
             .maybeSingle();
-          // A reminder that is already taken, or belongs to another elder, is not a target:
-          // fall back to the open one rather than confirming a closed dose.
-          reminder = targeted ?? undefined;
+          if (targetError) throw targetError;
+          if (!targeted) throw Object.assign(new Error("404: No open medication reminder for this elder"), { status: 404, code: "NOT_FOUND" });
+          reminder = targeted;
         }
-        if (!reminder) {
+        if (!reminder && !targetedReminderId) {
           const { data: reminders } = await db.from("medication_reminders").select("id, medication_id").eq("elder_id", body.elder_id).in("status", ["gepland", "herinnerd", "gesnoozed_1", "gesnoozed_2", "geëscaleerd"]).order("scheduled_time", { ascending: true }).limit(1);
           reminder = reminders?.[0];
         }
-        await db.from("pending_confirmations").insert({
+        const { error: confirmationError } = await db.from("pending_confirmations").insert({
           elder_id: body.elder_id,
           confirmation_type: "medication_taken",
           payload: { transcript, medication_reminder_id: reminder?.id ?? null, medication_id: reminder?.medication_id ?? null },
           expires_at: expiresAt,
           locale: locale,
         });
+        if (confirmationError) throw confirmationError;
         const askBack = locale === "nl-NL"
           ? `Ik hoorde u zeggen dat u uw medicijn heeft ingenomen. Klopt dat? Zeg ja of nee.`
           : `I heard you say you took your medicine. Is that correct? Please say yes or no.`;

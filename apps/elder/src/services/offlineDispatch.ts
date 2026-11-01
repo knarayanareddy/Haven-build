@@ -57,7 +57,7 @@ export function planOfflineDispatch(action: OfflineAction): DispatchPlan {
         elder_id: payload.elder_id,
         screen_id: payload.screen_id ?? 'PILLS',
         locale: payload.locale ?? 'nl-NL',
-        transcript_text: 'I took it',
+        medication_action: 'taken',
         medication_reminder_id: payload.medication_id,
       }));
 

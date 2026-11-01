@@ -115,7 +115,7 @@ function GrandchildFlow() {
         elder_id: scope.elderId,
         family_member_id: scope.familyMemberId,
         display_name: 'Kleinkind',
-        message_type: 'text',
+        message_type: 'tekst',
         content_nl: 'Uw kleinkind stuurde een lieve groet.',
         content_en: 'Your grandchild sent a loving hello.',
       });
